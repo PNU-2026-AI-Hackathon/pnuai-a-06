@@ -1,4 +1,5 @@
 import { FlowButton, FlowScreen } from '@/components/flow-screen';
+import { saveAuthCallback } from '@/lib/auth-callback';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
@@ -44,11 +45,14 @@ export default function AuthCallbackScreen() {
       return;
     }
 
-    localStorage.setItem('access_token', authToken);
+    const params = new URLSearchParams();
+    params.set('token', authToken);
 
     if (authUserId) {
-      localStorage.setItem('user_id', authUserId);
+      params.set('user_id', authUserId);
     }
+
+    saveAuthCallback(`auth/callback?${params.toString()}`);
 
     setMessage('로그인 정보를 저장했습니다. 메인 화면으로 이동합니다.');
 

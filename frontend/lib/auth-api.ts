@@ -1,7 +1,9 @@
+import { getAuthItem } from '@/lib/auth-storage';
+
 const API_BASE_URL = 'http://211.213.193.67:7020';
 
 export async function fetchMe() {
-  const token = localStorage.getItem('access_token');
+  const token = getAuthItem('access_token');
 
   if (!token) {
     throw new Error('access_token이 없습니다.');
