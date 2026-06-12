@@ -24,10 +24,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 KAKAO_AUTHORIZE_URL = "https://kauth.kakao.com/oauth/authorize"
 STATE_COOKIE_NAME = "kakao_oauth_state"
+FRONTEND_REDIRECT_COOKIE_NAME = "frontend_redirect_uri"
 
 
 @router.get("/kakao/login")
-def kakao_login(settings: Settings = Depends(get_settings)) -> RedirectResponse:
+def kakao_login(
+    frontend_redirect_uri: str | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
     if not settings.kakao_rest_api_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -50,6 +54,15 @@ def kakao_login(settings: Settings = Depends(get_settings)) -> RedirectResponse:
         samesite="lax",
         max_age=600,
     )
+    if frontend_redirect_uri:
+        response.set_cookie(
+            FRONTEND_REDIRECT_COOKIE_NAME,
+            frontend_redirect_uri,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            max_age=600,
+        )
     return response
 
 
@@ -61,6 +74,10 @@ async def kakao_callback(
     error: str | None = Query(default=None),
     error_description: str | None = Query(default=None),
     saved_state: str | None = Cookie(default=None, alias=STATE_COOKIE_NAME),
+    saved_frontend_redirect_uri: str | None = Cookie(
+        default=None,
+        alias=FRONTEND_REDIRECT_COOKIE_NAME,
+    ),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Any:
@@ -87,15 +104,19 @@ async def kakao_callback(
     user = get_or_create_kakao_user(db, **normalized_user)
     access_token = create_access_token(subject=str(user.id))
 
-    if settings.frontend_redirect_uri:
+    frontend_redirect_uri = saved_frontend_redirect_uri or settings.frontend_redirect_uri
+
+    if frontend_redirect_uri:
         redirect_params = urlencode({"token": access_token, "user_id": user.id})
         redirect_response = RedirectResponse(
-            f"{settings.frontend_redirect_uri}?{redirect_params}"
+            f"{frontend_redirect_uri}?{redirect_params}"
         )
         redirect_response.delete_cookie(STATE_COOKIE_NAME)
+        redirect_response.delete_cookie(FRONTEND_REDIRECT_COOKIE_NAME)
         return redirect_response
 
     response.delete_cookie(STATE_COOKIE_NAME)
+    response.delete_cookie(FRONTEND_REDIRECT_COOKIE_NAME)
     return TokenResponse(access_token=access_token, user_id=user.id)
 
 
