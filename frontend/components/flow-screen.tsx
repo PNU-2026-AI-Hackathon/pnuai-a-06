@@ -1,6 +1,8 @@
 import { PropsWithChildren } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+
 type FlowScreenProps = PropsWithChildren<{
   title: string;
   subtitle?: string;
@@ -12,11 +14,13 @@ type FlowButtonProps = {
 };
 
 export function FlowScreen({ title, subtitle, children }: FlowScreenProps) {
+  const { contentMaxWidth, horizontalPadding } = useResponsiveLayout();
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingHorizontal: horizontalPadding }]}>
       <Text style={styles.title}>{title}</Text>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-      <View style={styles.actions}>{children}</View>
+      <View style={[styles.actions, { maxWidth: contentMaxWidth }]}>{children}</View>
     </View>
   );
 }
@@ -35,7 +39,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
-    padding: 24,
+    paddingVertical: 24,
   },
   title: {
     fontSize: 28,
@@ -50,7 +54,6 @@ const styles = StyleSheet.create({
   },
   actions: {
     width: '100%',
-    maxWidth: 360,
     gap: 10,
     marginTop: 8,
   },
