@@ -31,6 +31,20 @@ class Settings(BaseSettings):
         default=60,
         alias="ACCESS_TOKEN_EXPIRE_MINUTES",
     )
+    refresh_token_expire_days: int = Field(
+        default=30,
+        alias="REFRESH_TOKEN_EXPIRE_DAYS",
+    )
+    email_verification_expire_minutes: int = Field(
+        default=10,
+        alias="EMAIL_VERIFICATION_EXPIRE_MINUTES",
+    )
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str = Field(default="", alias="SMTP_USERNAME")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_from_email: str = Field(default="", alias="SMTP_FROM_EMAIL")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
 
     @property
     def cors_origin_list(self) -> list[str]:

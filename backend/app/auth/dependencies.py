@@ -6,7 +6,7 @@ from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.users.models import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/kakao/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/email/login")
 
 
 def get_current_user(
