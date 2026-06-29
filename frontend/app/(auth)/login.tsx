@@ -1,7 +1,8 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 const splashText = require('../../assets/svg/splash_text.svg');
@@ -28,23 +29,23 @@ export default function LoginScreen() {
       </View>
 
       <View style={styles.bottomArea}>
-        <Pressable
+        <ScalePressable
           accessibilityRole="button"
           accessibilityLabel="카카오로 계속하기"
           onPress={() => router.replace('/main')}
           style={styles.kakaoButton}>
           <Image source={kakaoTalk} style={styles.kakaoIcon} contentFit="contain" />
           <Text style={styles.kakaoText}>카카오로 계속하기</Text>
-        </Pressable>
+        </ScalePressable>
 
         <View style={styles.linkRow}>
-          <Pressable onPress={() => router.push('/tutorial')}>
+          <ScalePressable onPress={() => router.push('/tutorial')} pressedScale={0.9}>
             <Text style={styles.linkText}>회원가입</Text>
-          </Pressable>
+          </ScalePressable>
           <View style={styles.divider} />
-          <Pressable onPress={() => router.replace('/main')}>
+          <ScalePressable onPress={() => router.replace('/main')} pressedScale={0.9}>
             <Text style={styles.linkText}>이메일 로그인</Text>
-          </Pressable>
+          </ScalePressable>
         </View>
       </View>
     </View>

@@ -1,13 +1,18 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 const basketIcon = require('../../assets/svg/basket.svg');
 const dividedMap = require('../../assets/svg/dividedMap.svg');
-const missionFrame = require('../../assets/svg/missionFrame.svg');
+const missionLevelFrames = [
+  require('../../assets/svg/mission_level/standard_frame.svg'),
+  require('../../assets/svg/mission_level/rare_frame.svg'),
+  require('../../assets/svg/mission_level/side_frame.svg'),
+];
 
 // 구 별로 나누기
 const mapPieceTargets = [
@@ -29,7 +34,7 @@ const mapPieceTargets = [
   { number: 16, district: '기장군', x: 0.815, y: 0.247 },
 ];
 const MAP_ASPECT_RATIO = 1;
-const MISSION_FRAME_ASPECT_RATIO = 293 / 390;
+const MISSION_FRAME_ASPECT_RATIO = 164 / 209;
 
 export default function BusanMapScreen() {
   const {
@@ -43,22 +48,96 @@ export default function BusanMapScreen() {
   } = useResponsiveLayout();
   const [isMissionDeckOpen, setIsMissionDeckOpen] = useState(false);
   const [selectedMapPiece, setSelectedMapPiece] = useState(1);
+  const [activeMissionIndex, setActiveMissionIndex] = useState(0);
+  const activeMissionIndexRef = useRef(0);
+  const isCardAnimatingRef = useRef(false);
+  const cardTranslateX = useRef(new Animated.Value(0)).current;
   const mapWidth = Math.min(width - 16, mediaMaxWidth, 430);
   const mapHeight = mapWidth / MAP_ASPECT_RATIO;
   const targetSize = Math.min(58, Math.max(40, mapWidth * 0.11));
   const basketSize = Math.min(68, Math.max(58, availableWidth * 0.16));
-  const frameWidth = Math.min(availableWidth * 0.78, 300);
+  const frameWidth = Math.min(width * 0.84, 344);
   const frameHeight = frameWidth / MISSION_FRAME_ASPECT_RATIO;
   const selectedDistrict = mapPieceTargets.find((target) => target.number === selectedMapPiece)?.district ?? '강서구';
 
   const openMissionDeck = (pieceNumber: number) => {
     setSelectedMapPiece(pieceNumber);
+    activeMissionIndexRef.current = 0;
+    isCardAnimatingRef.current = false;
+    setActiveMissionIndex(0);
+    cardTranslateX.setValue(0);
     setIsMissionDeckOpen(true);
   };
 
-  const openMissionList = () => {
+  const moveMissionCard = (direction: 1 | -1) => {
+    if (isCardAnimatingRef.current) {
+      return;
+    }
+
+    isCardAnimatingRef.current = true;
+    const nextIndex = (activeMissionIndexRef.current + direction + missionLevelFrames.length) % missionLevelFrames.length;
+    Animated.timing(cardTranslateX, {
+      duration: 180,
+      toValue: direction === 1 ? -frameWidth : frameWidth,
+      useNativeDriver: true,
+    }).start(() => {
+      activeMissionIndexRef.current = nextIndex;
+      setActiveMissionIndex(nextIndex);
+      cardTranslateX.setValue(direction === 1 ? frameWidth * 0.34 : -frameWidth * 0.34);
+      Animated.spring(cardTranslateX, {
+        friction: 7,
+        tension: 150,
+        toValue: 0,
+        useNativeDriver: true,
+      }).start(() => {
+        isCardAnimatingRef.current = false;
+      });
+    });
+  };
+
+  const cardPanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 12 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+      onPanResponderMove: (_, gestureState) => {
+        cardTranslateX.setValue(gestureState.dx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -48) {
+          moveMissionCard(1);
+          return;
+        }
+        if (gestureState.dx > 48) {
+          moveMissionCard(-1);
+          return;
+        }
+        Animated.spring(cardTranslateX, {
+          friction: 7,
+          tension: 150,
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(cardTranslateX, {
+          friction: 7,
+          tension: 150,
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      },
+    })
+  ).current;
+
+  const cardRotate = cardTranslateX.interpolate({
+    inputRange: [-frameWidth, 0, frameWidth],
+    outputRange: ['-8deg', '0deg', '8deg'],
+  });
+  const nextMissionIndex = (activeMissionIndex + 1) % missionLevelFrames.length;
+  const previousMissionIndex = (activeMissionIndex - 1 + missionLevelFrames.length) % missionLevelFrames.length;
+
+  const openMissionDetail = () => {
     router.push({
-      pathname: '/map/spot-list',
+      pathname: '/mission/detail',
       params: { district: selectedDistrict, piece: String(selectedMapPiece) },
     });
   };
@@ -74,9 +153,9 @@ export default function BusanMapScreen() {
         },
       ]}>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="뒤로 가기" onPress={() => router.back()} style={styles.backButton}>
+        <ScalePressable accessibilityLabel="뒤로 가기" onPress={() => router.back()} pressedScale={0.86} style={styles.backButton}>
           <Text style={styles.backIcon}>‹</Text>
-        </Pressable>
+        </ScalePressable>
         <Text style={styles.title}>부산</Text>
         <View style={styles.headerSpacer} />
       </View>
@@ -124,45 +203,22 @@ export default function BusanMapScreen() {
 
       {!isMissionDeckOpen ? (
         <View style={[styles.actions, { maxWidth: contentMaxWidth }]}>
-          <Pressable
+          <ScalePressable
             accessibilityRole="button"
             accessibilityLabel="구 선택하기"
             onPress={() => router.push('/map/district')}
             style={styles.selectButton}>
             <Text style={styles.selectButtonText}>구 선택하기</Text>
-          </Pressable>
+          </ScalePressable>
         </View>
       ) : null}
 
       {isMissionDeckOpen ? (
         <View style={styles.overlay}>
           <Text style={styles.overlayTitle}>넘겨서 다음 미션 보기</Text>
-
-          <View style={[styles.frameDeck, { height: frameHeight + 42, width: frameWidth + 72 }]}>
-            <View
-              pointerEvents="none"
-              style={[
-                styles.backCardShade,
-                styles.backShadeLeft,
-                {
-                  height: frameHeight * 0.88,
-                  width: frameWidth * 0.84,
-                },
-              ]}
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.backCardShade,
-                styles.backShadeRight,
-                {
-                  height: frameHeight * 0.88,
-                  width: frameWidth * 0.84,
-                },
-              ]}
-            />
+          <View style={[styles.frameDeck, { height: frameHeight + 20, width: frameWidth + 72 }]}>
             <Image
-              source={missionFrame}
+              source={missionLevelFrames[previousMissionIndex]}
               style={[
                 styles.missionFrame,
                 styles.backFrameLeft,
@@ -174,7 +230,7 @@ export default function BusanMapScreen() {
               contentFit="contain"
             />
             <Image
-              source={missionFrame}
+              source={missionLevelFrames[nextMissionIndex]}
               style={[
                 styles.missionFrame,
                 styles.backFrameRight,
@@ -185,44 +241,44 @@ export default function BusanMapScreen() {
               ]}
               contentFit="contain"
             />
-            <Image
-              source={missionFrame}
+            <Animated.View
+              {...cardPanResponder.panHandlers}
               style={[
-                styles.missionFrame,
-                styles.frontFrame,
+                styles.frontMissionCard,
                 {
                   height: frameHeight,
+                  transform: [{ translateX: cardTranslateX }, { rotate: cardRotate }],
                   width: frameWidth,
                 },
-              ]}
-              contentFit="contain"
-            />
-            <View style={styles.selectedPieceBadge}>
-              <Text style={styles.selectedPieceNumber}>{selectedDistrict}</Text>
-            </View>
+              ]}>
+              <Image source={missionLevelFrames[activeMissionIndex]} style={styles.frontMissionImage} contentFit="contain" />
+              <View style={styles.selectedPieceBadge}>
+                <Text style={styles.selectedPieceNumber}>{selectedDistrict}</Text>
+              </View>
+            </Animated.View>
           </View>
 
           <View style={styles.pagination}>
-            <View style={[styles.pageDot, styles.activeDot]} />
-            <View style={styles.pageDot} />
-            <View style={styles.pageDot} />
+            {missionLevelFrames.map((_, index) => (
+              <View key={`mission-page-${index}`} style={[styles.pageDot, index === activeMissionIndex ? styles.activeDot : null]} />
+            ))}
           </View>
 
           <View style={[styles.overlayActions, { maxWidth: contentMaxWidth }]}>
-            <Pressable
+            <ScalePressable
               accessibilityRole="button"
-              accessibilityLabel="미션 전체 보기"
-              onPress={openMissionList}
+              accessibilityLabel="미션 상세 보기"
+              onPress={openMissionDetail}
               style={styles.overlayButton}>
-              <Text style={styles.overlayButtonText}>미션 전체 보기</Text>
-            </Pressable>
-            <Pressable
+              <Text style={styles.overlayButtonText}>미션 상세 보기</Text>
+            </ScalePressable>
+            <ScalePressable
               accessibilityRole="button"
               accessibilityLabel="닫기"
               onPress={() => setIsMissionDeckOpen(false)}
               style={styles.overlayButton}>
               <Text style={styles.overlayButtonText}>닫기</Text>
-            </Pressable>
+            </ScalePressable>
           </View>
         </View>
       ) : null}
@@ -309,12 +365,12 @@ const styles = StyleSheet.create({
   },
   overlay: {
     alignItems: 'center',
-    backgroundColor: 'rgba(20, 25, 27, 0.62)',
+    backgroundColor: 'rgba(20, 25, 27, 0.72)',
     bottom: 0,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     left: 0,
-    paddingHorizontal: 24,
-    paddingTop: 74,
+    paddingHorizontal: 18,
+    paddingTop: 132,
     position: 'absolute',
     right: 0,
     top: 0,
@@ -323,7 +379,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '400',
-    marginBottom: 32,
+    marginBottom: 20,
   },
   frameDeck: {
     alignItems: 'center',
@@ -331,43 +387,27 @@ const styles = StyleSheet.create({
   },
   missionFrame: {
     position: 'absolute',
-  },
-  backCardShade: {
-    backgroundColor: 'rgba(53, 74, 82, 0.34)',
-    borderRadius: 34,
-    elevation: 18,
-    position: 'absolute',
-    shadowColor: '#000000',
-    shadowOffset: { height: 18, width: 0 },
-    shadowOpacity: 0.38,
-    shadowRadius: 24,
-  },
-  backShadeLeft: {
-    transform: [{ translateX: -26 }, { translateY: 20 }, { rotate: '-7deg' }],
-  },
-  backShadeRight: {
-    transform: [{ translateX: 26 }, { translateY: 8 }, { rotate: '7deg' }],
+    zIndex: 1,
   },
   backFrameLeft: {
-    elevation: 18,
-    opacity: 0.78,
-    shadowColor: '#000000',
-    shadowOffset: { height: 18, width: -12 },
-    shadowOpacity: 0.36,
-    shadowRadius: 24,
-    transform: [{ translateX: -26 }, { translateY: 12 }, { rotate: '-7deg' }],
+    opacity: 1,
+    transform: [{ translateX: -4 }, { translateY: 7 }, { rotate: '-11deg' }],
   },
   backFrameRight: {
-    elevation: 18,
-    opacity: 0.8,
-    shadowColor: '#000000',
-    shadowOffset: { height: 16, width: 12 },
-    shadowOpacity: 0.34,
-    shadowRadius: 24,
-    transform: [{ translateX: 26 }, { translateY: -6 }, { rotate: '7deg' }],
+    opacity: 1,
+    transform: [{ translateX: 3 }, { translateY: 7 }, { rotate: '11deg' }],
   },
-  frontFrame: {
-    transform: [{ translateY: 2 }],
+  frontMissionCard: {
+    alignItems: 'center',
+    elevation: 0,
+    justifyContent: 'center',
+    position: 'absolute',
+    zIndex: 3,
+  },
+  frontMissionImage: {
+    height: '100%',
+    width: '100%',
+    zIndex: 1,
   },
   selectedPieceBadge: {
     alignItems: 'center',
@@ -380,6 +420,7 @@ const styles = StyleSheet.create({
     minWidth: 76,
     paddingHorizontal: 12,
     position: 'absolute',
+    zIndex: 2,
   },
   selectedPieceNumber: {
     color: '#d94242',
@@ -390,8 +431,8 @@ const styles = StyleSheet.create({
   pagination: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 66,
-    marginTop: 16,
+    marginBottom: 42,
+    marginTop: 10,
   },
   pageDot: {
     backgroundColor: 'rgba(255, 255, 255, 0.62)',
@@ -422,5 +463,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 });
+
+
+
 
 

@@ -1,6 +1,7 @@
 import { PropsWithChildren } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 type FlowScreenProps = PropsWithChildren<{
@@ -27,9 +28,9 @@ export function FlowScreen({ title, subtitle, children }: FlowScreenProps) {
 
 export function FlowButton({ label, onPress }: FlowButtonProps) {
   return (
-    <Pressable style={styles.button} onPress={onPress}>
+    <ScalePressable style={styles.button} onPress={onPress}>
       <Text style={styles.buttonText}>{label}</Text>
-    </Pressable>
+    </ScalePressable>
   );
 }
 
@@ -70,3 +71,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
