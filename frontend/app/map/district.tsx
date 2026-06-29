@@ -15,9 +15,9 @@ import { FlowButton } from '@/components/flow-screen';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 const districtMap = require('../../assets/svg/gu_map.svg');
-const redFlag = require('../../assets/svg/red_flag.svg');
-const yellowFlag = require('../../assets/svg/yellow_flag.svg');
-const blueFlag = require('../../assets/svg/blue_flag.svg');
+const redFlag = require('../../assets/svg/flag/red_flag.svg');
+const yellowFlag = require('../../assets/svg/flag/yellow_flag.svg');
+const blueFlag = require('../../assets/svg/flag/blue_flag.svg');
 const MAP_ASPECT_RATIO = 328 / 273;
 const CARD_GAP = 12;
 

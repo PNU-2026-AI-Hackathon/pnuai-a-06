@@ -1,8 +1,10 @@
 import { useMemo } from 'react';
 import { useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function useResponsiveLayout() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   return useMemo(() => {
     const screenRatio = height / width;
@@ -14,8 +16,10 @@ export function useResponsiveLayout() {
     const contentMaxWidth = isWideScreen ? 520 : 360;
     const mediaMaxWidth = isWideScreen ? 620 : 520;
     const centerContentOffset = isTallScreen ? -24 : isWideScreen ? 12 : 0;
-    const bottomActionInset = isTallScreen ? 40 : 24;
-    const topInset = isTallScreen ? 64 : 40;
+    const bottomSafeInset = Math.max(insets.bottom, 0);
+    const topSafeInset = Math.max(insets.top, 0);
+    const bottomActionInset = bottomSafeInset + (isTallScreen ? 40 : 24);
+    const topInset = topSafeInset + (isTallScreen ? 40 : 28);
 
     return {
       width,
@@ -30,7 +34,9 @@ export function useResponsiveLayout() {
       mediaMaxWidth,
       centerContentOffset,
       bottomActionInset,
+      bottomSafeInset,
+      topSafeInset,
       topInset,
     };
-  }, [height, width]);
+  }, [height, insets.bottom, insets.top, width]);
 }

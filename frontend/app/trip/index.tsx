@@ -1,12 +1,265 @@
 import { router } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { FlowButton, FlowScreen } from '@/components/flow-screen';
+import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+
+const companions = [
+  { label: '나', color: '#b9d7ee' },
+  { label: '선우', color: '#c9d1d7' },
+];
 
 export default function TripCreateScreen() {
+  const {
+    bottomActionInset,
+    horizontalPadding,
+    isCompactWidth,
+    isTallScreen,
+    topInset,
+  } = useResponsiveLayout();
+  const avatarSize = isCompactWidth ? 54 : 60;
+  const contentTopGap = isTallScreen ? 38 : 22;
+  const companionsTopGap = isTallScreen ? 26 : 18;
+  const formTopGap = isTallScreen ? 42 : 28;
+  const peopleTopGap = isTallScreen ? 30 : 22;
+  const startButtonPadding = isTallScreen ? 18 : 15;
+  const titleSize = isCompactWidth ? 23 : 25;
+  const valueSize = isCompactWidth ? 18 : 20;
+
   return (
-    <FlowScreen title="T01 여행 전" subtitle="장바구니 + 동행자 초대 + 여행 시작">
-      <FlowButton label="동행자 초대" onPress={() => router.push('/trip/invite')} />
-      <FlowButton label="여행 시작하기" onPress={() => router.push('/trip/active')} />
-    </FlowScreen>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingBottom: bottomActionInset,
+          paddingHorizontal: horizontalPadding,
+          paddingTop: topInset,
+        },
+      ]}>
+      <View style={styles.topBar}>
+        <Pressable accessibilityLabel="뒤로 가기" onPress={() => router.back()} style={styles.backButton}>
+          <Text style={styles.backIcon}>‹</Text>
+        </Pressable>
+        <Text style={styles.topTitle}>여행 시작하기</Text>
+        <View style={styles.topSpacer} />
+      </View>
+
+      <View
+        style={[
+          styles.content,
+          {
+            paddingTop: contentTopGap,
+            paddingBottom: 14,
+          },
+        ]}>
+        <View>
+          <Text style={[styles.heading, { fontSize: titleSize }]}>동행자를{'\n'}추가해 주세요</Text>
+          <Text style={styles.description}>카톡으로 여행갈 친구들을 모아보세요!</Text>
+        </View>
+
+        <View style={[styles.companions, { marginTop: companionsTopGap }]}>
+          <Pressable onPress={() => router.push('/trip/invite')} style={styles.companionItem}>
+            <View style={[styles.addAvatar, { height: avatarSize, width: avatarSize }]}>
+              <Text style={styles.addIcon}>+</Text>
+            </View>
+            <Text style={styles.mutedLabel}>추가</Text>
+          </Pressable>
+          {companions.map((item) => (
+            <View key={item.label} style={styles.companionItem}>
+              <View style={[styles.avatar, { backgroundColor: item.color, height: avatarSize, width: avatarSize }]} />
+              <Text style={item.label === '나' ? styles.activeLabel : styles.mutedLabel}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={[styles.form, { marginTop: formTopGap }]}>
+          <Text style={styles.sectionLabel}>여행 기간</Text>
+          <View style={styles.dateRow}>
+            <View style={styles.dateField}>
+              <Text style={styles.fieldLabel}>시작일</Text>
+              <View style={styles.selectLine}>
+                <Text style={[styles.fieldValue, { fontSize: valueSize }]}>2026.6.6</Text>
+                <Text style={styles.chevron}>⌄</Text>
+              </View>
+            </View>
+            <View style={styles.dateField}>
+              <Text style={styles.fieldLabel}>종료일</Text>
+              <View style={styles.selectLine}>
+                <Text style={[styles.fieldValue, { fontSize: valueSize }]}>2026.6.12</Text>
+                <Text style={styles.chevron}>⌄</Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.noticeRow}>
+            <View style={styles.noticeIcon}>
+              <Text style={styles.noticeIconText}>!</Text>
+            </View>
+            <Text style={styles.noticeText}>여행 기간에 맞춰 미션이 부여돼요.</Text>
+          </View>
+
+          <View style={[styles.peopleField, { marginTop: peopleTopGap }]}>
+            <Text style={styles.fieldLabel}>인원수</Text>
+            <View style={styles.selectLine}>
+              <Text style={[styles.fieldValue, { fontSize: valueSize }]}>4명</Text>
+              <Text style={styles.chevron}>⌄</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <Pressable
+        onPress={() => router.push('/trip/active')}
+        style={[styles.startButton, { paddingVertical: startButtonPadding }]}>
+        <Text style={styles.startButtonText}>여행 시작</Text>
+      </Pressable>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    backgroundColor: '#ffffff',
+    flex: 1,
+  },
+  topBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    height: 44,
+    justifyContent: 'space-between',
+  },
+  backButton: {
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    width: 48,
+  },
+  backIcon: {
+    color: '#202124',
+    fontSize: 44,
+    lineHeight: 44,
+  },
+  topTitle: {
+    color: '#111111',
+    fontSize: 19,
+    fontWeight: '700',
+  },
+  topSpacer: {
+    width: 48,
+  },
+  content: {
+    flexGrow: 1,
+  },
+  heading: {
+    color: '#000000',
+    fontWeight: '800',
+    lineHeight: 30,
+  },
+  description: {
+    color: '#b2b2b2',
+    fontSize: 13,
+    marginTop: 8,
+  },
+  companions: {
+    flexDirection: 'row',
+    gap: 14,
+  },
+  companionItem: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  addAvatar: {
+    alignItems: 'center',
+    backgroundColor: '#e9ecef',
+    borderRadius: 999,
+    justifyContent: 'center',
+  },
+  addIcon: {
+    color: '#4d86bf',
+    fontSize: 31,
+    fontWeight: '300',
+    lineHeight: 40,
+  },
+  avatar: {
+    borderRadius: 999,
+  },
+  activeLabel: {
+    color: '#4d86bf',
+    fontSize: 13,
+  },
+  mutedLabel: {
+    color: '#b2b2b2',
+    fontSize: 13,
+  },
+  form: {},
+  sectionLabel: {
+    color: '#a6a6a6',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    gap: 24,
+  },
+  dateField: {
+    flex: 1,
+  },
+  fieldLabel: {
+    color: '#a6a6a6',
+    fontSize: 13,
+    marginBottom: 10,
+  },
+  selectLine: {
+    alignItems: 'center',
+    borderBottomColor: '#b9b9b9',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingBottom: 6,
+  },
+  fieldValue: {
+    color: '#000000',
+    fontWeight: '500',
+  },
+  chevron: {
+    color: '#1f1f1f',
+    fontSize: 22,
+  },
+  noticeRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  noticeIcon: {
+    alignItems: 'center',
+    backgroundColor: '#5489bd',
+    borderRadius: 999,
+    height: 22,
+    justifyContent: 'center',
+    width: 22,
+  },
+  noticeIconText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  noticeText: {
+    color: '#5489bd',
+    fontSize: 12,
+  },
+  peopleField: {},
+  startButton: {
+    alignItems: 'center',
+    backgroundColor: '#4f85bd',
+    borderRadius: 999,
+    justifyContent: 'center',
+    shadowColor: '#4f85bd',
+    shadowOffset: { height: 8, width: 0 },
+    shadowOpacity: 0.26,
+    shadowRadius: 18,
+  },
+  startButtonText: {
+    color: '#ffffff',
+    fontSize: 19,
+    fontWeight: '700',
+  },
+});
