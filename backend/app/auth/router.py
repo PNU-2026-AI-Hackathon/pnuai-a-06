@@ -1,24 +1,44 @@
+import base64
+import json
 from typing import Any
 
 from secrets import token_urlsafe
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
+from app.auth.email import send_verification_email
 from app.auth.kakao import (
     exchange_code_for_token,
     fetch_kakao_user,
     normalize_kakao_user,
 )
-from app.auth.schemas import TokenResponse, UserResponse
+from app.auth.schemas import (
+    EmailLoginRequest,
+    EmailRegisterRequest,
+    EmailVerificationResponse,
+    EmailVerifyRequest,
+    RefreshTokenRequest,
+    TokenResponse,
+    UserResponse,
+)
 from app.core.config import Settings, get_settings
-from app.core.security import create_access_token
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+)
 from app.db.session import get_db
-from app.users.models import User
-from app.users.service import get_or_create_kakao_user
+from app.models.users import User
+from app.services.users import (
+    authenticate_email_user,
+    get_or_create_kakao_user,
+    register_email_user,
+    verify_email_user,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -27,7 +47,66 @@ STATE_COOKIE_NAME = "kakao_oauth_state"
 FRONTEND_REDIRECT_COOKIE_NAME = "frontend_redirect_uri"
 
 
-@router.get("/kakao/login")
+def create_token_response(user: User) -> TokenResponse:
+    return TokenResponse(
+        access_token=create_access_token(subject=str(user.id)),
+        refresh_token=create_refresh_token(subject=str(user.id)),
+        user_id=user.id,
+    )
+
+
+def encode_oauth_state(
+    nonce: str,
+    frontend_redirect_uri: str | None = None,
+) -> str:
+    payload = {"nonce": nonce}
+    if frontend_redirect_uri:
+        payload["frontend_redirect_uri"] = frontend_redirect_uri
+
+    encoded_payload = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+    return encoded_payload.rstrip("=")
+
+
+def decode_oauth_state(state: str) -> tuple[str, str | None]:
+    padding = "=" * (-len(state) % 4)
+    try:
+        payload = json.loads(
+            base64.urlsafe_b64decode(f"{state}{padding}").decode("utf-8")
+        )
+    except (ValueError, json.JSONDecodeError):
+        return state, None
+
+    if not isinstance(payload, dict):
+        return state, None
+
+    nonce = payload.get("nonce")
+    frontend_redirect_uri = payload.get("frontend_redirect_uri")
+    if not isinstance(nonce, str):
+        return state, None
+    if frontend_redirect_uri is not None and not isinstance(frontend_redirect_uri, str):
+        frontend_redirect_uri = None
+    return nonce, frontend_redirect_uri
+
+
+def append_query_params(url: str, params: dict[str, Any]) -> str:
+    parsed_url = urlsplit(url)
+    query_params = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    query_params.update(params)
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            urlencode(query_params),
+            parsed_url.fragment,
+        )
+    )
+
+
+# Kakao login is intentionally disabled while email login is used.
+# @router.get("/kakao/login")
 def kakao_login(
     frontend_redirect_uri: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -39,11 +118,12 @@ def kakao_login(
         )
 
     state = token_urlsafe(32)
+    oauth_state = encode_oauth_state(state, frontend_redirect_uri)
     params = {
         "response_type": "code",
         "client_id": settings.kakao_rest_api_key,
         "redirect_uri": settings.kakao_redirect_uri,
-        "state": state,
+        "state": oauth_state,
     }
     response = RedirectResponse(f"{KAKAO_AUTHORIZE_URL}?{urlencode(params)}")
     response.set_cookie(
@@ -66,7 +146,8 @@ def kakao_login(
     return response
 
 
-@router.get("/kakao/callback", response_model=None)
+# Kakao callback is intentionally disabled while email login is used.
+# @router.get("/kakao/callback", response_model=None)
 async def kakao_callback(
     response: Response,
     code: str | None = Query(default=None),
@@ -91,7 +172,14 @@ async def kakao_callback(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Missing Kakao authorization code.",
         )
-    if not state or not saved_state or state != saved_state:
+    if not state or not saved_state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Kakao OAuth state.",
+        )
+
+    state_nonce, state_frontend_redirect_uri = decode_oauth_state(state)
+    if state_nonce != saved_state:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid Kakao OAuth state.",
@@ -104,12 +192,18 @@ async def kakao_callback(
     user = get_or_create_kakao_user(db, **normalized_user)
     access_token = create_access_token(subject=str(user.id))
 
-    frontend_redirect_uri = saved_frontend_redirect_uri or settings.frontend_redirect_uri
+    frontend_redirect_uri = (
+        state_frontend_redirect_uri
+        or saved_frontend_redirect_uri
+        or settings.frontend_redirect_uri
+    )
 
     if frontend_redirect_uri:
-        redirect_params = urlencode({"token": access_token, "user_id": user.id})
         redirect_response = RedirectResponse(
-            f"{frontend_redirect_uri}?{redirect_params}"
+            append_query_params(
+                frontend_redirect_uri,
+                {"token": access_token, "user_id": str(user.id)},
+            )
         )
         redirect_response.delete_cookie(STATE_COOKIE_NAME)
         redirect_response.delete_cookie(FRONTEND_REDIRECT_COOKIE_NAME)
@@ -117,7 +211,113 @@ async def kakao_callback(
 
     response.delete_cookie(STATE_COOKIE_NAME)
     response.delete_cookie(FRONTEND_REDIRECT_COOKIE_NAME)
-    return TokenResponse(access_token=access_token, user_id=user.id)
+    return create_token_response(user)
+
+
+@router.post("/email/register", response_model=EmailVerificationResponse)
+def register_with_email(
+    payload: EmailRegisterRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> EmailVerificationResponse:
+    try:
+        _, code = register_email_user(
+            db,
+            email=payload.email,
+            password=payload.password,
+            name=payload.name,
+            expires_in_minutes=settings.email_verification_expire_minutes,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    sent = send_verification_email(settings, to_email=payload.email, code=code)
+    return EmailVerificationResponse(
+        message="Verification code sent." if sent else "Verification code created.",
+        expires_in_minutes=settings.email_verification_expire_minutes,
+        dev_verification_code=None if sent else code,
+    )
+
+
+@router.post("/email/verify", response_model=TokenResponse)
+def verify_email(
+    payload: EmailVerifyRequest,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    user = verify_email_user(db, email=payload.email, code=payload.code)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code.",
+        )
+
+    return create_token_response(user)
+
+
+@router.post("/email/login", response_model=TokenResponse)
+def login_with_email(
+    payload: EmailLoginRequest,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    user = authenticate_email_user(db, email=payload.email, password=payload.password)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email, password, or unverified email.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return create_token_response(user)
+
+
+@router.post("/token", response_model=TokenResponse)
+async def login_with_oauth_form(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    form_data = dict(parse_qsl((await request.body()).decode("utf-8")))
+    username = form_data.get("username", "")
+    password = form_data.get("password", "")
+    user = authenticate_email_user(
+        db,
+        email=username,
+        password=password,
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email, password, or unverified email.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return create_token_response(user)
+
+
+@router.post("/token/refresh", response_model=TokenResponse)
+def refresh_token(
+    payload: RefreshTokenRequest,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    user_id = decode_refresh_token(payload.refresh_token)
+    if user_id is None or not user_id.isdigit():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.get(User, int(user_id))
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return create_token_response(user)
 
 
 @router.get("/me", response_model=UserResponse)
