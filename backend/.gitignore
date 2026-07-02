@@ -1,3 +1,6 @@
 logs/
 *.log
 .uvicorn-*.pid
+.pgdata/
+logging.ini
+app/static/mission-photos/*.jpg
