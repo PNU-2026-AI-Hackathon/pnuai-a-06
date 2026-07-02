@@ -10,7 +10,7 @@ from app.core.security import (
     verify_code,
     verify_password,
 )
-from app.users.models import User
+from app.models.users import User
 
 
 def get_or_create_kakao_user(

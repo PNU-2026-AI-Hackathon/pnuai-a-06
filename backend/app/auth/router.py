@@ -5,7 +5,7 @@ from typing import Any
 from secrets import token_urlsafe
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -32,8 +32,8 @@ from app.core.security import (
     decode_refresh_token,
 )
 from app.db.session import get_db
-from app.users.models import User
-from app.users.service import (
+from app.models.users import User
+from app.services.users import (
     authenticate_email_user,
     get_or_create_kakao_user,
     register_email_user,
@@ -263,6 +263,29 @@ def login_with_email(
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     user = authenticate_email_user(db, email=payload.email, password=payload.password)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email, password, or unverified email.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return create_token_response(user)
+
+
+@router.post("/token", response_model=TokenResponse)
+async def login_with_oauth_form(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    form_data = dict(parse_qsl((await request.body()).decode("utf-8")))
+    username = form_data.get("username", "")
+    password = form_data.get("password", "")
+    user = authenticate_email_user(
+        db,
+        email=username,
+        password=password,
+    )
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
