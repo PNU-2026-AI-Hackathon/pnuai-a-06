@@ -2,6 +2,9 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { Image } from 'expo-image';
+
+const splashText = require('../../assets/svg/logo_text.svg');
 
 export default function MainScreen() {
   const {
@@ -31,9 +34,10 @@ export default function MainScreen() {
         },
       ]}>
       <View style={[styles.header, { paddingTop: topInset }]}>
-        <Pressable onPress={() => router.replace('/main')} style={styles.brandBadge}>
-          <Text style={styles.brandText}>로고 + 서비스명</Text>
-        </Pressable>
+        <Image source={splashText} style={styles.logoText} contentFit="contain" />
+        {/* <View style={styles.brandBadge}>
+          <Image source={splashText} style={styles.logoText} contentFit="contain" />
+        </View> */}
         <Pressable onPress={() => router.push('/main/profile')} style={styles.profileButton}>
           <Text style={styles.profileText}>프로필 사진</Text>
         </Pressable>
@@ -74,14 +78,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 18,
   },
-  brandBadge: {
-    backgroundColor: 'rgba(195, 211, 219, 0.78)',
-    paddingHorizontal: 4,
-    paddingVertical: 5,
-  },
+  // brandBadge: {
+  //   backgroundColor: 'rgba(195, 211, 219, 0.78)',
+  //   paddingHorizontal: 4,
+  //   paddingVertical: 5,
+  // },
   brandText: {
     color: '#000000',
     fontSize: 14,
+  },
+  logoText: {
+    height: 30,
+    width: 86,
   },
   profileButton: {
     alignItems: 'center',

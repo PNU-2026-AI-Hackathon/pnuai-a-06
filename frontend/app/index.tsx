@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-const splashText = require('../assets/svg/splash_text.svg');
+const splashText = require('../assets/svg/logo_text.svg');
 const splashMap = require('../assets/svg/splash_map.svg');
 
 export default function SplashScreen() {
