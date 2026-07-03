@@ -5,10 +5,14 @@ type MissionApiItem = Record<string, unknown>;
 export type MissionItem = {
   id: string;
   code: string | null;
+  districtCode: string | null;
+  districtLabel: string | null;
   title: string;
   location: string;
   description: string;
   photoUrl: string | null;
+  theme: string | null;
+  type: string | null;
 };
 
 function getString(item: MissionApiItem, keys: string[]) {
@@ -48,6 +52,7 @@ function toMissionItem(item: MissionApiItem, index: number): MissionItem {
   const code = getString(item, ['mission_code', 'code', 'missionCode']);
   const id = getString(item, ['id', 'mission_id', 'missionId']) || code || `mission-${index}`;
   const district = getString(item, ['district_label', 'districtLabel', 'district', 'district_name', 'districtName', 'gu']);
+  const districtCode = getString(item, ['district_code', 'districtCode']);
   const place = getString(item, ['place', 'place_name', 'placeName', 'location', 'address']);
   const location = [district ? `부산 · ${district}` : '', place].filter(Boolean).join(' · ');
   const photoUrl = getString(item, ['target_photo_url', 'photo_url', 'photoUrl', 'image_url', 'imageUrl']);
@@ -55,10 +60,14 @@ function toMissionItem(item: MissionApiItem, index: number): MissionItem {
   return {
     id,
     code: code || null,
+    districtCode: districtCode || null,
+    districtLabel: district || null,
     title: getString(item, ['title', 'name', 'mission_name', 'missionName']) || '미션명',
     location: location || '부산',
     description: getString(item, ['description', 'content', 'guide', 'summary']) || '미션 설명이 아직 없습니다.',
     photoUrl: normalizePhotoUrl(photoUrl) || (code ? getMissionPhotoUrl(code) : null),
+    theme: getString(item, ['theme']) || null,
+    type: getString(item, ['type', 'mission_type', 'missionType']) || null,
   };
 }
 
