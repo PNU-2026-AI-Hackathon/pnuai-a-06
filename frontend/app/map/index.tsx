@@ -1,7 +1,6 @@
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
@@ -21,16 +20,35 @@ const missionLevelByType = {
   SIDE: { accentColor: '#245B6B', frame: missionLevelFrames[2], label: '사이드 미션', titleColor: '#182428' },
 };
 
-type CategoryIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
 type CategoryValue = MissionTheme | 'ACQUIRED';
 
-const categoryItems: { icon: CategoryIconName; label: string; value: CategoryValue }[] = [
-  { icon: 'terrain', label: '산', value: 'MOUNTAIN' },
-  { icon: 'beach', label: '바다', value: 'SEA' },
-  { icon: 'city-variant-outline', label: '도시', value: 'CITY' },
-  { icon: 'flag-outline', label: '획득', value: 'ACQUIRED' },
-];
+const categoryItems = [
+  {
+    icon: require('../../assets/svg/theme_icon/mountain.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/mountain_filled.svg'),
+    label: '산',
+    value: 'MOUNTAIN',
+  },
+  {
+    icon: require('../../assets/svg/theme_icon/sea.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/sea_filled.svg'),
+    label: '바다',
+    value: 'SEA',
+  },
+  {
+    icon: require('../../assets/svg/theme_icon/city.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/city_filled.svg'),
+    label: '도시',
+    value: 'CITY',
+  },
+  {
+    icon: require('../../assets/svg/theme_icon/flag.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/flag_filled.svg'),
+    label: '획득',
+    value: 'ACQUIRED',
+  },
+] satisfies { icon: number; selectedIcon: number; label: string; value: CategoryValue }[];
 
 // 구 별 지도 터치 위치
 const mapPieceTargets = [
@@ -267,6 +285,8 @@ export default function BusanMapScreen() {
       pathname: '/mission/detail',
       params: {
         district: selectedDistrict,
+        districtCode: selectedTarget?.districtCode ?? '',
+        missionCode: activeMission?.code ?? activeMission?.id ?? '',
         piece: String(selectedMapPiece ?? ''),
         ...(selectedCategory !== 'ACQUIRED' ? { theme: selectedCategory } : {}),
       },
@@ -304,7 +324,7 @@ export default function BusanMapScreen() {
                 onPress={() => setSelectedCategory(item.value)}
                 pressedScale={0.94}
                 style={[styles.categoryButton, isSelected && styles.selectedCategoryButton]}>
-                <MaterialCommunityIcons color="#202124" name={item.icon} size={24} />
+                <Image source={isSelected ? item.selectedIcon : item.icon} style={styles.categoryIcon} contentFit="contain" />
                 <Text style={[styles.categoryLabel, isSelected && styles.selectedCategoryLabel]}>{item.label}</Text>
               </ScalePressable>
             );
@@ -528,7 +548,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 999,
     flexDirection: 'row',
-    gap: 7,
+    gap: 10,
     justifyContent: 'center',
     minHeight: 38,
     paddingHorizontal: 13,
@@ -538,17 +558,20 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   selectedCategoryButton: {
-    backgroundColor: '#F7FBFC',
-    borderColor: '#202124',
-    borderWidth: 1,
+    backgroundColor: '#64ABBF',
+  },
+  categoryIcon: {
+    height: 24,
+    width: 24,
   },
   categoryLabel: {
-    color: '#202124',
-    fontSize: 13,
-    fontWeight: '600',
+    color: '#224853',
+    fontSize: 12,
+    fontWeight: '500',
   },
   selectedCategoryLabel: {
-    fontWeight: '800',
+    color: '#ffffff',
+    fontWeight: '700',
   },
   mapArea: {
     alignItems: 'center',

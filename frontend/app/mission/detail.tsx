@@ -1,40 +1,104 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, type MissionItem } from '@/lib/mission-api';
 
-const themeItems = [
+type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
+
+const themeItems: { icon: number; label: string; value: MissionTheme }[] = [
   { icon: require('../../assets/svg/mission_theme/mountain.svg'), label: '산', value: 'MOUNTAIN' },
   { icon: require('../../assets/svg/mission_theme/sea.svg'), label: '바다', value: 'SEA' },
   { icon: require('../../assets/svg/mission_theme/city.svg'), label: '도시', value: 'CITY' },
 ];
 const districtCodeByLabel: Record<string, string> = {
-  부산진구: 'BUSANJIN',
+  강서구: 'GANGSEO',
+  사하구: 'SAHA',
+  사상구: 'SASANG',
+  북구: 'BUK',
   금정구: 'GEUMJEONG',
-  기장군: 'GIJANG',
-  해운대구: 'HAEUNDAE',
+  동래구: 'DONGNAE',
+  연제구: 'YEONJE',
+  부산진구: 'BUSANJIN',
+  서구: 'SEO',
+  동구: 'DONG',
   중구: 'JUNG',
-  남구: 'NAM',
   수영구: 'SUYEONG',
+  남구: 'NAM',
+  영도구: 'YEONGDO',
+  해운대구: 'HAEUNDAE',
+  기장군: 'GIJANG',
 };
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function normalizeValue(value: string | null | undefined) {
+  return value?.trim().toUpperCase() ?? '';
+}
+
+function getValidTheme(value: string | string[] | undefined): MissionTheme {
+  const theme = normalizeValue(getParamValue(value));
+
+  return theme === 'SEA' || theme === 'CITY' ? theme : 'MOUNTAIN';
+}
+
+function getSortedMissions(
+  missions: MissionItem[],
+  options: { district: string; districtCode: string; missionCode: string; theme: MissionTheme }
+) {
+  const focusedDistrictCode = normalizeValue(options.districtCode);
+  const focusedMissionCode = normalizeValue(options.missionCode);
+
+  return missions
+    .map((mission, index) => {
+      const missionCode = normalizeValue(mission.code ?? mission.id);
+      const missionTheme = normalizeValue(mission.theme);
+      const missionDistrictCode = normalizeValue(mission.districtCode);
+      const isSameTheme = missionTheme === options.theme;
+      const isSameDistrict =
+        Boolean(focusedDistrictCode && missionDistrictCode === focusedDistrictCode) || mission.districtLabel === options.district;
+      const isSameMission = Boolean(focusedMissionCode && missionCode === focusedMissionCode);
+      let priority = 4;
+
+      if (isSameTheme && isSameDistrict) {
+        priority = isSameMission ? 0 : 1;
+      } else if (isSameTheme) {
+        priority = 2;
+      } else if (isSameDistrict) {
+        priority = 3;
+      }
+
+      return { index, mission, priority };
+    })
+    .sort((a, b) => a.priority - b.priority || a.index - b.index)
+    .map(({ mission }) => mission);
+}
+
 export default function MissionDetailScreen() {
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
-  const params = useLocalSearchParams<{ district?: string; theme?: string }>();
-  const district = getParamValue(params.district) ?? '금정구';
-  const districtCode = districtCodeByLabel[district];
-  const [selectedTheme, setSelectedTheme] = useState(getParamValue(params.theme) ?? themeItems[0].value);
+  const params = useLocalSearchParams<{ district?: string; districtCode?: string; missionCode?: string; theme?: string }>();
+  const focusedDistrict = getParamValue(params.district) ?? '금정구';
+  const focusedDistrictCode = getParamValue(params.districtCode) || districtCodeByLabel[focusedDistrict] || '';
+  const focusedMissionCode = getParamValue(params.missionCode) ?? '';
+  const [selectedTheme, setSelectedTheme] = useState<MissionTheme>(getValidTheme(params.theme));
   const [missions, setMissions] = useState<MissionItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const sortedMissions = useMemo(
+    () =>
+      getSortedMissions(missions, {
+        district: focusedDistrict,
+        districtCode: focusedDistrictCode,
+        missionCode: focusedMissionCode,
+        theme: selectedTheme,
+      }),
+    [focusedDistrict, focusedDistrictCode, focusedMissionCode, missions, selectedTheme]
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -43,8 +107,8 @@ export default function MissionDetailScreen() {
       try {
         setIsLoading(true);
         setErrorMessage('');
-        // 선택된 구와 테마로 미션 목록 요청
-        const missionList = await fetchMissions({ districtCode, theme: selectedTheme });
+        // 전체 미션을 가져와서 화면에서 우선순위만 바꿈
+        const missionList = await fetchMissions({});
 
         if (isActive) {
           setMissions(missionList);
@@ -66,7 +130,7 @@ export default function MissionDetailScreen() {
     return () => {
       isActive = false;
     };
-  }, [districtCode, selectedTheme]);
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -85,7 +149,7 @@ export default function MissionDetailScreen() {
             <Text style={styles.backIcon}>‹</Text>
           </ScalePressable>
 
-          <Text style={styles.title}>{district} 미션 리스트</Text>
+          <Text style={styles.title}>미션 상세 리스트</Text>
 
           <View style={styles.themeRow}>
             {themeItems.map((item) => {
@@ -114,14 +178,18 @@ export default function MissionDetailScreen() {
             <View style={styles.stateBox}>
               <Text style={styles.stateText}>{errorMessage}</Text>
             </View>
-          ) : missions.length === 0 ? (
+          ) : sortedMissions.length === 0 ? (
             <View style={styles.stateBox}>
               <Text style={styles.stateText}>표시할 미션이 없습니다.</Text>
             </View>
           ) : (
             <View style={styles.missionList}>
-              {missions.map((mission) => (
+              {sortedMissions.map((mission) => (
                 <View key={mission.id} style={styles.missionCard}>
+                  {/* <View style={styles.missionMetaRow}>
+                    <Text style={styles.missionThemeText}>{mission.theme ?? 'THEME'}</Text>
+                    <Text style={styles.missionDistrictText}>{mission.districtLabel ?? '부산'}</Text>
+                  </View> */}
                   <Text style={styles.missionTitle}>{mission.title}</Text>
                   <Text style={styles.locationText}>{mission.location}</Text>
                   <Text style={styles.descriptionText}>{mission.description}</Text>
@@ -164,10 +232,10 @@ const styles = StyleSheet.create({
     lineHeight: 48,
   },
   title: {
-    color: '#111111',
+    color: '#000000',
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 20,
+    marginBottom: 12,
   },
   themeRow: {
     flexDirection: 'row',
@@ -187,9 +255,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   themeIcon: {
-    height: 36,
+    height: 40,
     marginBottom: 8,
-    width: 36,
+    width: 40,
   },
   themeLabel: {
     color: '#000000',
@@ -220,17 +288,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 12,
     paddingHorizontal: 22,
-    paddingVertical: 32,
+    paddingVertical: 28,
   },
   missionTitle: {
     color: '#000000',
     fontSize: 17,
     fontWeight: '500',
-    marginBottom: 12,
+    marginBottom: 7,
   },
   locationText: {
     color: '#AEAEAE',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '400',
     marginBottom: 10,
   },
@@ -238,8 +306,8 @@ const styles = StyleSheet.create({
     color: '#AEAEAE',
     fontSize: 14,
     fontWeight: '400',
-    lineHeight: 21,
-    marginBottom: 32,
+    lineHeight: 18,
+    marginBottom: 24,
   },
   missionPhoto: {
     aspectRatio: 1.55,
