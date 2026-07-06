@@ -1,6 +1,6 @@
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 
-const API_BASE_URL = 'http://211.213.193.67:7020';
+export const API_BASE_URL = 'http://211.213.193.67:7020';
 
 type AuthTokens = {
   access_token?: string;
@@ -16,10 +16,23 @@ export type AuthUser = {
   email: string | null;
   nickname: string | null;
   profile_image_url: string | null;
+  profile_emoji: string | null;
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
 };
+
+export function getProfileImageUrl(profileImageUrl: string | null | undefined) {
+  if (!profileImageUrl) {
+    return null;
+  }
+
+  if (profileImageUrl.startsWith('http://') || profileImageUrl.startsWith('https://')) {
+    return profileImageUrl;
+  }
+
+  return `${API_BASE_URL}${profileImageUrl}`;
+}
 
 async function readAuthResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -44,6 +57,25 @@ async function postJson<T>(path: string, body: Record<string, string>): Promise<
       'Content-Type': 'application/json',
     },
     method: 'POST',
+  });
+
+  return readAuthResponse<T>(res);
+}
+
+async function patchJson<T>(path: string, body: Record<string, string>): Promise<T> {
+  const token = getAuthItem('access_token');
+
+  if (!token) {
+    throw new Error('access_token이 없습니다.');
+  }
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    body: JSON.stringify(body),
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    method: 'PATCH',
   });
 
   return readAuthResponse<T>(res);
@@ -85,6 +117,14 @@ export function loginWithEmail(email: string, password: string) {
 export function refreshAuthToken(refreshToken: string) {
   // refresh token으로 access token 갱신
   return postJson<AuthTokens>('/auth/token/refresh', { refresh_token: refreshToken });
+}
+
+export function updateMe(nickname: string) {
+  return patchJson<AuthUser>('/auth/me', { nickname });
+}
+
+export function updateProfileEmoji(profileEmoji: string) {
+  return patchJson<AuthUser>('/auth/me/profile-emoji', { profile_emoji: profileEmoji });
 }
 
 export async function fetchMe(): Promise<AuthUser> {

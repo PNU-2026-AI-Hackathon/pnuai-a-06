@@ -1,8 +1,10 @@
+import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ProfileAvatar } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMe } from '@/lib/auth-api';
@@ -21,26 +23,34 @@ const menuItems: MenuItem[] = [
 export default function ProfileScreen() {
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
   const [nickname, setNickname] = useState('사용자');
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+  const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
 
-    fetchMe()
-      .then((user) => {
-        if (isMounted) {
-          setNickname(user.nickname?.trim() || '사용자');
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setNickname('사용자');
-        }
-      });
+      fetchMe()
+        .then((user) => {
+          if (isActive) {
+            setNickname(user.nickname?.trim() || '사용자');
+            setProfileImageUrl(user.profile_image_url);
+            setProfileEmoji(user.profile_emoji);
+          }
+        })
+        .catch(() => {
+          if (isActive) {
+            setNickname('사용자');
+            setProfileImageUrl(null);
+            setProfileEmoji(null);
+          }
+        });
 
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+      return () => {
+        isActive = false;
+      };
+    }, []),
+  );
 
   return (
     <View style={styles.container}>
@@ -63,8 +73,8 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.profileInfo}>
-          <Pressable accessibilityRole="button" accessibilityLabel="프로필 사진 변경" style={styles.avatarButton}>
-            <View style={styles.avatar} />
+          <Pressable accessibilityRole="button" accessibilityLabel="프로필 편집" onPress={() => router.push('/main/profile-edit')} style={styles.avatarButton}>
+            <ProfileAvatar profileImageUrl={profileImageUrl} profileEmoji={profileEmoji} />
             <View style={styles.editBadge}>
               <MaterialCommunityIcons color="#4E5259" name="pencil" size={20} />
             </View>
