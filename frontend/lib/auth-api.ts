@@ -9,6 +9,18 @@ type AuthTokens = {
   user_id?: number | string;
 };
 
+export type AuthUser = {
+  id: number;
+  provider: string;
+  provider_user_id: string;
+  email: string | null;
+  nickname: string | null;
+  profile_image_url: string | null;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+};
+
 async function readAuthResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
@@ -75,7 +87,7 @@ export function refreshAuthToken(refreshToken: string) {
   return postJson<AuthTokens>('/auth/token/refresh', { refresh_token: refreshToken });
 }
 
-export async function fetchMe() {
+export async function fetchMe(): Promise<AuthUser> {
   const token = getAuthItem('access_token');
 
   if (!token) {

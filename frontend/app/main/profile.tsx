@@ -1,9 +1,11 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { fetchMe } from '@/lib/auth-api';
 
 type MenuItem = {
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
@@ -18,6 +20,27 @@ const menuItems: MenuItem[] = [
 
 export default function ProfileScreen() {
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
+  const [nickname, setNickname] = useState('사용자');
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetchMe()
+      .then((user) => {
+        if (isMounted) {
+          setNickname(user.nickname?.trim() || '사용자');
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setNickname('사용자');
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -46,7 +69,7 @@ export default function ProfileScreen() {
               <MaterialCommunityIcons color="#4E5259" name="pencil" size={20} />
             </View>
           </Pressable>
-          <Text style={styles.username}>username123</Text>
+          <Text style={styles.username}>{nickname}</Text>
         </View>
       </View>
 
