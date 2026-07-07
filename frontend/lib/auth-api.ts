@@ -1,8 +1,93 @@
-import { getAuthItem } from '@/lib/auth-storage';
+import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 
 const API_BASE_URL = 'http://211.213.193.67:7020';
 
-export async function fetchMe() {
+type AuthTokens = {
+  access_token?: string;
+  refresh_token?: string;
+  token?: string;
+  user_id?: number | string;
+};
+
+export type AuthUser = {
+  id: number;
+  provider: string;
+  provider_user_id: string;
+  email: string | null;
+  nickname: string | null;
+  profile_image_url: string | null;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+};
+
+async function readAuthResponse<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+
+  if (!res.ok) {
+    const message = data?.detail ?? data?.message ?? '인증 요청에 실패했습니다.';
+    throw new Error(
+      Array.isArray(message)
+        ? message.map((item) => `${item.loc?.join('.') ?? 'field'}: ${item.msg}`).join('\n')
+        : message,
+    );
+  }
+
+  return data;
+}
+
+async function postJson<T>(path: string, body: Record<string, string>): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    body: JSON.stringify(body),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+  });
+
+  return readAuthResponse<T>(res);
+}
+
+export function saveAuthTokens(data: AuthTokens) {
+  const accessToken = data.access_token ?? data.token;
+
+  if (!accessToken) {
+    throw new Error('로그인 응답에 access token이 없습니다.');
+  }
+
+  setAuthItem('access_token', accessToken);
+
+  if (data.refresh_token) {
+    setAuthItem('refresh_token', data.refresh_token);
+  }
+
+  if (data.user_id !== undefined) {
+    setAuthItem('user_id', String(data.user_id));
+  }
+}
+
+export function registerWithEmail(email: string, password: string, name: string) {
+  // 이메일 회원가입 요청
+  return postJson('/auth/email/register', { email, name, password });
+}
+
+export function verifyEmail(email: string, code: string) {
+  // 이메일 인증 코드 확인
+  return postJson('/auth/email/verify', { code, email });
+}
+
+export function loginWithEmail(email: string, password: string) {
+  // 이메일 로그인 요청
+  return postJson<AuthTokens>('/auth/email/login', { email, password });
+}
+
+export function refreshAuthToken(refreshToken: string) {
+  // refresh token으로 access token 갱신
+  return postJson<AuthTokens>('/auth/token/refresh', { refresh_token: refreshToken });
+}
+
+export async function fetchMe(): Promise<AuthUser> {
   const token = getAuthItem('access_token');
 
   if (!token) {

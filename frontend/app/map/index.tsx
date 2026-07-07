@@ -1,39 +1,90 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { fetchMissions, type MissionItem } from '@/lib/mission-api';
 
-const basketIcon = require('../../assets/svg/basket.svg');
-const dividedMap = require('../../assets/svg/dividedMap.svg');
-const missionFrame = require('../../assets/svg/missionFrame.svg');
-
-// 구 별로 나누기
-const mapPieceTargets = [
-  { number: 1, district: '강서구', x: 0.18, y: 0.64 },
-  { number: 2, district: '사하구', x: 0.38, y: 0.74 },
-  { number: 3, district: '사상구', x: 0.4, y: 0.54 },
-  { number: 4, district: '북구', x: 0.45, y: 0.37 },
-  { number: 5, district: '금정구', x: 0.56, y: 0.33 },
-  { number: 6, district: '동래구', x: 0.565, y: 0.44 },
-  { number: 7, district: '연제구', x: 0.586, y: 0.505 },
-  { number: 8, district: '부산진구', x: 0.486, y: 0.54 },
-  { number: 9, district: '서구', x: 0.45, y: 0.637 },
-  { number: 10, district: '동구', x: 0.528, y: 0.594 },
-  { number: 11, district: '중구', x: 0.526, y: 0.674 },
-  { number: 12, district: '수영구', x: 0.642, y: 0.543 },
-  { number: 13, district: '남구', x: 0.602, y: 0.657 },
-  { number: 14, district: '영도구', x: 0.562, y: 0.747 },
-  { number: 15, district: '해운대구', x: 0.735, y: 0.467 },
-  { number: 16, district: '기장군', x: 0.815, y: 0.247 },
+const dividedMap = require('../../assets/svg/map/divided_map.svg');
+const missionLevelFrames = [
+  require('../../assets/svg/mission_level/standard_frame.svg'),
+  require('../../assets/svg/mission_level/rare_frame.svg'),
+  require('../../assets/svg/mission_level/side_frame.svg'),
 ];
+
+const missionLevelByType = {
+  BASIC: { accentColor: '#437084', frame: missionLevelFrames[0], label: '기본 미션', titleColor: '#163745' },
+  RARE: { accentColor: '#83B1C3', frame: missionLevelFrames[1], label: '희귀 미션', titleColor: '#F3F9FC' },
+  SIDE: { accentColor: '#245B6B', frame: missionLevelFrames[2], label: '사이드 미션', titleColor: '#182428' },
+};
+
+type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
+type CategoryValue = MissionTheme | 'ACQUIRED';
+
+const categoryItems = [
+  {
+    icon: require('../../assets/svg/theme_icon/mountain.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/mountain_filled.svg'),
+    label: '산',
+    value: 'MOUNTAIN',
+  },
+  {
+    icon: require('../../assets/svg/theme_icon/sea.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/sea_filled.svg'),
+    label: '바다',
+    value: 'SEA',
+  },
+  {
+    icon: require('../../assets/svg/theme_icon/city.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/city_filled.svg'),
+    label: '도시',
+    value: 'CITY',
+  },
+  {
+    icon: require('../../assets/svg/theme_icon/flag.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/flag_filled.svg'),
+    label: '획득',
+    value: 'ACQUIRED',
+  },
+] satisfies { icon: number; selectedIcon: number; label: string; value: CategoryValue }[];
+
+// 구 별 지도 터치 위치
+const mapPieceTargets = [
+  { number: 1, district: '강서구', districtCode: 'GANGSEO', x: 0.18, y: 0.64 },
+  { number: 2, district: '사하구', districtCode: 'SAHA', x: 0.38, y: 0.74 },
+  { number: 3, district: '사상구', districtCode: 'SASANG', x: 0.4, y: 0.54 },
+  { number: 4, district: '북구', districtCode: 'BUK', x: 0.45, y: 0.37 },
+  { number: 5, district: '금정구', districtCode: 'GEUMJEONG', x: 0.56, y: 0.33 },
+  { number: 6, district: '동래구', districtCode: 'DONGNAE', x: 0.565, y: 0.44 },
+  { number: 7, district: '연제구', districtCode: 'YEONJE', x: 0.586, y: 0.505 },
+  { number: 8, district: '부산진구', districtCode: 'BUSANJIN', x: 0.486, y: 0.54 },
+  { number: 9, district: '서구', districtCode: 'SEO', x: 0.45, y: 0.637 },
+  { number: 10, district: '동구', districtCode: 'DONG', x: 0.528, y: 0.594 },
+  { number: 11, district: '중구', districtCode: 'JUNG', x: 0.526, y: 0.674 },
+  { number: 12, district: '수영구', districtCode: 'SUYEONG', x: 0.642, y: 0.543 },
+  { number: 13, district: '남구', districtCode: 'NAM', x: 0.602, y: 0.657 },
+  { number: 14, district: '영도구', districtCode: 'YEONGDO', x: 0.562, y: 0.747 },
+  { number: 15, district: '해운대구', districtCode: 'HAEUNDAE', x: 0.735, y: 0.467 },
+  { number: 16, district: '기장군', districtCode: 'GIJANG', x: 0.815, y: 0.247 },
+];
+const DEFAULT_THEME_DISTRICTS: Record<MissionTheme, string[]> = {
+  MOUNTAIN: [],
+  SEA: [],
+  CITY: [],
+};
 const MAP_ASPECT_RATIO = 1;
-const MISSION_FRAME_ASPECT_RATIO = 293 / 390;
+const MISSION_FRAME_ASPECT_RATIO = 164 / 209;
+
+function getMissionLevel(mission?: MissionItem) {
+  const type = mission?.type === 'RARE' || mission?.type === 'SIDE' ? mission.type : 'BASIC';
+
+  return missionLevelByType[type];
+}
 
 export default function BusanMapScreen() {
   const {
-    availableWidth,
     bottomActionInset,
     contentMaxWidth,
     horizontalPadding,
@@ -42,24 +93,203 @@ export default function BusanMapScreen() {
     width,
   } = useResponsiveLayout();
   const [isMissionDeckOpen, setIsMissionDeckOpen] = useState(false);
-  const [selectedMapPiece, setSelectedMapPiece] = useState(1);
+  const [selectedCategory, setSelectedCategory] = useState<CategoryValue>('MOUNTAIN');
+  const [themeDistricts, setThemeDistricts] = useState(DEFAULT_THEME_DISTRICTS);
+  const [isThemeDistrictLoading, setIsThemeDistrictLoading] = useState(false);
+  const [themeDistrictError, setThemeDistrictError] = useState('');
+  const [selectedMapPiece, setSelectedMapPiece] = useState<number | null>(null);
+  const [activeMissionIndex, setActiveMissionIndex] = useState(0);
+  const [deckMissions, setDeckMissions] = useState<MissionItem[]>([]);
+  const [isDeckMissionLoading, setIsDeckMissionLoading] = useState(false);
+  const [deckMissionError, setDeckMissionError] = useState('');
+  const [isMissionTitleMultiline, setIsMissionTitleMultiline] = useState(false);
+  const activeMissionIndexRef = useRef(0);
+  const isCardAnimatingRef = useRef(false);
+  const cardTranslateX = useRef(new Animated.Value(0)).current;
+  const selectedMissionTheme = selectedCategory !== 'ACQUIRED' ? selectedCategory : null;
+  const selectedThemeLabel = categoryItems.find((item) => item.value === selectedCategory)?.label ?? '미션';
   const mapWidth = Math.min(width - 16, mediaMaxWidth, 430);
   const mapHeight = mapWidth / MAP_ASPECT_RATIO;
-  const targetSize = Math.min(58, Math.max(40, mapWidth * 0.11));
-  const basketSize = Math.min(68, Math.max(58, availableWidth * 0.16));
-  const frameWidth = Math.min(availableWidth * 0.78, 300);
+  const targetSize = Math.min(72, Math.max(54, mapWidth * 0.15));
+  const frameWidth = Math.min(width * 0.84, 344);
   const frameHeight = frameWidth / MISSION_FRAME_ASPECT_RATIO;
-  const selectedDistrict = mapPieceTargets.find((target) => target.number === selectedMapPiece)?.district ?? '강서구';
+  const missionDeckCount = Math.max(deckMissions.length, 1);
+  const shouldShowPreviousFrame = deckMissions.length > 2;
+  const shouldShowNextFrame = deckMissions.length > 1;
+  const activeDistrictKeys = useMemo(() => {
+    if (!selectedMissionTheme) {
+      return new Set(mapPieceTargets.flatMap((target) => [target.district, target.districtCode]));
+    }
 
-  const openMissionDeck = (pieceNumber: number) => {
+    return new Set(themeDistricts[selectedMissionTheme]);
+  }, [selectedMissionTheme, themeDistricts]);
+  const selectedTarget = mapPieceTargets.find((target) => target.number === selectedMapPiece) ?? null;
+  const isSelectedTargetActive = selectedTarget
+    ? activeDistrictKeys.has(selectedTarget.district) || activeDistrictKeys.has(selectedTarget.districtCode)
+    : false;
+  const selectedDistrict = isSelectedTargetActive && selectedTarget ? selectedTarget.district : '강서구';
+
+  useEffect(() => {
+    if (!selectedMissionTheme) {
+      return;
+    }
+
+    let isActive = true;
+    const missionTheme = selectedMissionTheme;
+
+    async function loadThemeDistricts() {
+      try {
+        setIsThemeDistrictLoading(true);
+        setThemeDistrictError('');
+        // 선택 테마에 미션이 있는 구만 요청
+        const missions = await fetchMissions({ theme: missionTheme });
+        const districts = Array.from(
+          new Set(missions.flatMap((mission) => [mission.districtLabel, mission.districtCode].filter(Boolean) as string[]))
+        );
+
+        if (isActive) {
+          setThemeDistricts((prev) => ({ ...prev, [missionTheme]: districts }));
+        }
+      } catch (error) {
+        if (isActive) {
+          setThemeDistricts((prev) => ({ ...prev, [missionTheme]: [] }));
+          setThemeDistrictError(error instanceof Error ? error.message : '미션 구 정보를 불러오지 못했습니다.');
+        }
+      } finally {
+        if (isActive) {
+          setIsThemeDistrictLoading(false);
+        }
+      }
+    }
+
+    loadThemeDistricts();
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedMissionTheme]);
+
+  useEffect(() => {
+    setSelectedMapPiece(null);
+  }, [selectedCategory]);
+
+  const openMissionDeck = async (pieceNumber: number) => {
+    const target = mapPieceTargets.find((item) => item.number === pieceNumber);
+
     setSelectedMapPiece(pieceNumber);
+    activeMissionIndexRef.current = 0;
+    isCardAnimatingRef.current = false;
+    setActiveMissionIndex(0);
+    setDeckMissions([]);
+    setDeckMissionError('');
+    cardTranslateX.setValue(0);
     setIsMissionDeckOpen(true);
+
+    if (!target) {
+      return;
+    }
+
+    try {
+      setIsDeckMissionLoading(true);
+      // 선택한 구와 테마의 실제 미션 요청
+      const missions = await fetchMissions({
+        districtCode: target.districtCode,
+        ...(selectedMissionTheme ? { theme: selectedMissionTheme } : {}),
+      });
+      setDeckMissions(missions);
+    } catch (error) {
+      setDeckMissionError(error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.');
+    } finally {
+      setIsDeckMissionLoading(false);
+    }
   };
 
-  const openMissionList = () => {
+  const moveMissionCard = useCallback((direction: 1 | -1) => {
+    if (isCardAnimatingRef.current || deckMissions.length === 0) {
+      return;
+    }
+
+    isCardAnimatingRef.current = true;
+    const nextIndex = (activeMissionIndexRef.current + direction + deckMissions.length) % deckMissions.length;
+    Animated.timing(cardTranslateX, {
+      duration: 180,
+      toValue: direction === 1 ? -frameWidth : frameWidth,
+      useNativeDriver: true,
+    }).start(() => {
+      activeMissionIndexRef.current = nextIndex;
+      setActiveMissionIndex(nextIndex);
+      cardTranslateX.setValue(direction === 1 ? frameWidth * 0.34 : -frameWidth * 0.34);
+      Animated.spring(cardTranslateX, {
+        friction: 7,
+        tension: 150,
+        toValue: 0,
+        useNativeDriver: true,
+      }).start(() => {
+        isCardAnimatingRef.current = false;
+      });
+    });
+  }, [cardTranslateX, deckMissions.length, frameWidth]);
+
+  const cardPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) => deckMissions.length > 1 && Math.abs(gestureState.dx) > 12 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+        onPanResponderMove: (_, gestureState) => {
+          cardTranslateX.setValue(gestureState.dx);
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx < -48) {
+            moveMissionCard(1);
+            return;
+          }
+          if (gestureState.dx > 48) {
+            moveMissionCard(-1);
+            return;
+          }
+          Animated.spring(cardTranslateX, {
+            friction: 7,
+            tension: 150,
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(cardTranslateX, {
+            friction: 7,
+            tension: 150,
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [cardTranslateX, deckMissions.length, moveMissionCard]
+  );
+
+  const cardRotate = cardTranslateX.interpolate({
+    inputRange: [-frameWidth, 0, frameWidth],
+    outputRange: ['-8deg', '0deg', '8deg'],
+  });
+  const nextMissionIndex = (activeMissionIndex + 1) % missionDeckCount;
+  const previousMissionIndex = (activeMissionIndex - 1 + missionDeckCount) % missionDeckCount;
+  const activeMission = deckMissions[activeMissionIndex];
+  const activeMissionLevel = getMissionLevel(activeMission);
+  const nextMission = deckMissions[nextMissionIndex];
+  const previousMission = deckMissions[previousMissionIndex];
+
+  useEffect(() => {
+    setIsMissionTitleMultiline(false);
+  }, [activeMission?.id, activeMission?.title]);
+
+  const openMissionDetail = () => {
     router.push({
-      pathname: '/map/spot-list',
-      params: { district: selectedDistrict, piece: String(selectedMapPiece) },
+      pathname: '/mission/detail',
+      params: {
+        district: selectedDistrict,
+        districtCode: selectedTarget?.districtCode ?? '',
+        missionCode: activeMission?.code ?? activeMission?.id ?? '',
+        piece: String(selectedMapPiece ?? ''),
+        ...(selectedCategory !== 'ACQUIRED' ? { theme: selectedCategory } : {}),
+      },
     });
   };
 
@@ -74,24 +304,31 @@ export default function BusanMapScreen() {
         },
       ]}>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="뒤로 가기" onPress={() => router.back()} style={styles.backButton}>
+        <ScalePressable accessibilityLabel="뒤로 가기" onPress={() => router.back()} pressedScale={0.86} style={styles.backButton}>
           <Text style={styles.backIcon}>‹</Text>
-        </Pressable>
+        </ScalePressable>
         <Text style={styles.title}>부산</Text>
         <View style={styles.headerSpacer} />
       </View>
 
       {!isMissionDeckOpen ? (
-        <View style={styles.basketRow}>
-          {['산 바구니', '바다 바구니', '도시 바구니'].map((label) => (
-            <Image
-              accessibilityLabel={label}
-              contentFit="contain"
-              key={label}
-              source={basketIcon}
-              style={{ height: basketSize, width: basketSize }}
-            />
-          ))}
+        <View style={styles.categoryRow}>
+          {categoryItems.map((item) => {
+            const isSelected = item.value === selectedCategory;
+
+            return (
+              <ScalePressable
+                accessibilityLabel={`${item.label} 미션 보기`}
+                accessibilityRole="button"
+                key={item.label}
+                onPress={() => setSelectedCategory(item.value)}
+                pressedScale={0.94}
+                style={[styles.categoryButton, isSelected && styles.selectedCategoryButton]}>
+                <Image source={isSelected ? item.selectedIcon : item.icon} style={styles.categoryIcon} contentFit="contain" />
+                <Text style={[styles.categoryLabel, isSelected && styles.selectedCategoryLabel]}>{item.label}</Text>
+              </ScalePressable>
+            );
+          })}
         </View>
       ) : null}
 
@@ -100,129 +337,166 @@ export default function BusanMapScreen() {
           <View style={styles.mapPieceStage}>
             <Image contentFit="contain" pointerEvents="none" source={dividedMap} style={styles.mapImage} />
             {!isMissionDeckOpen
-              ? mapPieceTargets.map((target) => (
-                  <Pressable
-                    accessibilityLabel={`${target.number}번 지도 조각 미션 보기`}
-                    accessibilityRole="button"
-                    key={`map-target-${target.number}`}
-                    onPress={() => openMissionDeck(target.number)}
-                    style={[
-                      styles.mapPieceTarget,
-                      {
-                        height: targetSize,
-                        left: target.x * mapWidth - targetSize / 2,
-                        top: target.y * mapHeight - targetSize / 2,
-                        width: targetSize,
-                      },
-                    ]}
-                  />
-                ))
+              ? mapPieceTargets.map((target) => {
+                  const isActive = activeDistrictKeys.has(target.district) || activeDistrictKeys.has(target.districtCode);
+                  const isSelected = target.number === selectedMapPiece;
+
+                  return (
+                    <Pressable
+                      accessibilityLabel={`${target.district} ${isActive ? '미션 선택' : '비활성 구'}`}
+                      accessibilityRole="button"
+                      disabled={!isActive}
+                      key={`map-target-${target.number}`}
+                      onPress={() => setSelectedMapPiece(target.number)}
+                      style={[
+                        styles.mapPieceTarget,
+                        {
+                          height: targetSize,
+                          left: target.x * mapWidth - targetSize / 2,
+                          top: target.y * mapHeight - targetSize / 2,
+                          width: targetSize,
+                        },
+                      ]}>
+                      <View style={[styles.mapPieceDot, !isActive && styles.inactiveMapPieceDot, isSelected && styles.selectedMapPieceDot]} />
+                      {isActive ? <Text style={[styles.mapPieceLabel, isSelected && styles.selectedMapPieceLabel]}>{target.district}</Text> : null}
+                    </Pressable>
+                  );
+                })
               : null}
+            {!isMissionDeckOpen && (isThemeDistrictLoading || themeDistrictError) ? (
+              <View style={styles.mapStatusBox}>
+                {isThemeDistrictLoading ? <ActivityIndicator color="#202124" size="small" /> : null}
+                <Text style={styles.mapStatusText}>{isThemeDistrictLoading ? '미션 구를 불러오는 중' : themeDistrictError}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
       </View>
 
       {!isMissionDeckOpen ? (
         <View style={[styles.actions, { maxWidth: contentMaxWidth }]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="구 선택하기"
-            onPress={() => router.push('/map/district')}
-            style={styles.selectButton}>
-            <Text style={styles.selectButtonText}>구 선택하기</Text>
-          </Pressable>
+          {isSelectedTargetActive && selectedTarget ? (
+            <View style={styles.selectedDistrictPanel}>
+              <View style={styles.selectedDistrictTextGroup}>
+                <Text style={styles.selectedDistrictEyebrow}>{selectedThemeLabel} 미션 지역</Text>
+                <Text style={styles.selectedDistrictTitle}>{selectedTarget.district}</Text>
+              </View>
+              <ScalePressable
+                accessibilityRole="button"
+                accessibilityLabel={`${selectedTarget.district} 미션 보기`}
+                onPress={() => openMissionDeck(selectedTarget.number)}
+                pressedScale={0.96}
+                style={styles.panelButton}>
+                <Text style={styles.panelButtonText}>미션 보기</Text>
+              </ScalePressable>
+            </View>
+          ) : (
+            <ScalePressable
+              accessibilityRole="button"
+              accessibilityLabel="구 선택하기"
+              onPress={() => router.push('/map/district')}
+              style={styles.selectButton}>
+              <Text style={styles.selectButtonText}>구 선택하기</Text>
+            </ScalePressable>
+          )}
         </View>
       ) : null}
 
       {isMissionDeckOpen ? (
         <View style={styles.overlay}>
           <Text style={styles.overlayTitle}>넘겨서 다음 미션 보기</Text>
-
-          <View style={[styles.frameDeck, { height: frameHeight + 42, width: frameWidth + 72 }]}>
-            <View
-              pointerEvents="none"
+          <View style={[styles.frameDeck, { height: frameHeight + 20, width: frameWidth + 72 }]}>
+            {shouldShowPreviousFrame ? (
+              <Image
+                source={getMissionLevel(previousMission).frame}
+                style={[styles.missionFrame, styles.backFrameLeft, { height: frameHeight, width: frameWidth }]}
+                contentFit="contain"
+              />
+            ) : null}
+            {shouldShowNextFrame ? (
+              <Image
+                source={getMissionLevel(nextMission).frame}
+                style={[styles.missionFrame, styles.backFrameRight, { height: frameHeight, width: frameWidth }]}
+                contentFit="contain"
+              />
+            ) : null}
+            <Animated.View
+              {...cardPanResponder.panHandlers}
               style={[
-                styles.backCardShade,
-                styles.backShadeLeft,
-                {
-                  height: frameHeight * 0.88,
-                  width: frameWidth * 0.84,
-                },
-              ]}
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.backCardShade,
-                styles.backShadeRight,
-                {
-                  height: frameHeight * 0.88,
-                  width: frameWidth * 0.84,
-                },
-              ]}
-            />
-            <Image
-              source={missionFrame}
-              style={[
-                styles.missionFrame,
-                styles.backFrameLeft,
+                styles.frontMissionCard,
                 {
                   height: frameHeight,
+                  transform: [{ translateX: cardTranslateX }, { rotate: cardRotate }],
                   width: frameWidth,
                 },
-              ]}
-              contentFit="contain"
-            />
-            <Image
-              source={missionFrame}
-              style={[
-                styles.missionFrame,
-                styles.backFrameRight,
-                {
-                  height: frameHeight,
-                  width: frameWidth,
-                },
-              ]}
-              contentFit="contain"
-            />
-            <Image
-              source={missionFrame}
-              style={[
-                styles.missionFrame,
-                styles.frontFrame,
-                {
-                  height: frameHeight,
-                  width: frameWidth,
-                },
-              ]}
-              contentFit="contain"
-            />
-            <View style={styles.selectedPieceBadge}>
-              <Text style={styles.selectedPieceNumber}>{selectedDistrict}</Text>
-            </View>
+              ]}>
+              <Image source={activeMissionLevel.frame} style={styles.frontMissionImage} contentFit="contain" />
+              <View style={styles.missionCardContent} pointerEvents="none">
+                {isDeckMissionLoading ? (
+                  <View style={styles.deckStateBox}>
+                    <ActivityIndicator color={activeMissionLevel.titleColor} />
+                    <Text style={[styles.deckStateText, { color: activeMissionLevel.accentColor }]}>미션을 불러오는 중</Text>
+                  </View>
+                ) : deckMissionError ? (
+                  <View style={styles.deckStateBox}>
+                    <Text style={[styles.deckStateText, { color: activeMissionLevel.accentColor }]}>{deckMissionError}</Text>
+                  </View>
+                ) : activeMission ? (
+                  <>
+                    <View style={[styles.missionTypeBadge, { borderColor: activeMissionLevel.accentColor }]}>
+                      <Text style={[styles.missionTypeText, { color: activeMissionLevel.accentColor }]}>{activeMissionLevel.label}</Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.deckMissionTitle,
+                        isMissionTitleMultiline && styles.longDeckMissionTitle,
+                        { color: activeMissionLevel.titleColor },
+                      ]}
+                      numberOfLines={2}
+                      onTextLayout={(event) => {
+                        if (!isMissionTitleMultiline && event.nativeEvent.lines.length > 1) {
+                          setIsMissionTitleMultiline(true);
+                        }
+                      }}>
+                      {activeMission.title}
+                    </Text>
+                    {activeMission.photoUrl ? (
+                      <Image source={{ uri: activeMission.photoUrl }} style={styles.deckMissionPhoto} contentFit="cover" />
+                    ) : (
+                      <View style={styles.deckMissionPhotoPlaceholder} />
+                    )}
+                    <Text style={[styles.deckMissionDescription, { color: activeMissionLevel.accentColor }]} numberOfLines={2}>{activeMission.description}</Text>
+                  </>
+                ) : (
+                  <View style={styles.deckStateBox}>
+                    <Text style={[styles.deckStateText, { color: activeMissionLevel.accentColor }]}>표시할 미션이 없습니다.</Text>
+                  </View>
+                )}
+              </View>
+            </Animated.View>
           </View>
 
           <View style={styles.pagination}>
-            <View style={[styles.pageDot, styles.activeDot]} />
-            <View style={styles.pageDot} />
-            <View style={styles.pageDot} />
+            {Array.from({ length: missionDeckCount }).map((_, index) => (
+              <View key={`mission-page-${index}`} style={[styles.pageDot, index === activeMissionIndex ? styles.activeDot : null]} />
+            ))}
           </View>
 
           <View style={[styles.overlayActions, { maxWidth: contentMaxWidth }]}>
-            <Pressable
+            <ScalePressable
               accessibilityRole="button"
-              accessibilityLabel="미션 전체 보기"
-              onPress={openMissionList}
+              accessibilityLabel="미션 상세 보기"
+              onPress={openMissionDetail}
               style={styles.overlayButton}>
-              <Text style={styles.overlayButtonText}>미션 전체 보기</Text>
-            </Pressable>
-            <Pressable
+              <Text style={styles.overlayButtonText}>미션 상세 보기</Text>
+            </ScalePressable>
+            <ScalePressable
               accessibilityRole="button"
               accessibilityLabel="닫기"
               onPress={() => setIsMissionDeckOpen(false)}
               style={styles.overlayButton}>
               <Text style={styles.overlayButtonText}>닫기</Text>
-            </Pressable>
+            </ScalePressable>
           </View>
         </View>
       ) : null}
@@ -262,18 +536,48 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
-  basketRow: {
+  categoryRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 22,
+    gap: 10,
     justifyContent: 'center',
-    marginBottom: 44,
+    marginBottom: 38,
+  },
+  categoryButton: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+    minHeight: 38,
+    paddingHorizontal: 13,
+    shadowColor: '#000000',
+    shadowOffset: { height: 3, width: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+  },
+  selectedCategoryButton: {
+    backgroundColor: '#64ABBF',
+  },
+  categoryIcon: {
+    height: 24,
+    width: 24,
+  },
+  categoryLabel: {
+    color: '#224853',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  selectedCategoryLabel: {
+    color: '#ffffff',
+    fontWeight: '700',
   },
   mapArea: {
     alignItems: 'center',
     flex: 1,
     justifyContent: 'center',
-    marginBottom: 48,
+    marginBottom: 28,
   },
   mapPieceStage: {
     height: '100%',
@@ -282,16 +586,122 @@ const styles = StyleSheet.create({
   },
   mapImage: {
     height: '100%',
+    opacity: 0.9,
     width: '100%',
   },
   mapPieceTarget: {
+    alignItems: 'center',
     borderRadius: 999,
+    justifyContent: 'center',
     position: 'absolute',
+  },
+  mapPieceDot: {
+    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    borderColor: '#70A9BA',
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 20,
+    shadowColor: '#000000',
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.16,
+    shadowRadius: 5,
+    width: 20,
+  },
+  inactiveMapPieceDot: {
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderColor: 'rgba(94, 104, 109, 0.42)',
+    borderStyle: 'dashed',
+    height: 14,
+    shadowOpacity: 0,
+    width: 14,
+  },
+  selectedMapPieceDot: {
+    backgroundColor: '#70A9BA',
+    borderColor: '#ffffff',
+    height: 26,
+    width: 26,
+  },
+  mapPieceLabel: {
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    borderRadius: 999,
+    color: '#202124',
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 3,
+    overflow: 'hidden',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  selectedMapPieceLabel: {
+    backgroundColor: '#202124',
+    color: '#ffffff',
+  },
+  mapStatusBox: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderRadius: 14,
+    gap: 7,
+    left: '50%',
+    minWidth: 156,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    position: 'absolute',
+    top: '50%',
+    transform: [{ translateX: -78 }, { translateY: -24 }],
+  },
+  mapStatusText: {
+    color: '#5e686d',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   actions: {
     alignItems: 'center',
     alignSelf: 'center',
     width: '100%',
+  },
+  selectedDistrictPanel: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    flexDirection: 'row',
+    gap: 14,
+    justifyContent: 'space-between',
+    minHeight: 72,
+    paddingHorizontal: 18,
+    shadowColor: '#000000',
+    shadowOffset: { height: 8, width: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    width: '100%',
+  },
+  selectedDistrictTextGroup: {
+    flex: 1,
+  },
+  selectedDistrictEyebrow: {
+    color: '#70A9BA',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 3,
+  },
+  selectedDistrictTitle: {
+    color: '#202124',
+    fontSize: 19,
+    fontWeight: '800',
+  },
+  panelButton: {
+    alignItems: 'center',
+    backgroundColor: '#70A9BA',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 46,
+    minWidth: 104,
+    paddingHorizontal: 18,
+  },
+  panelButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
   },
   selectButton: {
     alignItems: 'center',
@@ -309,12 +719,12 @@ const styles = StyleSheet.create({
   },
   overlay: {
     alignItems: 'center',
-    backgroundColor: 'rgba(20, 25, 27, 0.62)',
+    backgroundColor: 'rgba(20, 25, 27, 0.72)',
     bottom: 0,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     left: 0,
-    paddingHorizontal: 24,
-    paddingTop: 74,
+    paddingHorizontal: 18,
+    paddingTop: 132,
     position: 'absolute',
     right: 0,
     top: 0,
@@ -323,7 +733,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '400',
-    marginBottom: 32,
+    marginBottom: 20,
   },
   frameDeck: {
     alignItems: 'center',
@@ -331,67 +741,100 @@ const styles = StyleSheet.create({
   },
   missionFrame: {
     position: 'absolute',
-  },
-  backCardShade: {
-    backgroundColor: 'rgba(53, 74, 82, 0.34)',
-    borderRadius: 34,
-    elevation: 18,
-    position: 'absolute',
-    shadowColor: '#000000',
-    shadowOffset: { height: 18, width: 0 },
-    shadowOpacity: 0.38,
-    shadowRadius: 24,
-  },
-  backShadeLeft: {
-    transform: [{ translateX: -26 }, { translateY: 20 }, { rotate: '-7deg' }],
-  },
-  backShadeRight: {
-    transform: [{ translateX: 26 }, { translateY: 8 }, { rotate: '7deg' }],
+    zIndex: 1,
   },
   backFrameLeft: {
-    elevation: 18,
-    opacity: 0.78,
-    shadowColor: '#000000',
-    shadowOffset: { height: 18, width: -12 },
-    shadowOpacity: 0.36,
-    shadowRadius: 24,
-    transform: [{ translateX: -26 }, { translateY: 12 }, { rotate: '-7deg' }],
+    opacity: 1,
+    transform: [{ translateX: -4 }, { translateY: 7 }, { rotate: '-11deg' }],
   },
   backFrameRight: {
-    elevation: 18,
-    opacity: 0.8,
-    shadowColor: '#000000',
-    shadowOffset: { height: 16, width: 12 },
-    shadowOpacity: 0.34,
-    shadowRadius: 24,
-    transform: [{ translateX: 26 }, { translateY: -6 }, { rotate: '7deg' }],
+    opacity: 1,
+    transform: [{ translateX: 3 }, { translateY: 7 }, { rotate: '11deg' }],
   },
-  frontFrame: {
-    transform: [{ translateY: 2 }],
-  },
-  selectedPieceBadge: {
+  frontMissionCard: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: '#d94242',
-    borderRadius: 999,
-    borderWidth: 2,
+    elevation: 0,
     justifyContent: 'center',
-    minHeight: 42,
-    minWidth: 76,
-    paddingHorizontal: 12,
     position: 'absolute',
+    zIndex: 3,
   },
-  selectedPieceNumber: {
-    color: '#d94242',
-    fontSize: 17,
-    fontWeight: '800',
+  frontMissionImage: {
+    height: '100%',
+    width: '100%',
+    zIndex: 1,
+  },
+  missionCardContent: {
+    alignItems: 'center',
+    bottom: '15%',
+    left: '10%',
+    paddingHorizontal: 10,
+    position: 'absolute',
+    right: '10%',
+    top: '15%',
+    zIndex: 2,
+  },
+  missionTypeBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    marginBottom: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  missionTypeText: {
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  deckMissionTitle: {
+    width: '75%',
+    fontSize: 18,
+    fontWeight: '700',
     lineHeight: 22,
+    marginBottom: 8,
+    minHeight: 22,
+    textAlign: 'center',
+  },
+  longDeckMissionTitle: {
+    fontSize: 16,
+    lineHeight: 20,
+    minHeight: 40,
+  },
+  deckMissionPhoto: {
+    aspectRatio: 1,
+    backgroundColor: '#ffffff',
+    width: '68%',
+  },
+  deckMissionPhotoPlaceholder: {
+    aspectRatio: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.58)',
+    borderColor: 'rgba(95, 121, 136, 0.26)',
+    borderWidth: 1,
+    width: '68%',
+  },
+  deckMissionDescription: {
+    width: '80%',
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 15,
+    marginTop: 7,
+    textAlign: 'center',
+  },
+  deckStateBox: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+  },
+  deckStateText: {
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   pagination: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 66,
-    marginTop: 16,
+    marginBottom: 42,
+    marginTop: 10,
   },
   pageDot: {
     backgroundColor: 'rgba(255, 255, 255, 0.62)',
@@ -422,5 +865,3 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 });
-
-

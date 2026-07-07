@@ -23,7 +23,7 @@ export default function TripCreateScreen() {
   const peopleTopGap = isTallScreen ? 30 : 22;
   const startButtonPadding = isTallScreen ? 18 : 15;
   const titleSize = isCompactWidth ? 23 : 25;
-  const valueSize = isCompactWidth ? 18 : 20;
+  const valueSize = isCompactWidth ? 16 : 20;
 
   return (
     <View
@@ -71,7 +71,7 @@ export default function TripCreateScreen() {
           ))}
         </View>
 
-        <View style={[styles.form, { marginTop: formTopGap }]}>
+        <View style={{ marginTop: formTopGap }}>
           <Text style={styles.sectionLabel}>여행 기간</Text>
           <View style={styles.dateRow}>
             <View style={styles.dateField}>
@@ -96,7 +96,7 @@ export default function TripCreateScreen() {
             <Text style={styles.noticeText}>여행 기간에 맞춰 미션이 부여돼요.</Text>
           </View>
 
-          <View style={[styles.peopleField, { marginTop: peopleTopGap }]}>
+          <View style={{ marginTop: peopleTopGap }}>
             <Text style={styles.fieldLabel}>인원수</Text>
             <View style={styles.selectLine}>
               <Text style={[styles.fieldValue, { fontSize: valueSize }]}>4명</Text>
@@ -137,9 +137,9 @@ const styles = StyleSheet.create({
     lineHeight: 44,
   },
   topTitle: {
-    color: '#111111',
-    fontSize: 19,
-    fontWeight: '700',
+    color: '#10161F',
+    fontSize: 16,
+    fontWeight: '600',
   },
   topSpacer: {
     width: 48,
@@ -149,12 +149,12 @@ const styles = StyleSheet.create({
   },
   heading: {
     color: '#000000',
-    fontWeight: '800',
+    fontWeight: '600',
     lineHeight: 30,
   },
   description: {
-    color: '#b2b2b2',
-    fontSize: 13,
+    color: '#AEAEAE',
+    fontSize: 12,
     marginTop: 8,
   },
   companions: {
@@ -172,28 +172,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addIcon: {
-    color: '#4d86bf',
-    fontSize: 31,
-    fontWeight: '300',
+    color: '#409CB7',
+    fontSize: 27,
+    fontWeight: '400',
     lineHeight: 40,
   },
   avatar: {
     borderRadius: 999,
   },
   activeLabel: {
-    color: '#4d86bf',
-    fontSize: 13,
+    color: '#409CB7',
+    fontSize: 12,
   },
   mutedLabel: {
     color: '#b2b2b2',
-    fontSize: 13,
+    fontSize: 12,
   },
-  form: {},
   sectionLabel: {
-    color: '#a6a6a6',
-    fontSize: 14,
+    color: '#8A9194',
+    fontSize: 13,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   dateRow: {
     flexDirection: 'row',
@@ -203,13 +202,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   fieldLabel: {
-    color: '#a6a6a6',
-    fontSize: 13,
+    color: '#8A9194',
+    fontSize: 12,
     marginBottom: 10,
   },
   selectLine: {
     alignItems: 'center',
-    borderBottomColor: '#b9b9b9',
+    borderBottomColor: '#8A9194',
     borderBottomWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -226,40 +225,39 @@ const styles = StyleSheet.create({
   noticeRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 10,
+    gap: 7,
     marginTop: 8,
   },
   noticeIcon: {
     alignItems: 'center',
-    backgroundColor: '#5489bd',
+    backgroundColor: '#409CB7',
     borderRadius: 999,
-    height: 22,
+    height: 20,
     justifyContent: 'center',
-    width: 22,
+    width: 20,
   },
   noticeIconText: {
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 12,
+    fontWeight: '700',
   },
   noticeText: {
-    color: '#5489bd',
+    color: '#409CB7',
     fontSize: 12,
   },
-  peopleField: {},
   startButton: {
     alignItems: 'center',
-    backgroundColor: '#4f85bd',
+    backgroundColor: '#409CB7',
     borderRadius: 999,
     justifyContent: 'center',
-    shadowColor: '#4f85bd',
+    shadowColor: '#409CB7',
     shadowOffset: { height: 8, width: 0 },
     shadowOpacity: 0.26,
     shadowRadius: 18,
   },
   startButtonText: {
     color: '#ffffff',
-    fontSize: 19,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '500',
   },
 });
