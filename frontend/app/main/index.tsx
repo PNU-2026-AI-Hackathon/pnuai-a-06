@@ -1,8 +1,12 @@
+import { useFocusEffect } from '@react-navigation/native';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ProfileAvatar } from '@/components/profile-avatar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { Image } from 'expo-image';
+import { fetchMe } from '@/lib/auth-api';
 
 const splashText = require('../../assets/svg/logo_text.svg');
 
@@ -15,6 +19,8 @@ export default function MainScreen() {
     isTallScreen,
     topInset,
   } = useResponsiveLayout();
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+  const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
   const cardGap = 10;
   const smallCardWidth = (availableWidth - cardGap) / 2;
   const smallCardHeight = isTallScreen ? 238 : 210;
@@ -23,6 +29,30 @@ export default function MainScreen() {
   const availableMagazineHeight =
     height - topInset - bottomActionInset - headerHeight - smallCardHeight - verticalGaps;
   const magazineHeight = Math.max(300, Math.min(isTallScreen ? 520 : 440, availableMagazineHeight));
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      fetchMe()
+        .then((user) => {
+          if (isActive) {
+            setProfileImageUrl(user.profile_image_url);
+            setProfileEmoji(user.profile_emoji);
+          }
+        })
+        .catch(() => {
+          if (isActive) {
+            setProfileImageUrl(null);
+            setProfileEmoji(null);
+          }
+        });
+
+      return () => {
+        isActive = false;
+      };
+    }, []),
+  );
 
   return (
     <View
@@ -35,11 +65,8 @@ export default function MainScreen() {
       ]}>
       <View style={[styles.header, { paddingTop: topInset }]}>
         <Image source={splashText} style={styles.logoText} contentFit="contain" />
-        {/* <View style={styles.brandBadge}>
-          <Image source={splashText} style={styles.logoText} contentFit="contain" />
-        </View> */}
-        <Pressable onPress={() => router.push('/main/profile')} style={styles.profileButton}>
-          <Text style={styles.profileText}>프로필 사진</Text>
+        <Pressable accessibilityLabel="프로필" onPress={() => router.push('/main/profile')} style={styles.profileButton}>
+          <ProfileAvatar profileImageUrl={profileImageUrl} profileEmoji={profileEmoji} size={56} />
         </Pressable>
       </View>
 
@@ -78,11 +105,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 18,
   },
-  // brandBadge: {
-  //   backgroundColor: 'rgba(195, 211, 219, 0.78)',
-  //   paddingHorizontal: 4,
-  //   paddingVertical: 5,
-  // },
   brandText: {
     color: '#000000',
     fontSize: 14,
@@ -92,17 +114,10 @@ const styles = StyleSheet.create({
     width: 86,
   },
   profileButton: {
-    alignItems: 'center',
-    backgroundColor: '#d8e4ea',
     borderRadius: 999,
     height: 56,
-    justifyContent: 'center',
+    overflow: 'hidden',
     width: 56,
-  },
-  profileText: {
-    color: '#000000',
-    fontSize: 13,
-    textAlign: 'center',
   },
   magazineCard: {
     alignItems: 'center',

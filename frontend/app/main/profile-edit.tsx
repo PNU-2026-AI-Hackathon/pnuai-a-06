@@ -1,9 +1,11 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   KeyboardAvoidingView,
   Modal,
@@ -18,9 +20,11 @@ import {
 import { ProfileAvatar, profileIconOptions, type ProfileIconKey } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { fetchMe, updateMe, updateProfileEmoji } from '@/lib/auth-api';
+import { fetchMe, updateMe, updateProfileEmoji, uploadProfileImage } from '@/lib/auth-api';
 
 const FALLBACK_NICKNAME = '사용자';
+const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_PROFILE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -38,6 +42,7 @@ export default function ProfileEditScreen() {
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
   const [pendingProfileEmoji, setPendingProfileEmoji] = useState<ProfileIconKey | null>(null);
+  const [pendingProfileImageUrl, setPendingProfileImageUrl] = useState<string | null>(null);
   const [isProfileSheetVisible, setIsProfileSheetVisible] = useState(false);
   const [hasSavedProfileChange, setHasSavedProfileChange] = useState(false);
   const [message, setMessage] = useState('');
@@ -86,6 +91,7 @@ export default function ProfileEditScreen() {
   const openProfileSheet = () => {
     setSheetMessage('');
     setPendingProfileEmoji(profileIconOptions.some((option) => option.key === profileEmoji) ? (profileEmoji as ProfileIconKey) : null);
+    setPendingProfileImageUrl(profileImageUrl);
     setIsProfileSheetVisible(true);
     sheetProgress.setValue(0);
     Animated.timing(sheetProgress, {
@@ -147,6 +153,7 @@ export default function ProfileEditScreen() {
       const updatedUser = await updateProfileEmoji(pendingProfileEmoji);
       setProfileImageUrl(updatedUser.profile_image_url);
       setProfileEmoji(updatedUser.profile_emoji);
+      setPendingProfileImageUrl(updatedUser.profile_image_url);
       setHasSavedProfileChange(true);
       closeProfileSheet();
     } catch (error) {
@@ -154,6 +161,86 @@ export default function ProfileEditScreen() {
     } finally {
       setIsSavingProfile(false);
     }
+  };
+
+  const uploadPickedImage = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (asset.fileSize && asset.fileSize > MAX_PROFILE_IMAGE_BYTES) {
+      setSheetMessage('프로필 사진은 5MB 이하만 업로드할 수 있어요.');
+      return;
+    }
+
+    const fileName = asset.fileName || `profile-${Date.now()}.jpg`;
+    const mimeType = asset.mimeType || 'image/jpeg';
+
+    if (!ALLOWED_PROFILE_IMAGE_TYPES.has(mimeType)) {
+      setSheetMessage('JPEG, PNG, WebP 이미지만 업로드할 수 있어요.');
+      return;
+    }
+
+    try {
+      setIsSavingProfile(true);
+      setSheetMessage('');
+      const updatedUser = await uploadProfileImage({ name: fileName, type: mimeType, uri: asset.uri });
+      setProfileImageUrl(updatedUser.profile_image_url);
+      setProfileEmoji(updatedUser.profile_emoji);
+      setPendingProfileEmoji(null);
+      setPendingProfileImageUrl(updatedUser.profile_image_url);
+      setHasSavedProfileChange(true);
+      closeProfileSheet();
+    } catch (error) {
+      setSheetMessage(getErrorMessage(error));
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const pickImageFromLibrary = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      setSheetMessage('앨범 접근 권한이 필요합니다.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      mediaTypes: ['images'],
+      quality: 0.85,
+    });
+
+    if (!result.canceled) {
+      await uploadPickedImage(result.assets[0]);
+    }
+  };
+
+  const takeImageWithCamera = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+
+    if (!permission.granted) {
+      setSheetMessage('카메라 접근 권한이 필요합니다.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      mediaTypes: ['images'],
+      quality: 0.85,
+    });
+
+    if (!result.canceled) {
+      await uploadPickedImage(result.assets[0]);
+    }
+  };
+
+  const openImageSourcePicker = () => {
+    setSheetMessage('');
+    Alert.alert('프로필 사진', '사진을 가져올 방법을 선택해주세요.', [
+      { text: '앨범에서 선택', onPress: pickImageFromLibrary },
+      { text: '카메라 촬영', onPress: takeImageWithCamera },
+      { style: 'cancel', text: '취소' },
+    ]);
   };
 
   const sheetTranslateY = sheetProgress.interpolate({
@@ -247,12 +334,12 @@ export default function ProfileEditScreen() {
             ]}>
             <Text style={styles.sheetTitle}>{displayNickname}님{`\n`}프로필이미지를 골라보세요</Text>
             <View style={styles.sheetPreviewWrap}>
-              <ProfileAvatar profileEmoji={pendingProfileEmoji} size={110} />
+              <ProfileAvatar profileImageUrl={pendingProfileImageUrl} profileEmoji={pendingProfileEmoji} size={110} />
             </View>
             <View style={styles.profileOptionsGrid}>
-              <View style={styles.futureImageOption}>
-                <MaterialCommunityIcons color="#4E5259" name="image" size={28} />
-              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="앨범 또는 카메라에서 프로필 사진 선택" onPress={openImageSourcePicker} style={styles.futureImageOption}>
+                {isSavingProfile ? <ActivityIndicator color="#4E5259" /> : <MaterialCommunityIcons color="#4E5259" name="image" size={28} />}
+              </Pressable>
               {profileIconOptions.map((option) => {
                 const isSelected = pendingProfileEmoji === option.key;
 
@@ -261,7 +348,10 @@ export default function ProfileEditScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={`${option.key} 프로필 이미지 선택`}
                     key={option.key}
-                    onPress={() => setPendingProfileEmoji(option.key)}
+                    onPress={() => {
+                      setPendingProfileEmoji(option.key);
+                      setPendingProfileImageUrl(null);
+                    }}
                     style={[styles.profileOptionButton, isSelected && styles.profileOptionSelected]}>
                     <Image source={option.source} style={styles.profileOptionImage} contentFit="cover" />
                   </Pressable>
@@ -270,7 +360,10 @@ export default function ProfileEditScreen() {
             </View>
             {sheetMessage ? <Text style={styles.sheetMessageText}>{sheetMessage}</Text> : null}
             <View style={styles.sheetActionRow}>
-              <ScalePressable onPress={() => setPendingProfileEmoji(null)} pressedScale={0.98} style={styles.sheetDeleteButton}>
+              <ScalePressable onPress={() => {
+                  setPendingProfileEmoji(null);
+                  setPendingProfileImageUrl(null);
+                }} pressedScale={0.98} style={styles.sheetDeleteButton}>
                 <Text style={styles.sheetDeleteText}>지우기</Text>
               </ScalePressable>
               <ScalePressable

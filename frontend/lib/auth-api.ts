@@ -2,6 +2,12 @@ import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 
 export const API_BASE_URL = 'http://211.213.193.67:7020';
 
+
+type ProfileImageUploadInput = {
+  name: string;
+  type: string;
+  uri: string;
+};
 type AuthTokens = {
   access_token?: string;
   refresh_token?: string;
@@ -81,6 +87,24 @@ async function patchJson<T>(path: string, body: Record<string, string>): Promise
   return readAuthResponse<T>(res);
 }
 
+async function postMultipart<T>(path: string, formData: FormData): Promise<T> {
+  const token = getAuthItem('access_token');
+
+  if (!token) {
+    throw new Error('access_token이 없습니다.');
+  }
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    body: formData,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    method: 'POST',
+  });
+
+  return readAuthResponse<T>(res);
+}
+
 export function saveAuthTokens(data: AuthTokens) {
   const accessToken = data.access_token ?? data.token;
 
@@ -125,6 +149,13 @@ export function updateMe(nickname: string) {
 
 export function updateProfileEmoji(profileEmoji: string) {
   return patchJson<AuthUser>('/auth/me/profile-emoji', { profile_emoji: profileEmoji });
+}
+
+export function uploadProfileImage(image: ProfileImageUploadInput) {
+  const formData = new FormData();
+  formData.append('image', image as unknown as Blob);
+
+  return postMultipart<AuthUser>('/auth/me/profile-image', formData);
 }
 
 export async function fetchMe(): Promise<AuthUser> {
