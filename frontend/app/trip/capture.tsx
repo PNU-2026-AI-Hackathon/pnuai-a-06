@@ -25,6 +25,8 @@ export default function MissionCaptureScreen() {
   const [facing, setFacing] = useState<CameraType>('back');
   const [flash, setFlash] = useState<FlashMode>('off');
   const [isCapturing, setIsCapturing] = useState(false);
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
+  const [isMissionComplete, setIsMissionComplete] = useState(false);
   const missionCardCollapsedBottom = bottomSafeInset - (MISSION_CARD_HEIGHT - MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT);
   const missionCardExpandedY = missionCardCollapsedBottom - height / 2 + MISSION_CARD_HEIGHT / 2;
   const backdropOpacity = missionCardTranslateY.interpolate({
@@ -89,11 +91,23 @@ export default function MissionCaptureScreen() {
 
     try {
       setIsCapturing(true);
-      await cameraRef.current.takePictureAsync({ quality: 0.9 });
-      router.push('/trip/result');
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9 });
+      if (photo?.uri) {
+        setCapturedPhotoUri(photo.uri);
+        setIsMissionComplete(false);
+      }
     } finally {
       setIsCapturing(false);
     }
+  };
+
+  const handleRetake = () => {
+    setCapturedPhotoUri(null);
+    setIsMissionComplete(false);
+  };
+
+  const handleComplete = () => {
+    setIsMissionComplete(true);
   };
 
   if (!permission) {
@@ -117,6 +131,30 @@ export default function MissionCaptureScreen() {
           <Text style={styles.permissionText}>미션 인증 사진을 촬영하려면 카메라 접근을 허용해 주세요.</Text>
           <ScalePressable onPress={requestPermission} pressedScale={0.96} style={styles.permissionButton}>
             <Text style={styles.permissionButtonText}>권한 허용</Text>
+          </ScalePressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (capturedPhotoUri) {
+    return (
+      <View style={[styles.reviewContainer, { paddingBottom: bottomSafeInset + 25, paddingTop: topSafeInset + 70 }]}>
+        <StatusBar style="dark" />
+        <View style={styles.reviewHeader}>
+          {isMissionComplete ? <Text style={styles.completeTitle}>미션 완료!</Text> : null}
+        </View>
+
+        <View style={styles.previewWrap}>
+          <Image source={{ uri: capturedPhotoUri }} style={styles.previewImage} contentFit="cover" />
+        </View>
+
+        <View style={styles.reviewActions}>
+          <ScalePressable accessibilityLabel="다시 찍기" onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton]}>
+            <Text style={[styles.reviewButtonText, styles.retakeButtonText]}>다시 찍기</Text>
+          </ScalePressable>
+          <ScalePressable accessibilityLabel="완료하기" onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton]}>
+            <Text style={[styles.reviewButtonText, styles.completeButtonText]}>완료하기</Text>
           </ScalePressable>
         </View>
       </View>
@@ -183,6 +221,64 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: '#000000',
     flex: 1,
+  },
+  reviewContainer: {
+    backgroundColor: '#F4F7FA',
+    flex: 1,
+    paddingHorizontal: 36,
+  },
+  reviewHeader: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  completeTitle: {
+    color: '#2D3C43',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  previewWrap: {
+    alignSelf: 'center',
+    backgroundColor: '#E5EEF3',
+    borderRadius: 18,
+    flex: 1,
+    maxHeight: 520,
+    minHeight: 300,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  previewImage: {
+    height: '100%',
+    width: '100%',
+  },
+  reviewActions: {
+    flexDirection: 'row',
+    gap: 18,
+    marginTop: 30,
+  },
+  reviewButton: {
+    alignItems: 'center',
+    borderRadius: 19,
+    flex: 1,
+    height: 58,
+    justifyContent: 'center',
+  },
+  retakeButton: {
+    backgroundColor: '#C9E4EE',
+  },
+  completeButton: {
+    backgroundColor: '#409CB7',
+  },
+  reviewButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  retakeButtonText: {
+    color: '#409CB7',
+  },
+  completeButtonText: {
+    color: '#FFFFFF',
   },
   topControls: {
     flexDirection: 'row',
