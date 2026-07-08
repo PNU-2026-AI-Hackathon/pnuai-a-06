@@ -1,8 +1,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.missions import Basket, CartItem, Mission, MissionSet
-from app.schemas.missions import BasketStatus, CartItemStatus, MissionType, Theme
+from app.models.missions import Basket, Mission, MissionSet
+from app.schemas.missions import BasketStatus, MissionType, Theme
 
 
 THEMES = [theme.value for theme in Theme]
@@ -87,56 +87,3 @@ def get_or_create_user_baskets(db: Session, user_id: int) -> list[Basket]:
     for basket in baskets:
         db.refresh(basket)
     return baskets
-
-
-def add_cart_item(db: Session, *, user_id: int, mission_id: int) -> CartItem | None:
-    mission = db.get(Mission, mission_id)
-    if mission is None:
-        return None
-
-    stmt = (
-        select(CartItem)
-        .where(CartItem.user_id == user_id, CartItem.mission_id == mission_id)
-        .options(selectinload(CartItem.mission))
-    )
-    cart_item = db.scalar(stmt)
-    if cart_item is None:
-        cart_item = CartItem(
-            user_id=user_id,
-            mission_id=mission_id,
-            status=CartItemStatus.ADDED.value,
-        )
-        db.add(cart_item)
-
-    basket_stmt = select(Basket).where(
-        Basket.user_id == user_id,
-        Basket.theme == mission.theme,
-    )
-    basket = db.scalar(basket_stmt)
-    if basket is None:
-        basket = Basket(
-            user_id=user_id,
-            theme=mission.theme,
-            status=BasketStatus.FILLED.value,
-        )
-        db.add(basket)
-    elif basket.status == BasketStatus.EMPTY.value:
-        basket.status = BasketStatus.FILLED.value
-
-    db.commit()
-    db.refresh(cart_item)
-    return db.scalar(
-        select(CartItem)
-        .where(CartItem.id == cart_item.id)
-        .options(selectinload(CartItem.mission))
-    )
-
-
-def list_user_cart_items(db: Session, user_id: int) -> list[CartItem]:
-    stmt = (
-        select(CartItem)
-        .where(CartItem.user_id == user_id)
-        .options(selectinload(CartItem.mission))
-        .order_by(CartItem.created_at.desc(), CartItem.id.desc())
-    )
-    return list(db.scalars(stmt).all())

@@ -4,3 +4,5 @@ logs/
 .pgdata/
 logging.ini
 app/static/mission-photos/*.jpg
+app/db/profile-images/*
+!app/db/profile-images/.gitkeep

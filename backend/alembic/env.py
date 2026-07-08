@@ -5,7 +5,8 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.models.missions import Basket, CartItem, Mission, MissionSet  # noqa: F401
+from app.models.missions import Basket, Mission, MissionSet  # noqa: F401
+from app.models.schedules import MissionSchedule, ScheduleInviteLink, ScheduleMember, ScheduleMission  # noqa: F401
 from app.models.users import User  # noqa: F401
 
 config = context.config

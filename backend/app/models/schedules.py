@@ -1,0 +1,201 @@
+from datetime import date, datetime
+
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.core.config import get_settings
+from app.models.missions import Mission
+from app.models.users import User
+
+
+class MissionSchedule(Base):
+    __tablename__ = "mission_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    creator_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="ACTIVE")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    creator: Mapped[User] = relationship(foreign_keys=[creator_id])
+    members: Mapped[list["ScheduleMember"]] = relationship(
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+    )
+    schedule_missions: Mapped[list["ScheduleMission"]] = relationship(
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def companions(self) -> list["ScheduleMember"]:
+        return self.members
+
+    @property
+    def missions(self) -> list["ScheduleMission"]:
+        return self.schedule_missions
+
+
+class ScheduleMember(Base):
+    __tablename__ = "schedule_members"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "user_id", name="uq_schedule_members_schedule_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("mission_schedules.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    invited_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING")
+    invite_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    invite_token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    invite_token_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    schedule: Mapped[MissionSchedule] = relationship(back_populates="members")
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+    invited_by: Mapped[User] = relationship(foreign_keys=[invited_by_user_id])
+
+    @property
+    def invite_url(self) -> str | None:
+        base_url = get_settings().schedule_invite_base_url.strip().rstrip("/")
+        if not base_url:
+            return None
+        return f"{base_url}/schedule-invitations/{self.invite_token}"
+
+
+class ScheduleInviteLink(Base):
+    __tablename__ = "schedule_invite_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("mission_schedules.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    invite_token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    schedule: Mapped[MissionSchedule] = relationship()
+    created_by: Mapped[User] = relationship(foreign_keys=[created_by_user_id])
+    accepted_by: Mapped[User | None] = relationship(foreign_keys=[accepted_by_user_id])
+
+    @property
+    def invite_url(self) -> str | None:
+        base_url = get_settings().schedule_invite_base_url.strip().rstrip("/")
+        if not base_url:
+            return None
+        return f"{base_url}/schedule-invitations/{self.invite_token}"
+
+
+class ScheduleMission(Base):
+    __tablename__ = "schedule_missions"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "mission_id", name="uq_schedule_missions_schedule_mission"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("mission_schedules.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    mission_id: Mapped[int] = mapped_column(
+        ForeignKey("missions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    added_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="ADDED")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    schedule: Mapped[MissionSchedule] = relationship(back_populates="schedule_missions")
+    mission: Mapped[Mission] = relationship()
+    added_by: Mapped[User] = relationship(foreign_keys=[added_by_user_id])

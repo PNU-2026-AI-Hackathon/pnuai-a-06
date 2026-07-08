@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from app.auth.router import router as auth_router
 from app.core.config import get_settings
 from app.routers.missions import router as missions_router
+from app.routers.schedules import invitation_router, router as schedules_router
 
 settings = get_settings()
 
@@ -30,6 +31,13 @@ app = FastAPI(
                 "user's basket and selected missions, not final mission completion."
             ),
         },
+        {
+            "name": "mission-schedules",
+            "description": (
+                "Authenticated APIs for date-range mission schedules, companion "
+                "invitations, and missions added to a specific schedule."
+            ),
+        },
     ],
 )
 
@@ -44,6 +52,8 @@ if settings.cors_origin_list:
 
 app.include_router(auth_router)
 app.include_router(missions_router)
+app.include_router(schedules_router)
+app.include_router(invitation_router)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 

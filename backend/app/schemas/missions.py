@@ -29,13 +29,6 @@ class BasketStatus(str, Enum):
     OVERFLOWING = "OVERFLOWING"
 
 
-class CartItemStatus(str, Enum):
-    ADDED = "ADDED"
-    IN_PROGRESS = "IN_PROGRESS"
-    SUBMITTED = "SUBMITTED"
-    COMPLETED = "COMPLETED"
-
-
 class MissionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -109,20 +102,3 @@ class BasketResponse(BaseModel):
     created_at: datetime = Field(description="Row creation time.")
     updated_at: datetime = Field(description="Row update time.")
 
-
-class CartItemCreateRequest(BaseModel):
-    mission_id: int = Field(gt=0, description="Mission id to add to the logged-in user's basket.")
-
-
-class CartItemResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int = Field(description="Internal selected-mission numeric id.")
-    user_id: int = Field(description="Owner user id.")
-    mission_id: int = Field(description="Selected mission id.")
-    status: CartItemStatus = Field(
-        description="Selection workflow state. This is not final mission completion judging yet."
-    )
-    mission: MissionResponse = Field(description="Selected mission detail.")
-    created_at: datetime = Field(description="Row creation time.")
-    updated_at: datetime = Field(description="Row update time.")

@@ -4,12 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user
 from app.db.session import get_db
 from app.schemas.missions import (
     BasketResponse,
-    CartItemCreateRequest,
-    CartItemResponse,
     DistrictResponse,
     MissionResponse,
     MissionType,
@@ -18,16 +15,15 @@ from app.schemas.missions import (
     Theme,
 )
 from app.services.missions import (
-    add_cart_item,
     get_mission_by_code,
     get_mission_set,
     get_or_create_user_baskets,
     list_districts,
     list_mission_sets,
     list_missions,
-    list_user_cart_items,
 )
 from app.models.users import User
+from app.auth.dependencies import get_current_user
 
 router = APIRouter(tags=["missions"])
 MISSION_PHOTO_DIR = Path("app/static/mission-photos")
@@ -171,50 +167,3 @@ def read_my_baskets(
 ) -> list[BasketResponse]:
     return get_or_create_user_baskets(db, current_user.id)
 
-
-@router.post(
-    "/cart-items",
-    response_model=CartItemResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Add a mission to my basket",
-    description=(
-        "Stores that the logged-in user selected a mission. This is the current "
-        "'basket 담기' action. If the same mission was already selected, the existing "
-        "cart item is returned. The matching theme basket moves from EMPTY to FILLED. "
-        "This endpoint is not mission completion/submission judging."
-    ),
-    responses={404: {"description": "Mission was not found."}},
-)
-def create_cart_item(
-    payload: CartItemCreateRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> CartItemResponse:
-    cart_item = add_cart_item(
-        db,
-        user_id=current_user.id,
-        mission_id=payload.mission_id,
-    )
-    if cart_item is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Mission not found.",
-        )
-    return cart_item
-
-
-@router.get(
-    "/cart-items/me",
-    response_model=list[CartItemResponse],
-    summary="List my selected missions",
-    description=(
-        "Returns missions the logged-in user has added to their basket. Use this for "
-        "a 'selected missions' or 'my basket contents' screen. Status currently means "
-        "selection workflow state, not verified mission completion."
-    ),
-)
-def read_my_cart_items(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> list[CartItemResponse]:
-    return list_user_cart_items(db, current_user.id)

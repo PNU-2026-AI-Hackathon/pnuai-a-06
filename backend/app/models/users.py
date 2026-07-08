@@ -19,6 +19,7 @@ class User(Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nickname: Mapped[str | None] = mapped_column(String(100), nullable=True)
     profile_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    profile_emoji: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
