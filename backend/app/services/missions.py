@@ -1,11 +1,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.missions import Basket, Mission, MissionSet
-from app.schemas.missions import BasketStatus, MissionType, Theme
-
-
-THEMES = [theme.value for theme in Theme]
+from app.models.missions import Mission, MissionSet
+from app.schemas.missions import MissionType, Theme
 
 
 def list_mission_sets(db: Session) -> list[MissionSet]:
@@ -66,24 +63,3 @@ def get_mission_set(db: Session, mission_set_id: int) -> MissionSet | None:
     if mission_set is not None:
         mission_set.missions.sort(key=lambda mission: (mission.sort_order, mission.id))
     return mission_set
-
-
-def get_or_create_user_baskets(db: Session, user_id: int) -> list[Basket]:
-    existing = {
-        basket.theme: basket
-        for basket in db.scalars(select(Basket).where(Basket.user_id == user_id)).all()
-    }
-    created = False
-    for theme in THEMES:
-        if theme not in existing:
-            basket = Basket(user_id=user_id, theme=theme, status=BasketStatus.EMPTY.value)
-            db.add(basket)
-            existing[theme] = basket
-            created = True
-    if created:
-        db.commit()
-
-    baskets = [existing[theme] for theme in THEMES]
-    for basket in baskets:
-        db.refresh(basket)
-    return baskets

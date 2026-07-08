@@ -22,13 +22,6 @@ class VerificationType(str, Enum):
     FREE_PHOTO = "FREE_PHOTO"
 
 
-class BasketStatus(str, Enum):
-    EMPTY = "EMPTY"
-    FILLED = "FILLED"
-    FULL = "FULL"
-    OVERFLOWING = "OVERFLOWING"
-
-
 class MissionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -42,6 +35,7 @@ class MissionResponse(BaseModel):
     district_label: str = Field(
         description="Human-readable Busan district label, e.g. 영도구 or 부산 전역."
     )
+    place_label: str | None = Field(description="Specific mission place label, e.g. 황령산 봉수대.")
     type: MissionType = Field(description="Mission category: BASIC, RARE, or SIDE.")
     title: str = Field(description="Mission title shown to users.")
     description: str = Field(description="Mission instruction shown to users.")
@@ -88,17 +82,3 @@ class DistrictResponse(BaseModel):
     district_code: str = Field(description="Structured Busan district code.")
     district_label: str = Field(description="Human-readable Busan district label.")
     mission_count: int = Field(description="Number of missions available in this district.")
-
-
-class BasketResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int = Field(description="Internal user basket numeric id.")
-    user_id: int = Field(description="Owner user id.")
-    theme: Theme = Field(description="Basket theme: MOUNTAIN, SEA, or CITY.")
-    status: BasketStatus = Field(
-        description="User basket visual state. Currently EMPTY changes to FILLED when a mission is added."
-    )
-    created_at: datetime = Field(description="Row creation time.")
-    updated_at: datetime = Field(description="Row update time.")
-

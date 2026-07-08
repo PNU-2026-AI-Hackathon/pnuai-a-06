@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.missions import (
-    BasketResponse,
     DistrictResponse,
     MissionResponse,
     MissionType,
@@ -17,13 +16,10 @@ from app.schemas.missions import (
 from app.services.missions import (
     get_mission_by_code,
     get_mission_set,
-    get_or_create_user_baskets,
     list_districts,
     list_mission_sets,
     list_missions,
 )
-from app.models.users import User
-from app.auth.dependencies import get_current_user
 
 router = APIRouter(tags=["missions"])
 MISSION_PHOTO_DIR = Path("app/static/mission-photos")
@@ -148,22 +144,3 @@ def read_mission_set(
             detail="Mission set not found.",
         )
     return mission_set
-
-
-@router.get(
-    "/baskets/me",
-    response_model=list[BasketResponse],
-    summary="Get my basket states",
-    description=(
-        "Returns the logged-in user's basket state for each theme. If the user has "
-        "no basket rows yet, this endpoint creates EMPTY baskets for MOUNTAIN, SEA, "
-        "and CITY. This is for progress display such as empty/filled basket UI. "
-        "It does not judge mission completion."
-    ),
-)
-def read_my_baskets(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> list[BasketResponse]:
-    return get_or_create_user_baskets(db, current_user.id)
-
