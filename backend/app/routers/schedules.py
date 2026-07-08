@@ -8,11 +8,12 @@ from app.schemas.schedules import (
     MissionScheduleCreateRequest,
     MissionScheduleResponse,
     MissionScheduleUpdateRequest,
+    ReceivedScheduleInvitationResponse,
+    ScheduleBasketResponse,
     ScheduleInviteRequest,
     ScheduleInvitationPreviewResponse,
     ScheduleMemberResponse,
     ScheduleMemberStatus,
-    ScheduleMembershipUpdateRequest,
     ScheduleMissionCreateRequest,
     ScheduleMissionResponse,
     ScheduleShareInvitationResponse,
@@ -20,26 +21,34 @@ from app.schemas.schedules import (
 from app.services.schedules import (
     accept_share_invitation_by_token,
     add_schedule_mission,
+    build_received_invitation_response,
     build_share_invitation_response,
     create_schedule_share_invitation,
     create_schedule,
     get_accessible_schedule,
     get_any_invitation_preview,
     invite_schedule_member,
+    list_received_invitations,
+    list_schedule_baskets,
     list_user_schedules,
     update_membership_by_invite_token,
-    update_my_membership,
     update_schedule,
 )
 
-router = APIRouter(prefix="/mission-schedules", tags=["mission-schedules"])
-invitation_router = APIRouter(prefix="/schedule-invitations", tags=["mission-schedules"])
+schedules_router = APIRouter(prefix="/schedules", tags=["schedules"])
+schedule_missions_router = APIRouter(prefix="/schedules", tags=["schedule missions"])
+schedule_invitations_router = APIRouter(prefix="/schedules", tags=["schedule invitations"])
+invitations_router = APIRouter(prefix="/invitations", tags=["schedule invitations"])
+
+# Backward-compatible alias used by app.main.
+router = schedules_router
+invitation_router = invitations_router
 
 
-@router.get(
+@schedules_router.get(
     "",
     response_model=list[MissionScheduleResponse],
-    summary="List my mission schedules",
+    summary="List my schedules",
     description=(
         "Returns schedules created by the logged-in user and schedules where the user "
         "has been invited. Creator and companions are separated in the response."
@@ -52,11 +61,11 @@ def read_my_schedules(
     return list_user_schedules(db, current_user.id)
 
 
-@router.post(
+@schedules_router.post(
     "",
     response_model=MissionScheduleResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a mission schedule",
+    summary="Create a schedule",
     description=(
         "Creates a mission schedule with a date range. Optional invitee emails are "
         "stored as PENDING companions. The creator is stored separately and is not "
@@ -78,10 +87,10 @@ def create_mission_schedule(
     return schedule
 
 
-@router.get(
+@schedules_router.get(
     "/{schedule_id}",
     response_model=MissionScheduleResponse,
-    summary="Get one mission schedule",
+    summary="Get one schedule",
     responses={404: {"description": "Schedule was not found or is not accessible."}},
 )
 def read_mission_schedule(
@@ -98,14 +107,14 @@ def read_mission_schedule(
     return schedule
 
 
-@router.post(
-    "/{schedule_id}/share-invitation",
+@schedule_invitations_router.post(
+    "/{schedule_id}/share-invitations",
     response_model=ScheduleShareInvitationResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a Kakao-shareable schedule invitation",
+    summary="Create a Kakao share invitation",
     description=(
         "Creates a one-use invite token for KakaoTalk sharing. The frontend should "
-        "pass schedule_id, schedule_title, inviter_name, invite_token, and invite_url "
+        "pass roomId, roomName, inviterName, inviteToken, and inviteUrl "
         "into the Kakao share template."
     ),
     responses={404: {"description": "Schedule was not found or the user is not the creator."}},
@@ -128,10 +137,35 @@ def create_schedule_share_invite(
     return build_share_invitation_response(invitation)
 
 
-@router.patch(
+@schedule_missions_router.get(
+    "/{schedule_id}/baskets",
+    response_model=list[ScheduleBasketResponse],
+    summary="Get theme basket states for a schedule",
+    description=(
+        "Returns MOUNTAIN, SEA, and CITY basket states for the selected schedule. "
+        "States are calculated from missions added to this schedule, not from a "
+        "user-wide basket."
+    ),
+    responses={404: {"description": "Schedule was not found or is not accessible."}},
+)
+def read_schedule_baskets(
+    schedule_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[ScheduleBasketResponse]:
+    baskets = list_schedule_baskets(db, schedule_id=schedule_id, user_id=current_user.id)
+    if baskets is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mission schedule not found.",
+        )
+    return baskets
+
+
+@schedules_router.patch(
     "/{schedule_id}",
     response_model=MissionScheduleResponse,
-    summary="Update a mission schedule",
+    summary="Update a schedule",
     description="Only the schedule creator can change the title, date range, or status.",
     responses={
         400: {"description": "Invalid date range."},
@@ -161,7 +195,7 @@ def update_mission_schedule(
     return schedule
 
 
-@router.post(
+@schedule_invitations_router.post(
     "/{schedule_id}/invitations",
     response_model=ScheduleMemberResponse,
     status_code=status.HTTP_201_CREATED,
@@ -200,33 +234,35 @@ def create_schedule_invitation(
     return member
 
 
-@router.patch(
-    "/{schedule_id}/membership/me",
-    response_model=ScheduleMemberResponse,
-    summary="Accept or decline my schedule invitation",
-    responses={404: {"description": "Invitation was not found."}},
-)
-def update_my_schedule_membership(
-    schedule_id: int,
-    payload: ScheduleMembershipUpdateRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> ScheduleMemberResponse:
-    member = update_my_membership(
-        db,
-        schedule_id=schedule_id,
-        user_id=current_user.id,
-        status=payload.status,
-    )
-    if member is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Schedule invitation not found.",
-        )
-    return member
+# This overlaps with token-based invitation accept/decline and is intentionally
+# not exposed. Keep the token flow as the single frontend path.
+# @schedule_invitations_router.patch(
+#     "/{schedule_id}/membership/me",
+#     response_model=ScheduleMemberResponse,
+#     summary="Accept or decline my schedule invitation",
+#     responses={404: {"description": "Invitation was not found."}},
+# )
+# def update_my_schedule_membership(
+#     schedule_id: int,
+#     payload: ScheduleMembershipUpdateRequest,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db),
+# ) -> ScheduleMemberResponse:
+#     member = update_my_membership(
+#         db,
+#         schedule_id=schedule_id,
+#         user_id=current_user.id,
+#         status=payload.status,
+#     )
+#     if member is None:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="Schedule invitation not found.",
+#         )
+#     return member
 
 
-@router.post(
+@schedule_missions_router.post(
     "/{schedule_id}/missions",
     response_model=ScheduleMissionResponse,
     status_code=status.HTTP_201_CREATED,
@@ -258,13 +294,33 @@ def create_schedule_mission(
     return schedule_mission
 
 
-@invitation_router.get(
+@invitations_router.get(
+    "/me",
+    response_model=list[ReceivedScheduleInvitationResponse],
+    summary="List my received email invitations",
+    description=(
+        "Returns pending email-targeted schedule invitations for the logged-in user. "
+        "Use each invite_token with `/invitations/{invite_token}/accept` or "
+        "`/invitations/{invite_token}/decline`."
+    ),
+)
+def read_my_received_invitations(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[ReceivedScheduleInvitationResponse]:
+    return [
+        build_received_invitation_response(member)
+        for member in list_received_invitations(db, current_user.id)
+    ]
+
+
+@invitations_router.get(
     "/{invite_token}",
     response_model=ScheduleInvitationPreviewResponse,
     summary="Preview a schedule invitation link",
     description=(
         "Returns safe invitation details for a shared invite link. The frontend can "
-        "call this when a user opens `/schedule-invitations/{token}` before asking "
+        "call this when a user opens `/invitations/{token}` before asking "
         "them to log in or accept."
     ),
     responses={404: {"description": "Invitation was not found or expired."}},
@@ -304,7 +360,7 @@ def preview_schedule_invitation(
     }
 
 
-@invitation_router.post(
+@invitations_router.post(
     "/{invite_token}/accept",
     response_model=ScheduleMemberResponse,
     summary="Accept a schedule invitation link",
@@ -359,7 +415,7 @@ def accept_schedule_invitation(
     return member
 
 
-@invitation_router.post(
+@invitations_router.post(
     "/{invite_token}/decline",
     response_model=ScheduleMemberResponse,
     summary="Decline a schedule invitation link",

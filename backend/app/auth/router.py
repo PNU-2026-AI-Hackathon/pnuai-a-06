@@ -59,7 +59,7 @@ from app.services.users import (
     verify_email_user,
 )
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth")
 
 KAKAO_AUTHORIZE_URL = "https://kauth.kakao.com/oauth/authorize"
 STATE_COOKIE_NAME = "kakao_oauth_state"
@@ -180,8 +180,7 @@ def save_profile_image(file: UploadFile, user_id: int) -> str:
     return f"/auth/profile-images/{filename}"
 
 
-# Kakao login is intentionally disabled while email login is used.
-# @router.get("/kakao/login")
+@router.get("/kakao/login", tags=["kakao auth"])
 def kakao_login(
     frontend_redirect_uri: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -221,8 +220,7 @@ def kakao_login(
     return response
 
 
-# Kakao callback is intentionally disabled while email login is used.
-# @router.get("/kakao/callback", response_model=None)
+@router.get("/kakao/callback", response_model=None, tags=["kakao auth"])
 async def kakao_callback(
     response: Response,
     code: str | None = Query(default=None),
@@ -289,7 +287,7 @@ async def kakao_callback(
     return create_token_response(user)
 
 
-@router.post("/kakao/token", response_model=TokenResponse)
+@router.post("/kakao/token", response_model=TokenResponse, tags=["kakao auth"])
 async def login_with_kakao_access_token(
     payload: KakaoTokenLoginRequest,
     db: Session = Depends(get_db),
@@ -300,7 +298,7 @@ async def login_with_kakao_access_token(
     return create_token_response(user)
 
 
-@router.post("/email/register", response_model=EmailVerificationResponse)
+@router.post("/email/register", response_model=EmailVerificationResponse, tags=["email auth"])
 def register_with_email(
     payload: EmailRegisterRequest,
     db: Session = Depends(get_db),
@@ -328,7 +326,7 @@ def register_with_email(
     )
 
 
-@router.post("/email/verify", response_model=TokenResponse)
+@router.post("/email/verify", response_model=TokenResponse, tags=["email auth"])
 def verify_email(
     payload: EmailVerifyRequest,
     db: Session = Depends(get_db),
@@ -343,7 +341,7 @@ def verify_email(
     return create_token_response(user)
 
 
-@router.post("/email/login", response_model=TokenResponse)
+@router.post("/email/login", response_model=TokenResponse, tags=["email auth"])
 def login_with_email(
     payload: EmailLoginRequest,
     db: Session = Depends(get_db),
@@ -359,7 +357,7 @@ def login_with_email(
     return create_token_response(user)
 
 
-@router.post("/token", response_model=TokenResponse)
+@router.post("/token", response_model=TokenResponse, tags=["auth tokens"])
 async def login_with_oauth_form(
     request: Request,
     db: Session = Depends(get_db),
@@ -382,7 +380,7 @@ async def login_with_oauth_form(
     return create_token_response(user)
 
 
-@router.post("/token/refresh", response_model=TokenResponse)
+@router.post("/token/refresh", response_model=TokenResponse, tags=["auth tokens"])
 def refresh_token(
     payload: RefreshTokenRequest,
     db: Session = Depends(get_db),
@@ -406,12 +404,12 @@ def refresh_token(
     return create_token_response(user)
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=UserResponse, tags=["account"])
 def read_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-@router.patch("/me", response_model=UserResponse)
+@router.patch("/me", response_model=UserResponse, tags=["account"])
 def update_me(
     payload: UserUpdateRequest,
     current_user: User = Depends(get_current_user),
@@ -426,7 +424,7 @@ def update_me(
     )
 
 
-@router.post("/me/profile-image", response_model=UserResponse)
+@router.post("/me/profile-image", response_model=UserResponse, tags=["account"])
 def upload_my_profile_image(
     image: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -443,7 +441,7 @@ def upload_my_profile_image(
     )
 
 
-@router.patch("/me/profile-emoji", response_model=UserResponse)
+@router.patch("/me/profile-emoji", response_model=UserResponse, tags=["account"])
 def update_my_profile_emoji(
     payload: ProfileEmojiUpdateRequest,
     current_user: User = Depends(get_current_user),
@@ -459,7 +457,7 @@ def update_my_profile_emoji(
     )
 
 
-@router.get("/profile-images/{filename}", response_class=FileResponse)
+@router.get("/profile-images/{filename}", response_class=FileResponse, tags=["account"])
 def read_profile_image(filename: str) -> FileResponse:
     image_path = get_profile_image_path(filename)
     if not image_path.is_file():

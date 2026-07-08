@@ -111,7 +111,7 @@ class ScheduleMember(Base):
         base_url = get_settings().schedule_invite_base_url.strip().rstrip("/")
         if not base_url:
             return None
-        return f"{base_url}/schedule-invitations/{self.invite_token}"
+        return f"{base_url}/invitations/{self.invite_token}"
 
 
 class ScheduleInviteLink(Base):
@@ -158,7 +158,7 @@ class ScheduleInviteLink(Base):
         base_url = get_settings().schedule_invite_base_url.strip().rstrip("/")
         if not base_url:
             return None
-        return f"{base_url}/schedule-invitations/{self.invite_token}"
+        return f"{base_url}/invitations/{self.invite_token}"
 
 
 class ScheduleMission(Base):

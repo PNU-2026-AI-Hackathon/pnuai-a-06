@@ -15,9 +15,11 @@ from app.models.users import User
 from app.schemas.schedules import (
     MissionScheduleCreateRequest,
     MissionScheduleUpdateRequest,
+    ScheduleBasketStatus,
     ScheduleMemberStatus,
     ScheduleMissionStatus,
 )
+from app.schemas.missions import Theme
 from app.core.config import get_settings
 
 
@@ -139,6 +141,39 @@ def list_user_schedules(db: Session, user_id: int) -> list[MissionSchedule]:
     return [_sort_schedule_children(schedule) for schedule in db.scalars(stmt).all()]
 
 
+def list_received_invitations(db: Session, user_id: int) -> list[ScheduleMember]:
+    stmt = (
+        select(ScheduleMember)
+        .where(
+            ScheduleMember.user_id == user_id,
+            ScheduleMember.status == ScheduleMemberStatus.PENDING.value,
+            ScheduleMember.invite_token_expires_at >= datetime.now(timezone.utc),
+        )
+        .options(
+            selectinload(ScheduleMember.schedule).selectinload(MissionSchedule.creator),
+            selectinload(ScheduleMember.user),
+        )
+        .order_by(ScheduleMember.created_at.desc(), ScheduleMember.id.desc())
+    )
+    return list(db.scalars(stmt).all())
+
+
+def build_received_invitation_response(member: ScheduleMember) -> dict[str, object]:
+    return {
+        "id": member.id,
+        "schedule_id": member.schedule_id,
+        "schedule_title": member.schedule.title,
+        "start_date": member.schedule.start_date,
+        "end_date": member.schedule.end_date,
+        "creator": member.schedule.creator,
+        "status": member.status,
+        "invite_token": member.invite_token,
+        "invite_url": member.invite_url,
+        "expires_at": member.invite_token_expires_at,
+        "created_at": member.created_at,
+    }
+
+
 def create_schedule(
     db: Session,
     *,
@@ -193,6 +228,34 @@ def get_accessible_schedule(
     return schedule
 
 
+def list_schedule_baskets(
+    db: Session,
+    *,
+    schedule_id: int,
+    user_id: int,
+) -> list[dict[str, str | int]] | None:
+    schedule = get_accessible_schedule(db, schedule_id=schedule_id, user_id=user_id)
+    if schedule is None:
+        return None
+
+    counts = {theme.value: 0 for theme in Theme}
+    for schedule_mission in schedule.schedule_missions:
+        counts[schedule_mission.mission.theme] += 1
+
+    return [
+        {
+            "theme": theme.value,
+            "status": (
+                ScheduleBasketStatus.FILLED.value
+                if counts[theme.value] > 0
+                else ScheduleBasketStatus.EMPTY.value
+            ),
+            "mission_count": counts[theme.value],
+        }
+        for theme in Theme
+    ]
+
+
 def create_schedule_share_invitation(
     db: Session,
     *,
@@ -225,8 +288,8 @@ def create_schedule_share_invitation(
 
 def build_share_invitation_response(invitation: ScheduleInviteLink) -> dict[str, object]:
     return {
-        "schedule_id": invitation.schedule_id,
-        "schedule_title": invitation.schedule.title,
+        "room_id": invitation.schedule_id,
+        "room_name": invitation.schedule.title,
         "inviter_name": _display_name(invitation.created_by),
         "invite_token": invitation.invite_token,
         "invite_url": invitation.invite_url,

@@ -25,6 +25,11 @@ class ScheduleMissionStatus(str, Enum):
     COMPLETED = "COMPLETED"
 
 
+class ScheduleBasketStatus(str, Enum):
+    EMPTY = "EMPTY"
+    FILLED = "FILLED"
+
+
 class ScheduleUserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -134,13 +139,53 @@ class ScheduleInvitationPreviewResponse(BaseModel):
     invite_type: str = Field(description="Invitation type: EMAIL or SHARE_LINK.")
 
 
+class ReceivedScheduleInvitationResponse(BaseModel):
+    id: int = Field(description="Membership invitation row id.")
+    schedule_id: int = Field(description="Invited schedule id.")
+    schedule_title: str = Field(description="Invited schedule title.")
+    start_date: date = Field(description="Schedule start date.")
+    end_date: date = Field(description="Schedule end date.")
+    creator: ScheduleUserResponse = Field(description="Schedule creator.")
+    status: ScheduleMemberStatus = Field(description="Current invitation status.")
+    invite_token: str = Field(description="Token to use with invitation accept/decline APIs.")
+    invite_url: str | None = Field(description="Frontend invitation URL.")
+    expires_at: datetime = Field(description="Invitation token expiration time.")
+    created_at: datetime = Field(description="Invitation creation time.")
+
+
 class ScheduleShareInvitationResponse(BaseModel):
-    schedule_id: int = Field(description="Schedule id to pass as Kakao template argument.")
-    schedule_title: str = Field(description="Schedule title to show in Kakao message.")
-    inviter_name: str = Field(description="Inviter display name to show in Kakao message.")
-    invite_token: str = Field(description="Invite token to pass as Kakao template argument.")
-    invite_url: str | None = Field(description="Deep/app link for Kakao button.")
-    expires_at: datetime = Field(description="Invite token expiration time.")
+    model_config = ConfigDict(populate_by_name=True)
+
+    room_id: int = Field(
+        alias="roomId",
+        description="Schedule id to pass as Kakao template argument.",
+    )
+    room_name: str = Field(
+        alias="roomName",
+        description="Schedule title to show in Kakao message.",
+    )
+    inviter_name: str = Field(
+        alias="inviterName",
+        description="Inviter display name to show in Kakao message.",
+    )
+    invite_token: str = Field(
+        alias="inviteToken",
+        description="Invite token to pass as Kakao template argument.",
+    )
+    invite_url: str | None = Field(
+        alias="inviteUrl",
+        description="Deep/app link for Kakao button.",
+    )
+    expires_at: datetime = Field(
+        alias="expiresAt",
+        description="Invite token expiration time.",
+    )
+
+
+class ScheduleBasketResponse(BaseModel):
+    theme: str = Field(description="Basket theme: MOUNTAIN, SEA, or CITY.")
+    status: ScheduleBasketStatus = Field(description="Theme basket state inside this schedule.")
+    mission_count: int = Field(description="Number of missions added for this theme.")
 
 
 class ScheduleMissionResponse(BaseModel):
