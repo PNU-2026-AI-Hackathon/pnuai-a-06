@@ -8,6 +8,7 @@ export type TripInvite = {
   inviteToken: string;
   inviteUrl?: string;
   expiresAt?: string;
+  status?: string;
 };
 
 type ApiTripInvite = {
@@ -26,6 +27,7 @@ type ApiTripInvite = {
   room_id?: string | number;
   roomName?: string;
   room_name?: string;
+  status?: string;
   schedule_id?: string | number;
   schedule_name?: string;
   schedule_title?: string;
@@ -119,6 +121,7 @@ function normalizeTripInvite(data: ApiTripInvite, fallbackRoomName: string): Tri
     inviterName: data.inviterName ?? data.inviter_name ?? data.creator?.nickname ?? '친구',
     roomId: String(data.roomId ?? data.room_id ?? data.schedule_id ?? ''),
     roomName: data.roomName ?? data.room_name ?? data.schedule_name ?? data.schedule_title ?? fallbackRoomName,
+    status: data.status,
   };
 }
 

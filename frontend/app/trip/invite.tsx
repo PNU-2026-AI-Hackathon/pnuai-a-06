@@ -4,7 +4,7 @@ import * as Linking from 'expo-linking';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FlowButton, FlowScreen } from '@/components/flow-screen';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -28,6 +28,37 @@ function getErrorMessage(error: unknown) {
   }
 
   return '초대 확인에 실패했습니다.';
+}
+
+function isAccessibleTripError(error: unknown) {
+  const message = getErrorMessage(error);
+  const normalizedMessage = message.toLowerCase();
+
+  return (
+    message.includes('이미') ||
+    message.includes('참여') ||
+    message.includes('입장') ||
+    normalizedMessage.includes('already') ||
+    normalizedMessage.includes('joined') ||
+    normalizedMessage.includes('member')
+  );
+}
+
+function isJoinedInviteStatus(status: string | undefined) {
+  if (!status) {
+    return false;
+  }
+
+  const normalizedStatus = status.toUpperCase();
+
+  return ['ACCEPTED', 'JOINED', 'APPROVED', 'ACTIVE', 'MEMBER'].includes(normalizedStatus);
+}
+
+function openActiveTrip(invite: TripInvite | null) {
+  router.replace({
+    pathname: '/trip/active',
+    params: invite?.roomId ? { scheduleId: invite.roomId } : undefined,
+  });
 }
 
 function createFallbackInviteUrl(inviteToken: string) {
@@ -81,7 +112,7 @@ export default function TripInviteScreen() {
   const titleSize = isCompactWidth ? 23 : 25;
 
   const [invitePreview, setInvitePreview] = useState<TripInvite | null>(null);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'accepting' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'accepting' | 'success' | 'error' | 'acceptError'>('idle');
   const [message, setMessage] = useState('');
   const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
   const [inviteData, setInviteData] = useState<TripInvite | null>(null);
@@ -109,6 +140,12 @@ export default function TripInviteScreen() {
         }
 
         setInvitePreview(preview);
+
+        if (isJoinedInviteStatus(preview.status)) {
+          openActiveTrip(preview);
+          return;
+        }
+
         setStatus('ready');
       })
       .catch((error) => {
@@ -162,13 +199,13 @@ export default function TripInviteScreen() {
     try {
       setIsSharingInvite(true);
       setMessage('');
+      console.log('[KakaoInvite] sharing custom template', templateArgs);
       await shareKakaoInvite(templateArgs);
-    } catch {
-      await Share.share({
-        message: `${templateArgs.inviterName}님이 ${templateArgs.roomName} 여행에 초대했어요.\n${templateArgs.inviteUrl}`,
-        title: `${templateArgs.roomName} 초대`,
-        url: templateArgs.inviteUrl,
-      });
+      setInviteSheetVisible(false);
+      setMessage('카카오톡 초대장을 열었어요.');
+    } catch (error) {
+      console.error('[KakaoInvite] share failed', error);
+      setMessage(`카카오 초대 실패: ${getErrorMessage(error)}`);
     } finally {
       setIsSharingInvite(false);
     }
@@ -195,14 +232,19 @@ export default function TripInviteScreen() {
       setStatus('success');
       setMessage('동행자 방에 입장했어요.');
     } catch (error) {
-      setStatus('error');
+      if (isAccessibleTripError(error)) {
+        openActiveTrip(invitePreview);
+        return;
+      }
+
+      setStatus('acceptError');
       setMessage(getErrorMessage(error));
     }
   };
 
   if (hasInviteParams) {
     const isBusy = status === 'loading' || status === 'accepting';
-    const title = status === 'success' ? '초대 완료' : status === 'error' ? '초대 확인 실패' : '여행 초대장';
+    const title = status === 'success' ? '초대 완료' : status === 'acceptError' ? '입장할 수 없어요' : status === 'error' ? '초대 확인 실패' : '여행 초대장';
 
     return (
       <View style={styles.centerContainer}>
@@ -218,17 +260,17 @@ export default function TripInviteScreen() {
 
         {message ? <Text style={styles.centerMessage}>{message}</Text> : null}
 
-        {status === 'ready' || status === 'error' ? (
+        {status === 'ready' || status === 'error' || status === 'acceptError' ? (
           <Pressable
             accessibilityRole="button"
-            disabled={!invitePreview || status === 'error'}
+            disabled={!invitePreview || status === 'error' || status === 'acceptError'}
             onPress={handleAcceptInvite}
-            style={[styles.primaryButton, (!invitePreview || status === 'error') && styles.disabledButton]}>
+            style={[styles.primaryButton, (!invitePreview || status === 'error' || status === 'acceptError') && styles.disabledButton]}>
             <Text style={styles.primaryButtonText}>입장하기</Text>
           </Pressable>
         ) : null}
 
-        {status === 'success' ? <FlowButton label="진행 중 여행으로" onPress={() => router.replace('/trip/active')} /> : null}
+        {status === 'success' ? <FlowButton label="진행 중 여행으로" onPress={() => openActiveTrip(invitePreview)} /> : null}
         {status === 'error' ? <FlowButton label="돌아가기" onPress={() => router.back()} /> : null}
       </View>
     );
