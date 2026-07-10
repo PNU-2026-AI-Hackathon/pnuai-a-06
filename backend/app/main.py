@@ -1,4 +1,9 @@
-from fastapi import FastAPI
+import logging
+import time
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -13,6 +18,32 @@ from app.routers.schedules import (
 )
 
 settings = get_settings()
+logger = logging.getLogger("app.requests")
+LOG_DIR = Path("logs")
+REQUEST_LOG_FILE = LOG_DIR / "backend.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+LOG_DIR.mkdir(exist_ok=True)
+
+if not any(
+    isinstance(handler, RotatingFileHandler)
+    and getattr(handler, "baseFilename", None) == str(REQUEST_LOG_FILE.resolve())
+    for handler in logger.handlers
+):
+    request_file_handler = RotatingFileHandler(
+        REQUEST_LOG_FILE,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    request_file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    )
+    logger.addHandler(request_file_handler)
+    logger.setLevel(logging.INFO)
 
 app = FastAPI(
     title="Jjigeukka API",
@@ -82,6 +113,36 @@ if settings.cors_origin_list:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    started_at = time.perf_counter()
+    client_host = request.client.host if request.client else "-"
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        logger.exception(
+            "request failed method=%s path=%s client=%s duration_ms=%.2f",
+            request.method,
+            request.url.path,
+            client_host,
+            duration_ms,
+        )
+        raise
+
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "request method=%s path=%s status=%s client=%s duration_ms=%.2f",
+        request.method,
+        request.url.path,
+        response.status_code,
+        client_host,
+        duration_ms,
+    )
+    return response
+
 
 app.include_router(auth_router)
 app.include_router(missions_router)

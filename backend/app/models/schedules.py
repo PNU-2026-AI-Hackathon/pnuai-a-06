@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from urllib.parse import quote
 
 from sqlalchemy import (
     Date,
@@ -15,6 +16,19 @@ from app.db.base import Base
 from app.core.config import get_settings
 from app.models.missions import Mission
 from app.models.users import User
+
+
+def build_schedule_invite_url(invite_token: str) -> str | None:
+    base_url = get_settings().schedule_invite_base_url.strip()
+    if not base_url:
+        return None
+
+    encoded_token = quote(invite_token, safe="")
+    if "{inviteToken}" in base_url:
+        return base_url.replace("{inviteToken}", encoded_token)
+
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url}{separator}inviteToken={encoded_token}"
 
 
 class MissionSchedule(Base):
@@ -108,10 +122,7 @@ class ScheduleMember(Base):
 
     @property
     def invite_url(self) -> str | None:
-        base_url = get_settings().schedule_invite_base_url.strip().rstrip("/")
-        if not base_url:
-            return None
-        return f"{base_url}/invitations/{self.invite_token}"
+        return build_schedule_invite_url(self.invite_token)
 
 
 class ScheduleInviteLink(Base):
@@ -155,10 +166,7 @@ class ScheduleInviteLink(Base):
 
     @property
     def invite_url(self) -> str | None:
-        base_url = get_settings().schedule_invite_base_url.strip().rstrip("/")
-        if not base_url:
-            return None
-        return f"{base_url}/invitations/{self.invite_token}"
+        return build_schedule_invite_url(self.invite_token)
 
 
 class ScheduleMission(Base):
