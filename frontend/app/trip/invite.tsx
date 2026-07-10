@@ -51,7 +51,7 @@ function isJoinedInviteStatus(status: string | undefined) {
 
   const normalizedStatus = status.toUpperCase();
 
-  return ['ACCEPTED', 'JOINED', 'APPROVED', 'ACTIVE', 'MEMBER'].includes(normalizedStatus);
+  return ['ACCEPTED', 'JOINED', 'APPROVED', 'ACTIVE', 'MEMBER', 'OWNER', 'CREATOR', 'HOST', 'INVITER'].includes(normalizedStatus);
 }
 
 function openActiveTrip(invite: TripInvite | null) {
@@ -134,7 +134,7 @@ export default function TripInviteScreen() {
     setInvitePreview(null);
 
     previewTripInvite(inviteToken)
-      .then((preview) => {
+      .then(async (preview) => {
         if (!isMounted) {
           return;
         }
@@ -146,7 +146,28 @@ export default function TripInviteScreen() {
           return;
         }
 
-        setStatus('ready');
+        try {
+          setStatus('accepting');
+          await acceptTripInvite({ inviteToken });
+
+          if (!isMounted) {
+            return;
+          }
+
+          openActiveTrip(preview);
+        } catch (error) {
+          if (!isMounted) {
+            return;
+          }
+
+          if (isAccessibleTripError(error)) {
+            openActiveTrip(preview);
+            return;
+          }
+
+          setStatus('ready');
+          setMessage(getErrorMessage(error));
+        }
       })
       .catch((error) => {
         if (!isMounted) {

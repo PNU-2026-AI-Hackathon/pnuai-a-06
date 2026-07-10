@@ -3,8 +3,10 @@ import * as Linking from 'expo-linking';
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
+import { BottomNavigationBar } from '@/components/bottom-navigation-bar';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 function getKakaoInviteToken(url: string) {
   try {
@@ -58,18 +60,33 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="main" />
-        <Stack.Screen name="tutorial" />
-        <Stack.Screen name="magazine" />
-        <Stack.Screen name="map" />
-        <Stack.Screen name="mission" />
-        <Stack.Screen name="trip" />
-        <Stack.Screen name="collection" />
-      </Stack>
+      <View style={styles.root}>
+        <View style={styles.stackArea}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="index" />
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="main" />
+            <Stack.Screen name="tutorial" />
+            <Stack.Screen name="magazine" />
+            <Stack.Screen name="map" />
+            <Stack.Screen name="mission" />
+            <Stack.Screen name="trip" />
+            <Stack.Screen name="collection" />
+          </Stack>
+        </View>
+        <BottomNavigationBar />
+      </View>
       <StatusBar style="auto" />
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    backgroundColor: '#ffffff',
+    flex: 1,
+  },
+  stackArea: {
+    flex: 1,
+  },
+});
