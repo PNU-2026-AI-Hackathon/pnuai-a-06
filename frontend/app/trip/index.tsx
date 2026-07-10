@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { shareKakaoInvite } from '@/lib/kakao-share';
 import { createDraftSchedule, type TripSchedule } from '@/lib/trip-schedule-api';
@@ -324,13 +325,7 @@ export default function TripCreateScreen() {
           paddingTop: topInset,
         },
       ]}>
-      <View style={styles.topBar}>
-        <Pressable accessibilityLabel="뒤로 가기" onPress={handleBack} style={styles.backButton}>
-          <Text style={styles.backIcon}>‹</Text>
-        </Pressable>
-        <Text style={styles.topTitle}>여행 시작하기</Text>
-        <View style={styles.topSpacer} />
-      </View>
+      <TopBar title="여행 시작하기" onBack={handleBack} />
 
       <View
         style={[
@@ -578,30 +573,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     flex: 1,
   },
-  topBar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    height: 48,
-    justifyContent: 'space-between',
-  },
-  backButton: {
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    width: 48,
-  },
-  backIcon: {
-    color: '#202124',
-    fontSize: 44,
-    lineHeight: 44,
-  },
-  topTitle: {
-    color: '#10161F',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  topSpacer: {
-    width: 48,
-  },
+
   content: {
     flexGrow: 1,
   },

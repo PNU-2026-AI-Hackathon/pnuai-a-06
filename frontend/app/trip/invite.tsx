@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FlowButton, FlowScreen } from '@/components/flow-screen';
+import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { shareKakaoInvite } from '@/lib/kakao-share';
 import { acceptTripInvite, createKakaoInviteTemplateArgs, createTripInvite, previewTripInvite, type TripInvite } from '@/lib/trip-invite-api';
@@ -315,13 +316,7 @@ export default function TripInviteScreen() {
           paddingTop: topInset,
         },
       ]}>
-      <View style={styles.topBar}>
-        <Pressable accessibilityLabel="뒤로 가기" onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backIcon}>‹</Text>
-        </Pressable>
-        <Text style={styles.topTitle}>동행자 초대하기</Text>
-        <View style={styles.topSpacer} />
-      </View>
+      <TopBar title="동행자 초대하기" />
 
       <View style={[styles.content, { paddingTop: contentTopGap }]}>
         <View>
@@ -413,30 +408,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 28,
   },
-  topBar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    height: 44,
-    justifyContent: 'space-between',
-  },
-  backButton: {
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    width: 48,
-  },
-  backIcon: {
-    color: '#202124',
-    fontSize: 44,
-    lineHeight: 44,
-  },
-  topTitle: {
-    color: '#10161F',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  topSpacer: {
-    width: 48,
-  },
+
   content: {
     flex: 1,
   },
