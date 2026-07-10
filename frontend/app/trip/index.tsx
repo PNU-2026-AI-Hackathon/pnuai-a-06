@@ -1,17 +1,11 @@
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-
-const companions = [
-  { label: '나', color: '#b9d7ee' },
-  { label: '선우', color: '#c9d1d7' },
-];
+import { createDraftSchedule } from '@/lib/trip-schedule-api';
 
 type SelectKey = 'startDate' | 'endDate' | 'people';
-
-
 type DatePart = 'year' | 'month' | 'day';
 
 type DateParts = {
@@ -51,6 +45,14 @@ const parseDateValue = (value: string): DateParts => {
 
 const createDateValue = ({ day, month, year }: DateParts) =>
   `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return '여행 일정 생성에 실패했습니다.';
+}
 
 const addDays = (date: Date, days: number) => {
   const nextDate = new Date(date);
@@ -117,12 +119,10 @@ export default function TripCreateScreen() {
     isTallScreen,
     topInset,
   } = useResponsiveLayout();
-  const avatarSize = isCompactWidth ? 54 : 60;
-  const contentTopGap = isTallScreen ? 38 : 22;
-  const companionsTopGap = isTallScreen ? 26 : 18;
-  const formTopGap = isTallScreen ? 42 : 28;
-  const peopleTopGap = isTallScreen ? 30 : 22;
-  const startButtonPadding = isTallScreen ? 18 : 15;
+  const contentTopGap = isTallScreen ? 44 : 26;
+  const formTopGap = isTallScreen ? 48 : 34;
+  const peopleTopGap = isTallScreen ? 34 : 24;
+  const nextButtonPadding = isTallScreen ? 18 : 15;
   const titleSize = isCompactWidth ? 23 : 25;
   const valueSize = isCompactWidth ? 16 : 20;
   const today = useMemo(() => new Date(), []);
@@ -132,6 +132,8 @@ export default function TripCreateScreen() {
   const [endDate, setEndDate] = useState(formatDateValue(addDays(today, 6)));
   const [peopleCount, setPeopleCount] = useState('4');
   const [openSelect, setOpenSelect] = useState<SelectKey | null>(null);
+  const [message, setMessage] = useState('');
+  const [isCreatingSchedule, setIsCreatingSchedule] = useState(false);
 
   const startDateParts = parseDateValue(startDate);
   const endDateParts = parseDateValue(endDate);
@@ -142,6 +144,7 @@ export default function TripCreateScreen() {
   const monthOptions = getMonthOptions(selectedDateParts.year, minDateParts, maxTripDate);
   const dayOptions = getDayOptions(selectedDateParts.year, selectedDateParts.month, minDateParts, maxTripDate);
   const selectTitle = openSelect === 'people' ? '인원수' : openSelect === 'endDate' ? '종료일' : '시작일';
+  const roomName = `B-Cut ${formatDateLabel(startDate)} 여행`;
 
   const closeSelect = () => setOpenSelect(null);
 
@@ -154,6 +157,7 @@ export default function TripCreateScreen() {
     if (openSelect === 'startDate') {
       const nextStartDate = updateDatePart(startDate, part, value, minStartDate, maxTripDate);
       setStartDate(nextStartDate);
+      setMessage('');
 
       if (endDate < nextStartDate) {
         setEndDate(nextStartDate);
@@ -162,6 +166,39 @@ export default function TripCreateScreen() {
 
     if (openSelect === 'endDate') {
       setEndDate(updateDatePart(endDate, part, value, startDateParts, maxTripDate));
+      setMessage('');
+    }
+  };
+
+  const handleNext = async () => {
+    if (isCreatingSchedule) {
+      return;
+    }
+
+    try {
+      setIsCreatingSchedule(true);
+      setMessage('');
+      const schedule = await createDraftSchedule({
+        endDate,
+        peopleCount,
+        roomName,
+        startDate,
+      });
+
+      router.push({
+        pathname: '/trip/invite',
+        params: {
+          endDate,
+          peopleCount,
+          roomName: schedule.roomName,
+          scheduleId: schedule.scheduleId,
+          startDate,
+        },
+      });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setIsCreatingSchedule(false);
     }
   };
 
@@ -217,23 +254,8 @@ export default function TripCreateScreen() {
           },
         ]}>
         <View>
-          <Text style={[styles.heading, { fontSize: titleSize }]}>동행자를{`\n`}추가해 주세요</Text>
-          <Text style={styles.description}>카톡으로 여행갈 친구들을 모아보세요!</Text>
-        </View>
-
-        <View style={[styles.companions, { marginTop: companionsTopGap }]}>
-          <Pressable onPress={() => router.push('/trip/invite')} style={styles.companionItem}>
-            <View style={[styles.addAvatar, { height: avatarSize, width: avatarSize }]}>
-              <Text style={styles.addIcon}>+</Text>
-            </View>
-            <Text style={styles.mutedLabel}>추가</Text>
-          </Pressable>
-          {companions.map((item) => (
-            <View key={item.label} style={styles.companionItem}>
-              <View style={[styles.avatar, { backgroundColor: item.color, height: avatarSize, width: avatarSize }]} />
-              <Text style={item.label === '나' ? styles.activeLabel : styles.mutedLabel}>{item.label}</Text>
-            </View>
-          ))}
+          <Text style={[styles.heading, { fontSize: titleSize }]}>여행 기간을{`\n`}정해 주세요</Text>
+          <Text style={styles.description}>일정을 만든 다음 동행자를 초대할 수 있어요.</Text>
         </View>
 
         <View style={{ marginTop: formTopGap }}>
@@ -281,12 +303,15 @@ export default function TripCreateScreen() {
             </Pressable>
           </View>
         </View>
+
+        {message ? <Text style={styles.messageText}>{message}</Text> : null}
       </View>
 
       <Pressable
-        onPress={() => router.push('/trip/active')}
-        style={[styles.startButton, { paddingVertical: startButtonPadding }]}>
-        <Text style={styles.startButtonText}>여행 시작</Text>
+        disabled={isCreatingSchedule}
+        onPress={handleNext}
+        style={[styles.nextButton, { paddingVertical: nextButtonPadding }, isCreatingSchedule && styles.disabledButton]}>
+        {isCreatingSchedule ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.nextButtonText}>동행자 추가하기</Text>}
       </Pressable>
 
       <Modal animationType="fade" transparent visible={openSelect !== null} onRequestClose={closeSelect}>
@@ -372,37 +397,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 8,
   },
-  companions: {
-    flexDirection: 'row',
-    gap: 14,
-  },
-  companionItem: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  addAvatar: {
-    alignItems: 'center',
-    backgroundColor: '#e9ecef',
-    borderRadius: 999,
-    justifyContent: 'center',
-  },
-  addIcon: {
-    color: '#409CB7',
-    fontSize: 27,
-    fontWeight: '400',
-    lineHeight: 40,
-  },
-  avatar: {
-    borderRadius: 999,
-  },
-  activeLabel: {
-    color: '#409CB7',
-    fontSize: 12,
-  },
-  mutedLabel: {
-    color: '#b2b2b2',
-    fontSize: 12,
-  },
   sectionLabel: {
     color: '#8A9194',
     fontSize: 13,
@@ -460,7 +454,14 @@ const styles = StyleSheet.create({
     color: '#409CB7',
     fontSize: 12,
   },
-  startButton: {
+  messageText: {
+    color: '#D06958',
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  nextButton: {
     alignItems: 'center',
     backgroundColor: '#409CB7',
     borderRadius: 999,
@@ -470,7 +471,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.26,
     shadowRadius: 18,
   },
-  startButtonText: {
+  disabledButton: {
+    opacity: 0.65,
+  },
+  nextButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '500',
