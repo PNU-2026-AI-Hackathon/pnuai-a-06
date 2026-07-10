@@ -47,6 +47,15 @@ class EmailLoginRequest(BaseModel):
         return normalize_email(value)
 
 
+class KakaoTokenLoginRequest(BaseModel):
+    kakao_access_token: str = Field(min_length=1)
+
+    @field_validator("kakao_access_token", mode="before")
+    @classmethod
+    def strip_token(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
 class EmailVerifyRequest(BaseModel):
     email: str
     code: str = Field(min_length=6, max_length=6)
@@ -80,7 +89,30 @@ class UserResponse(BaseModel):
     email: str | None
     nickname: str | None
     profile_image_url: str | None
+    profile_emoji: str | None
     email_verified_at: datetime | None
     created_at: datetime
     updated_at: datetime
     last_login_at: datetime | None
+
+
+class UserUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nickname: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @field_validator("nickname", mode="before")
+    @classmethod
+    def strip_optional_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class ProfileEmojiUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_emoji: str = Field(min_length=1, max_length=32)
+
+    @field_validator("profile_emoji", mode="before")
+    @classmethod
+    def strip_emoji_text(cls, value):
+        return value.strip() if isinstance(value, str) else value

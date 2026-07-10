@@ -133,3 +133,26 @@ def authenticate_email_user(db: Session, *, email: str, password: str) -> User |
     db.commit()
     db.refresh(user)
     return user
+
+
+def update_user_profile(
+    db: Session,
+    user: User,
+    *,
+    nickname: str | None = None,
+    profile_image_url: str | None = None,
+    profile_emoji: str | None = None,
+    update_nickname: bool = False,
+    update_profile_image_url: bool = False,
+    update_profile_emoji: bool = False,
+) -> User:
+    if update_nickname:
+        user.nickname = nickname
+    if update_profile_image_url:
+        user.profile_image_url = profile_image_url
+    if update_profile_emoji:
+        user.profile_emoji = profile_emoji
+
+    db.commit()
+    db.refresh(user)
+    return user

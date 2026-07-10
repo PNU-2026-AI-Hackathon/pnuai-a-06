@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     )
 
     frontend_redirect_uri: str = Field(default="", alias="FRONTEND_REDIRECT_URI")
+    schedule_invite_base_url: str = Field(default="", alias="SCHEDULE_INVITE_BASE_URL")
+    schedule_invite_expire_days: int = Field(default=14, alias="SCHEDULE_INVITE_EXPIRE_DAYS")
     cors_origins: str = Field(default="", alias="CORS_ORIGINS")
 
     jwt_secret_key: str = Field(

@@ -1,11 +1,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.missions import Basket, CartItem, Mission, MissionSet
-from app.schemas.missions import BasketStatus, CartItemStatus, MissionType, Theme
-
-
-THEMES = [theme.value for theme in Theme]
+from app.models.missions import Mission, MissionSet
+from app.schemas.missions import MissionType, Theme
 
 
 def list_mission_sets(db: Session) -> list[MissionSet]:
@@ -66,77 +63,3 @@ def get_mission_set(db: Session, mission_set_id: int) -> MissionSet | None:
     if mission_set is not None:
         mission_set.missions.sort(key=lambda mission: (mission.sort_order, mission.id))
     return mission_set
-
-
-def get_or_create_user_baskets(db: Session, user_id: int) -> list[Basket]:
-    existing = {
-        basket.theme: basket
-        for basket in db.scalars(select(Basket).where(Basket.user_id == user_id)).all()
-    }
-    created = False
-    for theme in THEMES:
-        if theme not in existing:
-            basket = Basket(user_id=user_id, theme=theme, status=BasketStatus.EMPTY.value)
-            db.add(basket)
-            existing[theme] = basket
-            created = True
-    if created:
-        db.commit()
-
-    baskets = [existing[theme] for theme in THEMES]
-    for basket in baskets:
-        db.refresh(basket)
-    return baskets
-
-
-def add_cart_item(db: Session, *, user_id: int, mission_id: int) -> CartItem | None:
-    mission = db.get(Mission, mission_id)
-    if mission is None:
-        return None
-
-    stmt = (
-        select(CartItem)
-        .where(CartItem.user_id == user_id, CartItem.mission_id == mission_id)
-        .options(selectinload(CartItem.mission))
-    )
-    cart_item = db.scalar(stmt)
-    if cart_item is None:
-        cart_item = CartItem(
-            user_id=user_id,
-            mission_id=mission_id,
-            status=CartItemStatus.ADDED.value,
-        )
-        db.add(cart_item)
-
-    basket_stmt = select(Basket).where(
-        Basket.user_id == user_id,
-        Basket.theme == mission.theme,
-    )
-    basket = db.scalar(basket_stmt)
-    if basket is None:
-        basket = Basket(
-            user_id=user_id,
-            theme=mission.theme,
-            status=BasketStatus.FILLED.value,
-        )
-        db.add(basket)
-    elif basket.status == BasketStatus.EMPTY.value:
-        basket.status = BasketStatus.FILLED.value
-
-    db.commit()
-    db.refresh(cart_item)
-    return db.scalar(
-        select(CartItem)
-        .where(CartItem.id == cart_item.id)
-        .options(selectinload(CartItem.mission))
-    )
-
-
-def list_user_cart_items(db: Session, user_id: int) -> list[CartItem]:
-    stmt = (
-        select(CartItem)
-        .where(CartItem.user_id == user_id)
-        .options(selectinload(CartItem.mission))
-        .order_by(CartItem.created_at.desc(), CartItem.id.desc())
-    )
-    return list(db.scalars(stmt).all())

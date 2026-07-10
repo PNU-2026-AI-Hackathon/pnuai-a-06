@@ -1,11 +1,26 @@
 import base64
 import json
+from pathlib import Path
+import secrets
+import shutil
 from typing import Any
 
 from secrets import token_urlsafe
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
+from fastapi.responses import FileResponse
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -21,9 +36,12 @@ from app.auth.schemas import (
     EmailRegisterRequest,
     EmailVerificationResponse,
     EmailVerifyRequest,
+    KakaoTokenLoginRequest,
+    ProfileEmojiUpdateRequest,
     RefreshTokenRequest,
     TokenResponse,
     UserResponse,
+    UserUpdateRequest,
 )
 from app.core.config import Settings, get_settings
 from app.core.security import (
@@ -37,14 +55,22 @@ from app.services.users import (
     authenticate_email_user,
     get_or_create_kakao_user,
     register_email_user,
+    update_user_profile,
     verify_email_user,
 )
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth")
 
 KAKAO_AUTHORIZE_URL = "https://kauth.kakao.com/oauth/authorize"
 STATE_COOKIE_NAME = "kakao_oauth_state"
 FRONTEND_REDIRECT_COOKIE_NAME = "frontend_redirect_uri"
+PROFILE_IMAGE_DIR = Path("app/db/profile-images")
+PROFILE_IMAGE_MEDIA_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 def create_token_response(user: User) -> TokenResponse:
@@ -105,8 +131,56 @@ def append_query_params(url: str, params: dict[str, Any]) -> str:
     )
 
 
-# Kakao login is intentionally disabled while email login is used.
-# @router.get("/kakao/login")
+def get_profile_image_path(filename: str) -> Path:
+    if Path(filename).name != filename:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile image not found.",
+        )
+    return PROFILE_IMAGE_DIR / filename
+
+
+def save_profile_image(file: UploadFile, user_id: int) -> str:
+    extension = PROFILE_IMAGE_MEDIA_TYPES.get(file.content_type or "")
+    if extension is None:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Profile image must be JPEG, PNG, or WebP.",
+        )
+
+    PROFILE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"user-{user_id}-{secrets.token_urlsafe(12)}{extension}"
+    image_path = PROFILE_IMAGE_DIR / filename
+    temp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
+
+    total_size = 0
+    try:
+        with temp_path.open("wb") as output:
+            while chunk := file.file.read(1024 * 1024):
+                total_size += len(chunk)
+                if total_size > MAX_PROFILE_IMAGE_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Profile image must be 5MB or smaller.",
+                    )
+                output.write(chunk)
+
+        if total_size == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Profile image file is empty.",
+            )
+
+        shutil.move(str(temp_path), image_path)
+    finally:
+        file.file.close()
+        if temp_path.exists():
+            temp_path.unlink()
+
+    return f"/auth/profile-images/{filename}"
+
+
+@router.get("/kakao/login", tags=["kakao auth"])
 def kakao_login(
     frontend_redirect_uri: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -146,8 +220,7 @@ def kakao_login(
     return response
 
 
-# Kakao callback is intentionally disabled while email login is used.
-# @router.get("/kakao/callback", response_model=None)
+@router.get("/kakao/callback", response_model=None, tags=["kakao auth"])
 async def kakao_callback(
     response: Response,
     code: str | None = Query(default=None),
@@ -214,7 +287,18 @@ async def kakao_callback(
     return create_token_response(user)
 
 
-@router.post("/email/register", response_model=EmailVerificationResponse)
+@router.post("/kakao/token", response_model=TokenResponse, tags=["kakao auth"])
+async def login_with_kakao_access_token(
+    payload: KakaoTokenLoginRequest,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    kakao_payload = await fetch_kakao_user(payload.kakao_access_token)
+    normalized_user = normalize_kakao_user(kakao_payload)
+    user = get_or_create_kakao_user(db, **normalized_user)
+    return create_token_response(user)
+
+
+@router.post("/email/register", response_model=EmailVerificationResponse, tags=["email auth"])
 def register_with_email(
     payload: EmailRegisterRequest,
     db: Session = Depends(get_db),
@@ -242,7 +326,7 @@ def register_with_email(
     )
 
 
-@router.post("/email/verify", response_model=TokenResponse)
+@router.post("/email/verify", response_model=TokenResponse, tags=["email auth"])
 def verify_email(
     payload: EmailVerifyRequest,
     db: Session = Depends(get_db),
@@ -257,7 +341,7 @@ def verify_email(
     return create_token_response(user)
 
 
-@router.post("/email/login", response_model=TokenResponse)
+@router.post("/email/login", response_model=TokenResponse, tags=["email auth"])
 def login_with_email(
     payload: EmailLoginRequest,
     db: Session = Depends(get_db),
@@ -273,7 +357,7 @@ def login_with_email(
     return create_token_response(user)
 
 
-@router.post("/token", response_model=TokenResponse)
+@router.post("/token", response_model=TokenResponse, tags=["auth tokens"])
 async def login_with_oauth_form(
     request: Request,
     db: Session = Depends(get_db),
@@ -296,7 +380,7 @@ async def login_with_oauth_form(
     return create_token_response(user)
 
 
-@router.post("/token/refresh", response_model=TokenResponse)
+@router.post("/token/refresh", response_model=TokenResponse, tags=["auth tokens"])
 def refresh_token(
     payload: RefreshTokenRequest,
     db: Session = Depends(get_db),
@@ -320,6 +404,66 @@ def refresh_token(
     return create_token_response(user)
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=UserResponse, tags=["account"])
 def read_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.patch("/me", response_model=UserResponse, tags=["account"])
+def update_me(
+    payload: UserUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    fields_to_update = payload.model_fields_set
+    return update_user_profile(
+        db,
+        current_user,
+        nickname=payload.nickname,
+        update_nickname="nickname" in fields_to_update,
+    )
+
+
+@router.post("/me/profile-image", response_model=UserResponse, tags=["account"])
+def upload_my_profile_image(
+    image: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    profile_image_url = save_profile_image(image, current_user.id)
+    return update_user_profile(
+        db,
+        current_user,
+        profile_image_url=profile_image_url,
+        profile_emoji=None,
+        update_profile_image_url=True,
+        update_profile_emoji=True,
+    )
+
+
+@router.patch("/me/profile-emoji", response_model=UserResponse, tags=["account"])
+def update_my_profile_emoji(
+    payload: ProfileEmojiUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    return update_user_profile(
+        db,
+        current_user,
+        profile_image_url=None,
+        profile_emoji=payload.profile_emoji,
+        update_profile_image_url=True,
+        update_profile_emoji=True,
+    )
+
+
+@router.get("/profile-images/{filename}", response_class=FileResponse, tags=["account"])
+def read_profile_image(filename: str) -> FileResponse:
+    image_path = get_profile_image_path(filename)
+    if not image_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile image not found.",
+        )
+
+    return FileResponse(image_path, filename=image_path.name)
