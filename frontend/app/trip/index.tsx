@@ -149,6 +149,8 @@ export default function TripCreateScreen() {
   } = useResponsiveLayout();
   const contentTopGap = isTallScreen ? 36 : 22;
   const nextButtonPadding = isTallScreen ? 18 : 15;
+  const bottomButtonInset = Math.max(bottomActionInset - 8, 0);
+  const nextButtonOffset = 22;
   const titleSize = isCompactWidth ? 21 : 23;
   const today = useMemo(() => new Date(), []);
   const minStartDate = useMemo(() => parseDateValue(formatDateValue(today)), [today]);
@@ -320,7 +322,7 @@ export default function TripCreateScreen() {
       style={[
         styles.container,
         {
-          paddingBottom: bottomActionInset,
+          paddingBottom: bottomButtonInset,
           paddingHorizontal: horizontalPadding,
           paddingTop: topInset,
         },
@@ -493,7 +495,12 @@ export default function TripCreateScreen() {
       <Pressable
         disabled={isCreatingSchedule}
         onPress={step === 'date' ? handleDateStepNext : handleNext}
-        style={[styles.nextButton, { paddingVertical: nextButtonPadding }, step === 'people' && styles.startTripButton, isCreatingSchedule && styles.disabledButton]}>
+        style={[
+          styles.nextButton,
+          { paddingVertical: nextButtonPadding, transform: [{ translateY: nextButtonOffset }] },
+          step === 'people' && styles.startTripButton,
+          isCreatingSchedule && styles.disabledButton,
+        ]}>
         {isCreatingSchedule ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.nextButtonText, step === 'people' && styles.startTripButtonText]}>{step === 'date' ? '다음' : '여행 시작'}</Text>}
       </Pressable>
 
@@ -575,13 +582,13 @@ const styles = StyleSheet.create({
   },
 
   content: {
-    flexGrow: 1,
+    flex: 1,
   },
   stepText: {
     color: '#409CB7',
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   heading: {
     color: '#10161F',
@@ -591,10 +598,10 @@ const styles = StyleSheet.create({
   description: {
     color: '#8A9194',
     fontSize: 12,
-    marginTop: 4,
+    marginTop: 2,
   },
   calendarSection: {
-    marginTop: 42,
+    marginTop: 38,
   },
   calendarHeader: {
     alignItems: 'center',
@@ -618,15 +625,15 @@ const styles = StyleSheet.create({
   },
   monthButtonText: {
     color: '#10161F',
-    fontSize: 40,
-    lineHeight: 40,
+    fontSize: 38,
+    lineHeight: 28,
   },
   disabledMonthButtonText: {
     color: '#DDE3E6',
   },
   weekdayRow: {
     flexDirection: 'row',
-    marginTop: 26,
+    marginTop: 24,
   },
   weekdayText: {
     color: '#10161F',
@@ -637,11 +644,12 @@ const styles = StyleSheet.create({
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 10,
+    marginTop: 2,
+    minHeight: 264,
   },
   dayCell: {
     alignItems: 'center',
-    height: 46,
+    height: 44,
     justifyContent: 'center',
     width: '14.285714%',
   },

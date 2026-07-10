@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
     width: 48,
   },
   cameraItem: {
-    transform: [{ translateY: -18 }],
+    transform: [{ translateY: -12 }],
     width: 58,
   },
   iconSlot: {

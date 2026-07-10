@@ -24,7 +24,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     flexDirection: 'row',
-    height: 38,
+    height: 48,
     justifyContent: 'space-between',
   },
   backButton: {

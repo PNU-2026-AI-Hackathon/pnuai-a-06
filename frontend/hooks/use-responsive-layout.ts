@@ -19,7 +19,7 @@ export function useResponsiveLayout() {
     const bottomSafeInset = Math.max(insets.bottom, 0);
     const topSafeInset = Math.max(insets.top, 0);
     const bottomActionInset = bottomSafeInset + (isTallScreen ? 40 : 24);
-    const topInset = topSafeInset + (isTallScreen ? 40 : 28);
+    const topInset = topSafeInset + (isTallScreen ? 32 : 24);
 
     return {
       width,
