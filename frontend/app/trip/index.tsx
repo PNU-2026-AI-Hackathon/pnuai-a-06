@@ -1,17 +1,27 @@
+import * as Clipboard from 'expo-clipboard';
+import * as Linking from 'expo-linking';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { createDraftSchedule } from '@/lib/trip-schedule-api';
+import { shareKakaoInvite } from '@/lib/kakao-share';
+import { createDraftSchedule, type TripSchedule } from '@/lib/trip-schedule-api';
+import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 
-type SelectKey = 'startDate' | 'endDate' | 'people';
-type DatePart = 'year' | 'month' | 'day';
+type TripStep = 'date' | 'people';
 
 type DateParts = {
   day: number;
   month: number;
   year: number;
+};
+
+type CalendarDay = DateParts & {
+  dateValue: string;
+  isCurrentMonth: boolean;
+  isSelectable: boolean;
 };
 
 const peopleOptions = Array.from({ length: 10 }, (_, index) => {
@@ -22,6 +32,10 @@ const peopleOptions = Array.from({ length: 10 }, (_, index) => {
     value,
   };
 });
+
+const kakaoTalk = require('../../assets/svg/kakaotalk.svg');
+
+const weekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
 
 const formatDateValue = (date: Date) => {
   const year = date.getFullYear();
@@ -61,54 +75,67 @@ const addDays = (date: Date, days: number) => {
   return nextDate;
 };
 
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-
 const compareDateParts = (left: DateParts, right: DateParts) => createDateValue(left).localeCompare(createDateValue(right));
 
 const getDaysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
 
-const createNumberRange = (start: number, end: number) =>
-  Array.from({ length: end - start + 1 }, (_, index) => start + index);
 
-const getMonthOptions = (year: number, minDate: DateParts, maxDate: DateParts) => {
-  const minMonth = year === minDate.year ? minDate.month : 1;
-  const maxMonth = year === maxDate.year ? maxDate.month : 12;
+const shiftMonth = (parts: DateParts, offset: number): DateParts => {
+  const date = new Date(parts.year, parts.month - 1 + offset, 1);
 
-  return createNumberRange(minMonth, maxMonth);
+  return { day: 1, month: date.getMonth() + 1, year: date.getFullYear() };
 };
 
-const getDayOptions = (year: number, month: number, minDate: DateParts, maxDate: DateParts) => {
-  const lastDay = getDaysInMonth(year, month);
-  const minDay = year === minDate.year && month === minDate.month ? minDate.day : 1;
-  const maxDay = year === maxDate.year && month === maxDate.month ? maxDate.day : lastDay;
+const getCalendarDays = (monthParts: DateParts, minDate: DateParts, maxDate: DateParts) => {
+  const firstDay = new Date(monthParts.year, monthParts.month - 1, 1);
+  const firstWeekday = firstDay.getDay();
+  const daysInMonth = getDaysInMonth(monthParts.year, monthParts.month);
+  const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+  const firstCalendarDate = addDays(firstDay, -firstWeekday);
 
-  return createNumberRange(minDay, maxDay);
+  return Array.from({ length: totalCells }, (_, index): CalendarDay => {
+    const date = addDays(firstCalendarDate, index);
+    const parts = {
+      day: date.getDate(),
+      month: date.getMonth() + 1,
+      year: date.getFullYear(),
+    };
+    const dateValue = createDateValue(parts);
+    const isSelectable = compareDateParts(parts, minDate) >= 0 && compareDateParts(parts, maxDate) <= 0;
+
+    return {
+      ...parts,
+      dateValue,
+      isCurrentMonth: parts.month === monthParts.month && parts.year === monthParts.year,
+      isSelectable,
+    };
+  });
 };
 
-const clampDateParts = (parts: DateParts, minDate: DateParts, maxDate: DateParts): DateParts => {
-  let nextParts = { ...parts };
+const isDateInRange = (value: string, startDate: string, endDate: string) => value >= startDate && value <= endDate;
 
-  if (compareDateParts(nextParts, minDate) < 0) {
-    nextParts = { ...minDate };
+const createFallbackInviteUrl = (inviteToken: string) => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const url = new URL('/trip/invite', window.location.origin);
+    url.searchParams.set('inviteToken', inviteToken);
+
+    return url.toString();
   }
 
-  if (compareDateParts(nextParts, maxDate) > 0) {
-    nextParts = { ...maxDate };
-  }
-
-  const monthOptions = getMonthOptions(nextParts.year, minDate, maxDate);
-  const month = clamp(nextParts.month, monthOptions[0], monthOptions[monthOptions.length - 1]);
-  const dayOptions = getDayOptions(nextParts.year, month, minDate, maxDate);
-  const day = clamp(nextParts.day, dayOptions[0], dayOptions[dayOptions.length - 1]);
-
-  return { day, month, year: nextParts.year };
+  return Linking.createURL('/trip/invite', {
+    isTripleSlashed: true,
+    queryParams: {
+      inviteToken,
+    },
+  });
 };
 
-const updateDatePart = (value: string, part: DatePart, nextValue: number, minDate: DateParts, maxDate: DateParts) => {
-  const currentParts = parseDateValue(value);
-  const nextParts = clampDateParts({ ...currentParts, [part]: nextValue }, minDate, maxDate);
+const getInviteUrl = (invite: TripInvite | null) => {
+  if (!invite) {
+    return '';
+  }
 
-  return createDateValue(nextParts);
+  return invite.inviteUrl ?? createFallbackInviteUrl(invite.inviteToken);
 };
 
 export default function TripCreateScreen() {
@@ -119,81 +146,166 @@ export default function TripCreateScreen() {
     isTallScreen,
     topInset,
   } = useResponsiveLayout();
-  const contentTopGap = isTallScreen ? 44 : 26;
-  const formTopGap = isTallScreen ? 48 : 34;
-  const peopleTopGap = isTallScreen ? 34 : 24;
+  const contentTopGap = isTallScreen ? 36 : 22;
   const nextButtonPadding = isTallScreen ? 18 : 15;
-  const titleSize = isCompactWidth ? 23 : 25;
-  const valueSize = isCompactWidth ? 16 : 20;
+  const titleSize = isCompactWidth ? 21 : 23;
   const today = useMemo(() => new Date(), []);
   const minStartDate = useMemo(() => parseDateValue(formatDateValue(today)), [today]);
   const maxTripDate = useMemo(() => parseDateValue(formatDateValue(addDays(today, 179))), [today]);
   const [startDate, setStartDate] = useState(formatDateValue(today));
   const [endDate, setEndDate] = useState(formatDateValue(addDays(today, 6)));
   const [peopleCount, setPeopleCount] = useState('4');
-  const [openSelect, setOpenSelect] = useState<SelectKey | null>(null);
+  const [scheduleName, setScheduleName] = useState('우정여행');
+  const [isPeoplePickerOpen, setIsPeoplePickerOpen] = useState(false);
+  const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
+  const [draftSchedule, setDraftSchedule] = useState<TripSchedule | null>(null);
+  const [inviteData, setInviteData] = useState<TripInvite | null>(null);
+  const [isCreatingInvite, setIsCreatingInvite] = useState(false);
+  const [isSharingInvite, setIsSharingInvite] = useState(false);
+  const [step, setStep] = useState<TripStep>('date');
+  const [isSelectingEndDate, setIsSelectingEndDate] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState<DateParts>(() => {
+    const parts = parseDateValue(formatDateValue(today));
+
+    return { ...parts, day: 1 };
+  });
   const [message, setMessage] = useState('');
   const [isCreatingSchedule, setIsCreatingSchedule] = useState(false);
 
-  const startDateParts = parseDateValue(startDate);
-  const endDateParts = parseDateValue(endDate);
-  const isDateSelectOpen = openSelect === 'startDate' || openSelect === 'endDate';
-  const selectedDateParts = openSelect === 'endDate' ? endDateParts : startDateParts;
-  const minDateParts = openSelect === 'endDate' ? startDateParts : minStartDate;
-  const yearOptions = createNumberRange(minDateParts.year, maxTripDate.year);
-  const monthOptions = getMonthOptions(selectedDateParts.year, minDateParts, maxTripDate);
-  const dayOptions = getDayOptions(selectedDateParts.year, selectedDateParts.month, minDateParts, maxTripDate);
-  const selectTitle = openSelect === 'people' ? '인원수' : openSelect === 'endDate' ? '종료일' : '시작일';
-  const roomName = `B-Cut ${formatDateLabel(startDate)} 여행`;
+  const calendarDays = useMemo(() => getCalendarDays(calendarMonth, minStartDate, maxTripDate), [calendarMonth, maxTripDate, minStartDate]);
+  const canGoPrevMonth = compareDateParts(shiftMonth(calendarMonth, -1), { ...minStartDate, day: 1 }) >= 0;
+  const canGoNextMonth = compareDateParts(shiftMonth(calendarMonth, 1), { ...maxTripDate, day: 1 }) <= 0;
+  const roomName = scheduleName.trim() || `B-Cut ${formatDateLabel(startDate)} 여행`;
+  const inviteUrl = getInviteUrl(inviteData);
 
-  const closeSelect = () => setOpenSelect(null);
+  const handleDateSelect = (day: CalendarDay) => {
+    if (!day.isSelectable) {
+      return;
+    }
 
-  const handlePeopleSelect = (value: string) => {
-    setPeopleCount(value);
-    closeSelect();
+    if (!isSelectingEndDate || day.dateValue < startDate) {
+      setStartDate(day.dateValue);
+      setEndDate(day.dateValue);
+      setIsSelectingEndDate(true);
+    } else {
+      setEndDate(day.dateValue);
+      setIsSelectingEndDate(false);
+    }
+
+    setMessage('');
   };
 
-  const handleDatePartSelect = (part: DatePart, value: number) => {
-    if (openSelect === 'startDate') {
-      const nextStartDate = updateDatePart(startDate, part, value, minStartDate, maxTripDate);
-      setStartDate(nextStartDate);
-      setMessage('');
+  const handleDateStepNext = () => {
+    setStep('people');
+    setMessage('');
+  };
 
-      if (endDate < nextStartDate) {
-        setEndDate(nextStartDate);
-      }
+  const handleBack = () => {
+    if (inviteSheetVisible) {
+      setInviteSheetVisible(false);
+      return;
     }
 
-    if (openSelect === 'endDate') {
-      setEndDate(updateDatePart(endDate, part, value, startDateParts, maxTripDate));
-      setMessage('');
+    if (isPeoplePickerOpen) {
+      setIsPeoplePickerOpen(false);
+      return;
     }
+
+    if (step === 'people') {
+      setStep('date');
+      return;
+    }
+
+    router.back();
+  };
+
+  const createOrGetDraftSchedule = async () => {
+    if (draftSchedule) {
+      return draftSchedule;
+    }
+
+    const schedule = await createDraftSchedule({
+      endDate,
+      peopleCount,
+      roomName,
+      startDate,
+    });
+
+    setDraftSchedule(schedule);
+
+    return schedule;
+  };
+
+  const closeInviteSheet = () => {
+    if (isSharingInvite) {
+      return;
+    }
+
+    setInviteSheetVisible(false);
+    setMessage('');
+  };
+
+  const handleCreateInvite = async () => {
+    if (isCreatingInvite || isCreatingSchedule) {
+      return;
+    }
+
+    try {
+      setIsCreatingInvite(true);
+      setMessage('');
+      const schedule = await createOrGetDraftSchedule();
+      const nextInvite = await createTripInvite({ roomName: schedule.roomName, scheduleId: schedule.scheduleId });
+      setInviteData(nextInvite);
+      setInviteSheetVisible(true);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setIsCreatingInvite(false);
+    }
+  };
+
+  const handleShareInvite = async () => {
+    if (!inviteData || !inviteUrl || isSharingInvite) {
+      return;
+    }
+
+    const templateArgs = createKakaoInviteTemplateArgs({ ...inviteData, inviteUrl });
+
+    try {
+      setIsSharingInvite(true);
+      setMessage('');
+      await shareKakaoInvite(templateArgs);
+      setInviteSheetVisible(false);
+      setMessage('카카오톡 초대장을 열었어요.');
+    } catch (error) {
+      setMessage(`카카오 초대 실패: ${getErrorMessage(error)}`);
+    } finally {
+      setIsSharingInvite(false);
+    }
+  };
+
+  const handleCopyInviteLink = async () => {
+    if (!inviteUrl) {
+      return;
+    }
+
+    await Clipboard.setStringAsync(inviteUrl);
+    setMessage('초대 링크를 복사했어요.');
   };
 
   const handleNext = async () => {
-    if (isCreatingSchedule) {
+    if (isCreatingSchedule || isCreatingInvite) {
       return;
     }
 
     try {
       setIsCreatingSchedule(true);
       setMessage('');
-      const schedule = await createDraftSchedule({
-        endDate,
-        peopleCount,
-        roomName,
-        startDate,
-      });
+      const schedule = await createOrGetDraftSchedule();
 
-      router.push({
-        pathname: '/trip/invite',
-        params: {
-          endDate,
-          peopleCount,
-          roomName: schedule.roomName,
-          scheduleId: schedule.scheduleId,
-          startDate,
-        },
+      router.replace({
+        pathname: '/trip/active',
+        params: { scheduleId: schedule.scheduleId },
       });
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -201,31 +313,6 @@ export default function TripCreateScreen() {
       setIsCreatingSchedule(false);
     }
   };
-
-  const renderDateWheel = (title: string, part: DatePart, options: number[], selectedValue: number, suffix: string) => (
-    <View style={styles.wheelColumn}>
-      <Text style={styles.wheelLabel}>{title}</Text>
-      <ScrollView style={styles.wheelList} contentContainerStyle={styles.wheelListContent} showsVerticalScrollIndicator={false}>
-        {options.map((item) => {
-          const isSelected = item === selectedValue;
-
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: isSelected }}
-              key={item}
-              onPress={() => handleDatePartSelect(part, item)}
-              style={[styles.wheelItem, isSelected && styles.selectedWheelItem]}>
-              <Text style={[styles.wheelText, isSelected && styles.selectedWheelText]}>
-                {item}
-                {suffix}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </View>
-  );
 
   return (
     <View
@@ -238,7 +325,7 @@ export default function TripCreateScreen() {
         },
       ]}>
       <View style={styles.topBar}>
-        <Pressable accessibilityLabel="뒤로 가기" onPress={() => router.back()} style={styles.backButton}>
+        <Pressable accessibilityLabel="뒤로 가기" onPress={handleBack} style={styles.backButton}>
           <Text style={styles.backIcon}>‹</Text>
         </Pressable>
         <Text style={styles.topTitle}>여행 시작하기</Text>
@@ -253,101 +340,232 @@ export default function TripCreateScreen() {
             paddingBottom: 14,
           },
         ]}>
-        <View>
-          <Text style={[styles.heading, { fontSize: titleSize }]}>여행 기간을{`\n`}정해 주세요</Text>
-          <Text style={styles.description}>일정을 만든 다음 동행자를 초대할 수 있어요.</Text>
-        </View>
+        {step === 'date' ? (
+          <>
+            <View>
+              <Text style={styles.stepText}>1/2</Text>
+              <Text style={[styles.heading, { fontSize: titleSize }]}>여행 기간을 알려주세요</Text>
+              <Text style={styles.description}>여행 기간에 맞춰 미션이 부여돼요.</Text>
+            </View>
 
-        <View style={{ marginTop: formTopGap }}>
-          <Text style={styles.sectionLabel}>여행 기간</Text>
-          <View style={styles.dateRow}>
-            <View style={styles.dateField}>
-              <Text style={styles.fieldLabel}>시작일</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="시작일 선택"
-                onPress={() => setOpenSelect('startDate')}
-                style={styles.selectLine}>
-                <Text style={[styles.fieldValue, { fontSize: valueSize }]}>{formatDateLabel(startDate)}</Text>
-                <Text style={styles.chevron}>⌄</Text>
-              </Pressable>
-            </View>
-            <View style={styles.dateField}>
-              <Text style={styles.fieldLabel}>종료일</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="종료일 선택"
-                onPress={() => setOpenSelect('endDate')}
-                style={styles.selectLine}>
-                <Text style={[styles.fieldValue, { fontSize: valueSize }]}>{formatDateLabel(endDate)}</Text>
-                <Text style={styles.chevron}>⌄</Text>
-              </Pressable>
-            </View>
-          </View>
-          <View style={styles.noticeRow}>
-            <View style={styles.noticeIcon}>
-              <Text style={styles.noticeIconText}>!</Text>
-            </View>
-            <Text style={styles.noticeText}>여행 기간에 맞춰 미션이 부여돼요.</Text>
-          </View>
+            <View style={styles.calendarSection}>
+              <View style={styles.calendarHeader}>
+                <Text style={styles.monthTitle}>
+                  {calendarMonth.year}년 {calendarMonth.month}월
+                </Text>
+                <View style={styles.monthButtons}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="이전 달"
+                    disabled={!canGoPrevMonth}
+                    onPress={() => setCalendarMonth((current) => shiftMonth(current, -1))}
+                    style={styles.monthButton}>
+                    <Text style={[styles.monthButtonText, !canGoPrevMonth && styles.disabledMonthButtonText]}>‹</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="다음 달"
+                    disabled={!canGoNextMonth}
+                    onPress={() => setCalendarMonth((current) => shiftMonth(current, 1))}
+                    style={styles.monthButton}>
+                    <Text style={[styles.monthButtonText, !canGoNextMonth && styles.disabledMonthButtonText]}>›</Text>
+                  </Pressable>
+                </View>
+              </View>
 
-          <View style={{ marginTop: peopleTopGap }}>
-            <Text style={styles.fieldLabel}>인원수</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="인원수 선택"
-              onPress={() => setOpenSelect('people')}
-              style={styles.selectLine}>
-              <Text style={[styles.fieldValue, { fontSize: valueSize }]}>{peopleCount}명</Text>
-              <Text style={styles.chevron}>⌄</Text>
-            </Pressable>
-          </View>
-        </View>
+              <View style={styles.weekdayRow}>
+                {weekdayLabels.map((day) => (
+                  <Text key={day} style={styles.weekdayText}>
+                    {day}
+                  </Text>
+                ))}
+              </View>
+
+              <View style={styles.calendarGrid}>
+                {calendarDays.map((day, index) => {
+                  const isSelected = isDateInRange(day.dateValue, startDate, endDate);
+                  const isStart = day.dateValue === startDate;
+                  const isEnd = day.dateValue === endDate;
+                  const isSegmentStart = isSelected && isStart;
+                  const isSegmentEnd = isSelected && isEnd;
+
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: !day.isSelectable, selected: isSelected }}
+                      disabled={!day.isSelectable}
+                      key={day.dateValue}
+                      onPress={() => handleDateSelect(day)}
+                      style={styles.dayCell}>
+                      {isSelected ? (
+                        <View
+                          style={[
+                            styles.rangeFill,
+                            isSegmentStart && styles.rangeStart,
+                            isSegmentEnd && styles.rangeEnd,
+                          ]}
+                        />
+                      ) : null}
+                      <Text
+                        style={[
+                          styles.dayText,
+                          !day.isCurrentMonth && styles.outsideMonthText,
+                          !day.isSelectable && styles.disabledDayText,
+                          isSelected && styles.selectedDayText,
+                        ]}>
+                        {day.day}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </>
+        ) : (
+          <>
+            <View>
+              <Text style={styles.stepText}>2/2</Text>
+              <Text style={[styles.heading, { fontSize: titleSize }]}>어떤 여행인가요?</Text>
+              <Text style={styles.description}>카카오톡으로 친구를 추가할 수 있어요</Text>
+            </View>
+
+            <View style={styles.tripSetupSection}>
+              <View style={styles.inviteRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="친구 추가"
+                  disabled={isCreatingInvite || isCreatingSchedule}
+                  onPress={handleCreateInvite}
+                  style={styles.invitePerson}>
+                  <View style={[styles.addCircle, (isCreatingInvite || isCreatingSchedule) && styles.disabledButton]}>
+                    {isCreatingInvite ? <ActivityIndicator color="#409CB7" /> : <Text style={styles.addIcon}>+</Text>}
+                  </View>
+                  <Text style={styles.inviteLabel}>추가</Text>
+                </Pressable>
+
+                <View style={styles.invitePerson}>
+                  <View style={[styles.avatarCircle, styles.myAvatar]}>
+                    <Text style={styles.avatarInitial}>나</Text>
+                  </View>
+                  <Text style={[styles.inviteLabel, styles.myInviteLabel]}>나</Text>
+                </View>
+
+                <View style={styles.invitePerson}>
+                  <View style={[styles.avatarCircle, styles.friendAvatar]}>
+                    <Text style={styles.avatarInitial}>친</Text>
+                  </View>
+                  <Text style={styles.inviteLabel}>친구</Text>
+                </View>
+              </View>
+
+              <View style={styles.formBlock}>
+                <Text style={styles.formLabel}>일정 이름</Text>
+                <View style={styles.inputLine}>
+                  <TextInput
+                    accessibilityLabel="일정 이름"
+                    onChangeText={setScheduleName}
+                    placeholder="일정 이름"
+                    placeholderTextColor="#A3AAAE"
+                    style={styles.scheduleInput}
+                    value={scheduleName}
+                  />
+                  {scheduleName ? (
+                    <Pressable accessibilityRole="button" accessibilityLabel="일정 이름 지우기" onPress={() => setScheduleName('')} style={styles.clearButton}>
+                      <Text style={styles.clearButtonText}>×</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+
+              <View style={styles.formBlock}>
+                <Text style={styles.formLabel}>인원수</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="인원수 선택"
+                  onPress={() => setIsPeoplePickerOpen(true)}
+                  style={styles.peopleSelectLine}>
+                  <Text style={styles.peopleSelectText}>{peopleCount}명</Text>
+                  <Text style={styles.peopleSelectChevron}>⌄</Text>
+                </Pressable>
+              </View>
+            </View>
+          </>
+        )}
 
         {message ? <Text style={styles.messageText}>{message}</Text> : null}
       </View>
 
       <Pressable
         disabled={isCreatingSchedule}
-        onPress={handleNext}
-        style={[styles.nextButton, { paddingVertical: nextButtonPadding }, isCreatingSchedule && styles.disabledButton]}>
-        {isCreatingSchedule ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.nextButtonText}>동행자 추가하기</Text>}
+        onPress={step === 'date' ? handleDateStepNext : handleNext}
+        style={[styles.nextButton, { paddingVertical: nextButtonPadding }, step === 'people' && styles.startTripButton, isCreatingSchedule && styles.disabledButton]}>
+        {isCreatingSchedule ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.nextButtonText, step === 'people' && styles.startTripButtonText]}>{step === 'date' ? '다음' : '여행 시작'}</Text>}
       </Pressable>
 
-      <Modal animationType="fade" transparent visible={openSelect !== null} onRequestClose={closeSelect}>
-        <Pressable accessibilityLabel="선택 닫기" onPress={closeSelect} style={styles.modalBackdrop}>
-          <Pressable style={styles.selectPanel}>
-            <View style={styles.selectPanelHeader}>
-              <Text style={styles.selectPanelTitle}>{selectTitle}</Text>
-              <Pressable accessibilityRole="button" accessibilityLabel="선택 닫기" onPress={closeSelect}>
-                <Text style={styles.closeButton}>×</Text>
+      <Modal animationType="fade" transparent visible={isPeoplePickerOpen} onRequestClose={() => setIsPeoplePickerOpen(false)}>
+        <Pressable accessibilityLabel="인원수 선택 닫기" onPress={() => setIsPeoplePickerOpen(false)} style={styles.modalBackdrop}>
+          <Pressable style={styles.peoplePanel}>
+            <Text style={styles.peoplePanelTitle}>인원수</Text>
+            {peopleOptions.map((item) => {
+              const isSelected = item.value === peopleCount;
+
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
+                  key={item.value}
+                  onPress={() => {
+                    setPeopleCount(item.value);
+                    setIsPeoplePickerOpen(false);
+                  }}
+                  style={[styles.peoplePanelItem, isSelected && styles.selectedPeoplePanelItem]}>
+                  <Text style={[styles.peoplePanelText, isSelected && styles.selectedPeoplePanelText]}>{item.label}</Text>
+                </Pressable>
+              );
+            })}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal animationType="fade" transparent visible={inviteSheetVisible} onRequestClose={closeInviteSheet}>
+        <Pressable accessibilityLabel="초대 닫기" onPress={closeInviteSheet} style={styles.inviteModalBackdrop}>
+          <Pressable style={styles.invitePanel}>
+            <Text style={styles.invitePanelTitle}>동행자 추가하기</Text>
+            <View style={styles.inviteTopDivider} />
+
+            <View style={styles.inviteOptionsRow}>
+              <Pressable accessibilityRole="button" accessibilityLabel="카카오톡으로 초대하기" onPress={handleShareInvite} style={styles.inviteOption}>
+                <View style={[styles.kakaoInviteAvatar, isSharingInvite && styles.disabledButton]}>
+                  {isSharingInvite ? <ActivityIndicator color="#3A2D00" /> : <Image source={kakaoTalk} style={styles.kakaoInviteIcon} contentFit="contain" />}
+                </View>
+                <Text style={styles.inviteOptionText}>카카오톡</Text>
               </Pressable>
+
+              {[
+                { label: '연진이', color: '#E9EDF0' },
+                { label: '김민지', color: '#E9EDF0' },
+              ].map((item) => (
+                <Pressable accessibilityRole="button" accessibilityLabel={`${item.label}에게 카카오톡 초대하기`} key={item.label} onPress={handleShareInvite} style={styles.inviteOption}>
+                  <View style={[styles.inviteContactAvatar, { backgroundColor: item.color }]}>
+                    <View style={styles.contactKakaoBadge}>
+                      <Image source={kakaoTalk} style={styles.contactKakaoIcon} contentFit="contain" />
+                    </View>
+                  </View>
+                  <Text style={styles.inviteOptionText}>{item.label}</Text>
+                </Pressable>
+              ))}
             </View>
 
-            {isDateSelectOpen ? (
-              <View style={styles.wheelRow}>
-                {renderDateWheel('년도', 'year', yearOptions, selectedDateParts.year, '년')}
-                {renderDateWheel('월', 'month', monthOptions, selectedDateParts.month, '월')}
-                {renderDateWheel('일', 'day', dayOptions, selectedDateParts.day, '일')}
-              </View>
-            ) : (
-              <ScrollView style={styles.optionList} contentContainerStyle={styles.optionListContent}>
-                {peopleOptions.map((item) => {
-                  const isSelected = item.value === peopleCount;
+            <View style={styles.inviteMiddleDivider} />
 
-                  return (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isSelected }}
-                      key={item.value}
-                      onPress={() => handlePeopleSelect(item.value)}
-                      style={[styles.optionItem, isSelected && styles.selectedOptionItem]}>
-                      <Text style={[styles.optionText, isSelected && styles.selectedOptionText]}>{item.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            )}
+            <Pressable accessibilityRole="button" accessibilityLabel="초대 링크 복사하기" onPress={handleCopyInviteLink} style={styles.copyInviteButton}>
+              <Text style={styles.copyInviteText}>링크 복사하기</Text>
+              <View style={styles.copyIcon}>
+                <View style={styles.copyIconBack} />
+                <View style={styles.copyIconFront} />
+              </View>
+            </Pressable>
+            {message ? <Text style={styles.inviteMessageText}>{message}</Text> : null}
           </Pressable>
         </Pressable>
       </Modal>
@@ -363,7 +581,7 @@ const styles = StyleSheet.create({
   topBar: {
     alignItems: 'center',
     flexDirection: 'row',
-    height: 44,
+    height: 48,
     justifyContent: 'space-between',
   },
   backButton: {
@@ -387,72 +605,211 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
   },
+  stepText: {
+    color: '#409CB7',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
   heading: {
-    color: '#000000',
+    color: '#10161F',
     fontWeight: '600',
     lineHeight: 30,
   },
   description: {
-    color: '#AEAEAE',
+    color: '#8A9194',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  calendarSection: {
+    marginTop: 42,
+  },
+  calendarHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  monthTitle: {
+    color: '#10161F',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  monthButtons: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  monthButton: {
+    alignItems: 'center',
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
+  },
+  monthButtonText: {
+    color: '#10161F',
+    fontSize: 40,
+    lineHeight: 40,
+  },
+  disabledMonthButtonText: {
+    color: '#DDE3E6',
+  },
+  weekdayRow: {
+    flexDirection: 'row',
+    marginTop: 26,
+  },
+  weekdayText: {
+    color: '#10161F',
+    flex: 1,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 10,
+  },
+  dayCell: {
+    alignItems: 'center',
+    height: 46,
+    justifyContent: 'center',
+    width: '14.285714%',
+  },
+  rangeFill: {
+    backgroundColor: '#B3E3F1',
+    bottom: 3,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 3,
+  },
+  rangeStart: {
+    borderBottomLeftRadius: 999,
+    borderTopLeftRadius: 999,
+  },
+  rangeEnd: {
+    borderBottomRightRadius: 999,
+    borderTopRightRadius: 999,
+  },
+  dayText: {
+    color: '#8A9194',
+    fontSize: 14,
+    fontWeight: '400',
+    zIndex: 1,
+  },
+  outsideMonthText: {
+    color: '#DCE3E6',
+  },
+  disabledDayText: {
+    color: '#DCE3E6',
+  },
+  selectedDayText: {
+    color: '#10161F',
+    fontWeight: '500',
+  },
+  tripSetupSection: {
+    marginTop: 58,
+  },
+  inviteRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  invitePerson: {
+    alignItems: 'center',
+    width: 56,
+  },
+  addCircle: {
+    alignItems: 'center',
+    backgroundColor: '#E7ECEE',
+    borderRadius: 999,
+    height: 56,
+    justifyContent: 'center',
+    width: 56,
+  },
+  addIcon: {
+    color: '#409CB7',
+    fontSize: 27,
+    fontWeight: '300',
+    lineHeight: 38,
+  },
+  avatarCircle: {
+    alignItems: 'center',
+    borderRadius: 999,
+    height: 56,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    width: 56,
+  },
+  myAvatar: {
+    backgroundColor: '#E6EEF0',
+  },
+  friendAvatar: {
+    backgroundColor: '#BFD9EF',
+  },
+  avatarInitial: {
+    color: '#10161F',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  inviteLabel: {
+    color: '#8A9194',
     fontSize: 12,
     marginTop: 8,
+    textAlign: 'center',
   },
-  sectionLabel: {
-    color: '#8A9194',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 8,
+  myInviteLabel: {
+    color: '#409CB7',
   },
-  dateRow: {
-    flexDirection: 'row',
-    gap: 24,
+  formBlock: {
+    marginTop: 38,
   },
-  dateField: {
-    flex: 1,
-  },
-  fieldLabel: {
+  formLabel: {
     color: '#8A9194',
     fontSize: 12,
-    marginBottom: 10,
+    marginBottom: 4,
   },
-  selectLine: {
+  inputLine: {
     alignItems: 'center',
-    borderBottomColor: '#8A9194',
+    borderBottomColor: '#D6D6D6',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    minHeight: 42,
+  },
+  scheduleInput: {
+    color: '#8A9194',
+    flex: 1,
+    fontSize: 24,
+    fontWeight: '600',
+    padding: 0,
+  },
+  clearButton: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  clearButtonText: {
+    color: '#CECECE',
+    fontSize: 32,
+    fontWeight: '300',
+    lineHeight: 42,
+  },
+  peopleSelectLine: {
+    alignItems: 'center',
+    borderBottomColor: '#D6D6D6',
     borderBottomWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingBottom: 6,
+    minHeight: 42,
   },
-  fieldValue: {
-    color: '#000000',
+  peopleSelectText: {
+    color: '#10161F',
+    fontSize: 24,
     fontWeight: '500',
   },
-  chevron: {
-    color: '#1f1f1f',
-    fontSize: 22,
-  },
-  noticeRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 7,
-    marginTop: 8,
-  },
-  noticeIcon: {
-    alignItems: 'center',
-    backgroundColor: '#409CB7',
-    borderRadius: 999,
-    height: 20,
-    justifyContent: 'center',
-    width: 20,
-  },
-  noticeIconText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  noticeText: {
-    color: '#409CB7',
-    fontSize: 12,
+  peopleSelectChevron: {
+    color: '#10161F',
+    fontSize: 28,
+    lineHeight: 30,
   },
   messageText: {
     color: '#D06958',
@@ -463,10 +820,10 @@ const styles = StyleSheet.create({
   },
   nextButton: {
     alignItems: 'center',
-    backgroundColor: '#409CB7',
+    backgroundColor: '#6EA4BF',
     borderRadius: 999,
     justifyContent: 'center',
-    shadowColor: '#409CB7',
+    shadowColor: '#6EA4BF',
     shadowOffset: { height: 8, width: 0 },
     shadowOpacity: 0.26,
     shadowRadius: 18,
@@ -474,17 +831,24 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.65,
   },
+  startTripButton: {
+    backgroundColor: '#D6EAF5',
+    shadowOpacity: 0,
+  },
   nextButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '500',
+  },
+  startTripButtonText: {
+    color: '#6EA4BF',
   },
   modalBackdrop: {
     backgroundColor: 'rgba(0, 0, 0, 0.28)',
     flex: 1,
     justifyContent: 'flex-end',
   },
-  selectPanel: {
+  peoplePanel: {
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
@@ -492,83 +856,159 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 18,
   },
-  selectPanelHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  selectPanelTitle: {
+  peoplePanelTitle: {
     color: '#10161F',
     fontSize: 16,
     fontWeight: '700',
-  },
-  closeButton: {
-    color: '#1f1f1f',
-    fontSize: 28,
-    lineHeight: 30,
-  },
-  wheelRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 4,
-  },
-  wheelColumn: {
-    flex: 1,
-  },
-  wheelLabel: {
-    color: '#8A9194',
-    fontSize: 12,
-    fontWeight: '700',
     marginBottom: 8,
-    textAlign: 'center',
   },
-  wheelList: {
-    maxHeight: 230,
-  },
-  wheelListContent: {
-    gap: 6,
-    paddingVertical: 4,
-  },
-  wheelItem: {
+  inviteModalBackdrop: {
     alignItems: 'center',
-    borderRadius: 8,
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.24)',
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingBottom: 63,
+    paddingHorizontal: 18,
   },
-  selectedWheelItem: {
-    backgroundColor: '#E8F5F8',
+  invitePanel: {
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    overflow: 'hidden',
+    paddingBottom: 24,
+    paddingTop: 28,
+    width: '100%',
   },
-  wheelText: {
-    color: '#1f1f1f',
+  invitePanelTitle: {
+    color: '#10161F',
     fontSize: 16,
     fontWeight: '500',
+    paddingHorizontal: 32,
   },
-  selectedWheelText: {
+  inviteTopDivider: {
+    backgroundColor: '#E8ECEF',
+    height: 1,
+    marginTop: 22,
+  },
+  inviteMiddleDivider: {
+    backgroundColor: '#E8ECEF',
+    height: 1,
+  },
+  inviteOptionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingBottom: 14,
+    paddingHorizontal: 32,
+    paddingTop: 14,
+  },
+  inviteOption: {
+    alignItems: 'center',
+    gap: 7,
+    width: 66,
+  },
+  kakaoInviteAvatar: {
+    alignItems: 'center',
+    backgroundColor: '#FBE339',
+    borderRadius: 999,
+    height: 56,
+    justifyContent: 'center',
+    width: 56,
+  },
+  kakaoInviteIcon: {
+    height: 25,
+    width: 25,
+  },
+  inviteContactAvatar: {
+    borderRadius: 999,
+    height: 56,
+    position: 'relative',
+    width: 56,
+  },
+  contactKakaoBadge: {
+    alignItems: 'center',
+    backgroundColor: '#FBE339',
+    borderColor: '#ffffff',
+    borderRadius: 999,
+    borderWidth: 2,
+    bottom: 4,
+    height: 23,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: -2,
+    width: 23,
+  },
+  contactKakaoIcon: {
+    height: 14,
+    width: 14,
+  },
+  inviteOptionText: {
+    color: '#54676F',
+    fontSize: 12,
+    fontWeight: '400',
+  },
+  copyInviteButton: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: '#E9EDF0',
+    borderRadius: 16,
+    flexDirection: 'row',
+    height: 56,
+    justifyContent: 'space-between',
+    marginTop: 18,
+    paddingHorizontal: 34,
+    width: '81%',
+  },
+  copyInviteText: {
+    color: '#54676F',
+    fontSize: 12,
+    fontWeight: '400',
+  },
+  copyIcon: {
+    height: 25,
+    position: 'relative',
+    width: 25,
+  },
+  copyIconBack: {
+    borderColor: '#54676F',
+    borderRadius: 2,
+    borderWidth: 2,
+    height: 20,
+    left: 4,
+    position: 'absolute',
+    top: 5,
+    width: 16,
+  },
+  copyIconFront: {
+    backgroundColor: '#E9EDF0',
+    borderColor: '#54676F',
+    borderRadius: 2,
+    borderWidth: 2,
+    height: 20,
+    left: 10,
+    position: 'absolute',
+    top: 0,
+    width: 16,
+  },
+  inviteMessageText: {
     color: '#409CB7',
-    fontWeight: '700',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 10,
+    paddingHorizontal: 32,
   },
-  optionList: {
-    maxHeight: 330,
-  },
-  optionListContent: {
-    paddingVertical: 4,
-  },
-  optionItem: {
+  peoplePanelItem: {
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 13,
   },
-  selectedOptionItem: {
+  selectedPeoplePanelItem: {
     backgroundColor: '#E8F5F8',
   },
-  optionText: {
-    color: '#1f1f1f',
+  peoplePanelText: {
+    color: '#10161F',
     fontSize: 16,
     fontWeight: '500',
   },
-  selectedOptionText: {
+  selectedPeoplePanelText: {
     color: '#409CB7',
     fontWeight: '700',
   },
