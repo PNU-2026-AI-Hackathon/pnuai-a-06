@@ -1,49 +1,51 @@
-import { Image } from 'expo-image';
+import { Feather } from '@expo/vector-icons';
 import { router, usePathname, type Href } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const hiddenPathnames = ['/', '/login', '/auth/callback', '/trip/capture'];
 
+type FeatherIconName = React.ComponentProps<typeof Feather>['name'];
+
 const navItems: {
   accessibilityLabel: string;
   href: Href;
-  icon: number;
+  icon: FeatherIconName;
   match: string[];
   type: 'standard' | 'camera';
 }[] = [
   {
     accessibilityLabel: '홈',
     href: '/main',
-    icon: require('../assets/svg/navigation_bar/home.svg'),
+    icon: 'home',
     match: ['/main'],
     type: 'standard',
   },
   {
     accessibilityLabel: '미션',
     href: '/mission/detail',
-    icon: require('../assets/svg/navigation_bar/mission.svg'),
+    icon: 'flag',
     match: ['/mission/detail', '/mission/locked', '/map', '/map/district'],
     type: 'standard',
   },
   {
     accessibilityLabel: '카메라',
     href: '/trip/capture',
-    icon: require('../assets/svg/navigation_bar/camera.svg'),
+    icon: 'camera',
     match: ['/trip/capture'],
     type: 'camera',
   },
   {
     accessibilityLabel: '일정',
     href: '/trip/hub',
-    icon: require('../assets/svg/navigation_bar/calendar.svg'),
+    icon: 'calendar',
     match: ['/trip', '/trip/hub', '/trip/invite', '/trip/active', '/trip/after', '/trip/result'],
     type: 'standard',
   },
   {
     accessibilityLabel: '프로필',
     href: '/main/profile',
-    icon: require('../assets/svg/navigation_bar/profile.svg'),
+    icon: 'user',
     match: ['/main/profile', '/main/profile-edit'],
     type: 'standard',
   },
@@ -68,6 +70,7 @@ export function BottomNavigationBar() {
         {navItems.map((item) => {
           const isActive = isActivePath(pathname, item.match);
           const isCamera = item.type === 'camera';
+          const color = isCamera ? '#ffffff' : isActive ? '#6EA4BF' : '#8A9194';
 
           return (
             <Pressable
@@ -78,8 +81,8 @@ export function BottomNavigationBar() {
               key={item.accessibilityLabel}
               onPress={() => router.push(item.href)}
               style={[styles.item, isCamera && styles.cameraItem]}>
-              <View style={[isCamera ? styles.cameraButton : styles.iconSlot, isActive && !isCamera && styles.activeIconSlot]}>
-                <Image source={item.icon} style={isCamera ? styles.cameraIcon : styles.icon} contentFit="contain" />
+              <View style={isCamera ? styles.cameraButton : styles.iconSlot}>
+                <Feather name={item.icon} size={isCamera ? 23 : 22} color={color} />
               </View>
             </Pressable>
           );
@@ -118,13 +121,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 42,
   },
-  activeIconSlot: {
-    opacity: 0.78,
-  },
-  icon: {
-    height: 21,
-    width: 22,
-  },
   cameraButton: {
     alignItems: 'center',
     backgroundColor: '#63B5CD',
@@ -132,9 +128,5 @@ const styles = StyleSheet.create({
     height: 52,
     justifyContent: 'center',
     width: 52,
-  },
-  cameraIcon: {
-    height: 21,
-    width: 22,
   },
 });

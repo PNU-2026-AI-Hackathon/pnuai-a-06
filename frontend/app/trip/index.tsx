@@ -3,7 +3,7 @@ import * as Linking from 'expo-linking';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -302,18 +302,15 @@ export default function TripCreateScreen() {
     }
 
     try {
+      Keyboard.dismiss();
       setIsCreatingSchedule(true);
       setMessage('');
-      const schedule = await createOrGetDraftSchedule();
+      await createOrGetDraftSchedule();
 
-      router.replace({
-        pathname: '/trip/active',
-        params: { scheduleId: schedule.scheduleId },
-      });
+      router.replace('/trip/hub');
     } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
       setIsCreatingSchedule(false);
+      setMessage(getErrorMessage(error));
     }
   };
 
