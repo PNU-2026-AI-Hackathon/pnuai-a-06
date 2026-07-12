@@ -6,9 +6,9 @@ import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 
 import { ScalePressable } from '@/components/scale-pressable';
-import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 import { shareKakaoInvite } from '@/lib/kakao-share';
@@ -348,8 +348,6 @@ export default function ActiveTripScreen() {
           },
         ]}
         showsVerticalScrollIndicator={false}>
-        <TopBar title="" />
-
         <View style={styles.tripHeader}>
           <View style={styles.tripTitleBlock}>
             <Text numberOfLines={2} style={styles.tripTitle}>{schedule?.roomName ?? '여행 일정'}</Text>
@@ -360,14 +358,29 @@ export default function ActiveTripScreen() {
           </ScalePressable>
         </View>
         <Text style={styles.sectionLabel}>담긴 미션</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ marginHorizontal: -horizontalPadding }}
+          contentContainerStyle={[styles.photoStrip, { paddingHorizontal: horizontalPadding }]}>
           <ScalePressable accessibilityRole="button" accessibilityLabel="동행자 추가" disabled={!schedule || isCreatingInvite} onPress={handleCreateInvite} pressedScale={0.96} style={styles.inviteTile}>
-            {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Ionicons color="#8A9194" name="person-add" size={27} />}
-            <Text style={styles.inviteTileText}>동행자 추가</Text>
+            {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Ionicons color="#8A9194" name="person-add" size={20} />}
+            <Text style={styles.inviteTileText}>초대하기</Text>
           </ScalePressable>
           {missions.map((mission) => (
             <ScalePressable key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={styles.photoTile}>
-              {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.photoTileImage} contentFit="cover" /> : <View style={styles.photoTilePlaceholder} />}
+              <Svg height="100%" pointerEvents="none" style={styles.photoTileGradient} viewBox="0 0 82 96" width="100%">
+                <Defs>
+                  <LinearGradient id="missionTileBorderGradient" x1="1" x2="0" y1="0" y2="1">
+                    <Stop offset="0" stopColor="#CCEBF5" />
+                    <Stop offset="1" stopColor="#5FC1E0" />
+                  </LinearGradient>
+                </Defs>
+                <Rect fill="url(#missionTileBorderGradient)" height="96" rx="28" width="82" x="0" y="0" />
+              </Svg>
+              <View style={styles.photoTileInner}>
+                {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.photoTileImage} contentFit="cover" /> : <View style={styles.photoTilePlaceholder} />}
+              </View>
             </ScalePressable>
           ))}
         </ScrollView>
@@ -508,78 +521,468 @@ export default function ActiveTripScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#F4F7FA', flex: 1 },
-  scrollContent: { paddingTop: 28 },
-  tripHeader: { alignItems: 'flex-start', flexDirection: 'row', gap: 14, justifyContent: 'space-between', marginBottom: 56, marginTop: 18 },
-  tripTitleBlock: { flex: 1, minWidth: 0 },
-  tripTitle: { color: '#2D3C43', fontSize: 30, fontWeight: '700', letterSpacing: 0, lineHeight: 37 },
-  companionsText: { color: '#8A9194', flex: 1, fontSize: 14, fontWeight: '600', marginTop: 8 },
-  settingsButton: { alignItems: 'center', height: 44, justifyContent: 'center', width: 44 },
-  sectionLabel: { color: '#8A9194', fontSize: 14, fontWeight: '700', marginBottom: 16 },
-  photoStrip: { alignItems: 'center', gap: 14, paddingRight: 24 },
-  inviteTile: { alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 28, height: 104, justifyContent: 'center', shadowColor: '#000000', shadowOffset: { height: 3, width: 0 }, shadowOpacity: 0.08, shadowRadius: 10, width: 104 },
-  inviteTileText: { color: '#8A9194', fontSize: 13, fontWeight: '700', marginTop: 8 },
-  photoTile: { borderColor: '#C7E8F4', borderRadius: 30, borderWidth: 6, height: 104, overflow: 'hidden', transform: [{ rotate: '4deg' }], width: 104 },
-  photoTileImage: { height: '100%', width: '100%' },
-  photoTilePlaceholder: { backgroundColor: '#D7E2E8', height: '100%', width: '100%' },
-  inlineMessage: { color: '#409CB7', fontSize: 12, fontWeight: '700', marginTop: 10 },
-  feedPanel: { backgroundColor: '#ffffff', borderTopLeftRadius: 28, borderTopRightRadius: 28, marginHorizontal: -24, marginTop: 34, minHeight: 520, paddingBottom: 28, paddingHorizontal: 24, paddingTop: 18 },
-  dayLabel: { borderBottomColor: '#E5E9EB', borderBottomWidth: 1, color: '#8A9194', fontSize: 14, fontWeight: '700', marginHorizontal: -24, marginBottom: 28, paddingBottom: 14, paddingHorizontal: 24 },
-  feedMissionItem: { flexDirection: 'row', gap: 20, paddingBottom: 28 },
-  feedIcon: { alignItems: 'center', backgroundColor: '#6EA6BF', borderRadius: 999, height: 56, justifyContent: 'center', width: 56 },
-  feedCopy: { flex: 1 },
-  feedTitle: { color: '#10161F', fontSize: 18, fontWeight: '800' },
-  feedLocation: { color: '#8A9194', fontSize: 14, fontWeight: '600', marginTop: 6 },
-  feedPhotoRow: { gap: 14, paddingRight: 24, paddingTop: 26 },
-  feedPhoto: { backgroundColor: '#E3E9EC', borderRadius: 14, height: 224, width: 192 },
-  feedPhotoPlaceholder: { backgroundColor: '#E3E9EC', borderRadius: 14, height: 224, width: 192 },
-  stateBox: { alignItems: 'center', paddingHorizontal: 28, paddingTop: 32 },
-  stateText: { color: '#8A9194', fontSize: 13, lineHeight: 18, textAlign: 'center' },
-  emptyBox: { alignItems: 'center', paddingVertical: 34 },
-  emptyTitle: { color: '#2D3C43', fontSize: 18, fontWeight: '700' },
-  emptyText: { color: '#8A9194', fontSize: 13, lineHeight: 18, marginTop: 8, textAlign: 'center' },
-  emptyButton: { alignItems: 'center', backgroundColor: '#6EA6BF', borderRadius: 999, justifyContent: 'center', marginTop: 20, minHeight: 48, paddingHorizontal: 22 },
-  emptyButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
-  modalBackdrop: { alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.28)', flex: 1, justifyContent: 'flex-end', paddingHorizontal: 18, paddingVertical: 34 },
-  missionPanel: { backgroundColor: '#ffffff', borderRadius: 22, maxHeight: '72%', paddingHorizontal: 20, paddingVertical: 24, width: '100%' },
-  panelTitle: { color: '#10161F', fontSize: 18, fontWeight: '700', marginBottom: 16 },
-  panelMissionList: { gap: 12 },
-  panelMissionItem: { backgroundColor: '#F4F7F8', borderRadius: 16, flexDirection: 'row', gap: 12, padding: 12 },
-  panelMissionPhoto: { backgroundColor: '#E3E9EC', borderRadius: 12, height: 74, width: 74 },
-  panelMissionPhotoPlaceholder: { backgroundColor: '#E3E9EC', borderRadius: 12, height: 74, width: 74 },
-  panelMissionCopy: { flex: 1 },
-  panelMissionTitle: { color: '#10161F', fontSize: 15, fontWeight: '700' },
-  panelMissionDescription: { color: '#8A9194', fontSize: 12, lineHeight: 17, marginTop: 5 },
-  panelMissionStatus: { color: '#409CB7', fontSize: 11, fontWeight: '700', marginTop: 6 },
-  sessionPanel: { backgroundColor: '#ffffff', borderRadius: 22, maxHeight: '84%', paddingHorizontal: 20, paddingVertical: 24, width: '100%' },
-  sessionMissionTitle: { color: '#2D3C43', fontSize: 15, fontWeight: '700', marginBottom: 12 },
-  sessionInfoBox: { backgroundColor: '#F4F7F8', borderRadius: 14, gap: 5, padding: 12 },
-  sessionInfoText: { color: '#53626A', fontSize: 12, fontWeight: '600' },
-  sessionMessage: { color: '#409CB7', fontSize: 12, fontWeight: '700', lineHeight: 17, marginTop: 10 },
-  sessionLoader: { marginTop: 10 },
-  sessionActionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
-  sessionActionButton: { alignItems: 'center', backgroundColor: '#EAF5F9', borderRadius: 999, justifyContent: 'center', minHeight: 42, paddingHorizontal: 15 },
-  sessionActionText: { color: '#409CB7', fontSize: 13, fontWeight: '800' },
-  captureActionButton: { backgroundColor: '#409CB7' },
-  captureActionText: { color: '#ffffff' },
-  submissionRow: { gap: 10, marginTop: 16 },
-  submissionCard: { width: 116 },
-  submissionImage: { aspectRatio: 1, backgroundColor: '#E3E9EC', borderRadius: 14, width: '100%' },
-  submissionText: { color: '#53626A', fontSize: 12, fontWeight: '700', marginTop: 6, textAlign: 'center' },
-  inviteModalBackdrop: { alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.24)', flex: 1, justifyContent: 'flex-end', paddingHorizontal: 18 },
-  invitePanel: { backgroundColor: '#ffffff', borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: 'hidden', paddingTop: 23, width: '100%' },
-  invitePanelTitle: { color: '#10161F', fontSize: 15, fontWeight: '700', paddingHorizontal: 32 },
-  inviteOptionsRow: { flexDirection: 'row', gap: 18, paddingHorizontal: 32, paddingTop: 27 },
-  inviteOption: { alignItems: 'center', gap: 7, width: 72 },
-  kakaoInviteAvatar: { alignItems: 'center', backgroundColor: '#FBE339', borderRadius: 999, height: 62, justifyContent: 'center', width: 62 },
-  kakaoTalkText: { color: '#3A2D00', fontSize: 10, fontWeight: '800' },
-  inviteContactAvatar: { backgroundColor: '#E9EDF0', borderRadius: 999, height: 62, position: 'relative', width: 62 },
-  contactKakaoBadge: { alignItems: 'center', backgroundColor: '#FBE339', borderColor: '#ffffff', borderRadius: 999, borderWidth: 2, bottom: 1, height: 21, justifyContent: 'center', position: 'absolute', right: 0, width: 21 },
-  contactKakaoText: { color: '#3A2D00', fontSize: 5, fontWeight: '800' },
-  inviteOptionText: { color: '#72787D', fontSize: 12, fontWeight: '500' },
-  inviteDivider: { backgroundColor: '#E8ECEF', height: 1, marginTop: 20 },
-  copyInviteButton: { alignItems: 'center', alignSelf: 'center', backgroundColor: '#E9EDF0', borderRadius: 16, flexDirection: 'row', height: 64, justifyContent: 'space-between', marginTop: 18, paddingHorizontal: 28, width: '77%' },
-  copyInviteText: { color: '#626E75', fontSize: 13, fontWeight: '600' },
-  inviteMessageText: { color: '#409CB7', fontSize: 12, lineHeight: 17, marginTop: 10, paddingHorizontal: 32 },
-  disabledButton: { opacity: 0.6 },
+  container: {
+    backgroundColor: '#F4F7FA',
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 28,
+  },
+  tripHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 14,
+    justifyContent: 'space-between',
+    marginBottom: 38,
+    marginTop: 12,
+  },
+  tripTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  tripTitle: {
+    color: '#2D3C43',
+    fontSize: 24,
+    fontWeight: '600',
+    letterSpacing: 0,
+    lineHeight: 37,
+  },
+  companionsText: {
+    color: '#8A9194',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  settingsButton: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  sectionLabel: {
+    color: '#8A9194',
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 12,
+  },
+  photoStrip: {
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 24,
+  },
+  inviteTile: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    borderWidth: 3,
+    borderColor: '#E7EAEB',
+    height: 98,
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { height: 3, width: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    width: 80,
+  },
+  inviteTileText: {
+    color: '#8A9194',
+    fontSize: 10,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  photoTile: {
+    alignItems: 'center',
+    height: 96,
+    justifyContent: 'center',
+    overflow: 'visible',
+    transform: [{ rotate: '4deg' }],
+    width: 82,
+  },
+  photoTileGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  photoTileInner: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    height: 86,
+    overflow: 'hidden',
+    padding: 2,
+    width: 72,
+  },
+  photoTileImage: {
+    borderRadius: 19,
+    height: '100%',
+    width: '100%',
+  },
+  photoTilePlaceholder: {
+    backgroundColor: '#D7E2E8',
+    borderRadius: 19,
+    height: '100%',
+    width: '100%',
+  },
+  inlineMessage: {
+    color: '#409CB7',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  feedPanel: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginHorizontal: -24,
+    marginTop: 28,
+    minHeight: 520,
+    paddingBottom: 28,
+    paddingHorizontal: 24,
+    paddingTop: 18,
+  },
+  dayLabel: {
+    borderBottomColor: '#E7EAEB',
+    borderBottomWidth: 1,
+    color: '#8A9194',
+    fontSize: 12,
+    fontWeight: '500',
+    marginHorizontal: -24,
+    marginBottom: 28,
+    paddingBottom: 14,
+    paddingHorizontal: 24,
+  },
+  feedMissionItem: {
+    flexDirection: 'row',
+    gap: 15,
+    paddingBottom: 38,
+  },
+  feedIcon: {
+    alignItems: 'center',
+    backgroundColor: '#6EA6BF',
+    borderRadius: 999,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  feedCopy: {
+    flex: 1,
+  },
+  feedTitle: {
+    color: '#10161F',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  feedLocation: {
+    color: '#8A9194',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  feedPhotoRow: {
+    gap: 14,
+    paddingRight: 24,
+    paddingTop: 22,
+  },
+  feedPhoto: {
+    backgroundColor: '#E3E9EC',
+    borderRadius: 14,
+    height: 170,
+    width: 128,
+  },
+  feedPhotoPlaceholder: {
+    backgroundColor: '#E3E9EC',
+    borderRadius: 14,
+    height: 170,
+    width: 128,
+  },
+  stateBox: {
+    alignItems: 'center',
+    paddingHorizontal: 28,
+    paddingTop: 28,
+  },
+  stateText: {
+    color: '#8A9194',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  emptyBox: {
+    alignItems: 'center',
+    paddingVertical: 34,
+  },
+  emptyTitle: {
+    color: '#2D3C43',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  emptyText: {
+    color: '#8A9194',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  emptyButton: {
+    alignItems: 'center',
+    backgroundColor: '#6EA6BF',
+    borderRadius: 999,
+    justifyContent: 'center',
+    marginTop: 20,
+    minHeight: 48,
+    paddingHorizontal: 22,
+  },
+  emptyButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  modalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 18,
+    paddingVertical: 34,
+  },
+  missionPanel: {
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    maxHeight: '72%',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    width: '100%',
+  },
+  panelTitle: {
+    color: '#10161F',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  panelMissionList: {
+    gap: 12,
+  },
+  panelMissionItem: {
+    backgroundColor: '#F4F7F8',
+    borderRadius: 16,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 12,
+  },
+  panelMissionPhoto: {
+    backgroundColor: '#E3E9EC',
+    borderRadius: 12,
+    height: 74,
+    width: 74,
+  },
+  panelMissionPhotoPlaceholder: {
+    backgroundColor: '#E3E9EC',
+    borderRadius: 12,
+    height: 74,
+    width: 74,
+  },
+  panelMissionCopy: {
+    flex: 1,
+  },
+  panelMissionTitle: {
+    color: '#10161F',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  panelMissionDescription: {
+    color: '#8A9194',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 5,
+  },
+  panelMissionStatus: {
+    color: '#409CB7',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  sessionPanel: {
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    maxHeight: '84%',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    width: '100%',
+  },
+  sessionMissionTitle: {
+    color: '#2D3C43',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  sessionInfoBox: {
+    backgroundColor: '#F4F7F8',
+    borderRadius: 14,
+    gap: 5,
+    padding: 12,
+  },
+  sessionInfoText: {
+    color: '#53626A',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  sessionMessage: {
+    color: '#409CB7',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 10,
+  },
+  sessionLoader: {
+    marginTop: 10,
+  },
+  sessionActionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 16,
+  },
+  sessionActionButton: {
+    alignItems: 'center',
+    backgroundColor: '#EAF5F9',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 15,
+  },
+  sessionActionText: {
+    color: '#409CB7',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  captureActionButton: {
+    backgroundColor: '#409CB7',
+  },
+  captureActionText: {
+    color: '#ffffff',
+  },
+  submissionRow: {
+    gap: 10,
+    marginTop: 16,
+  },
+  submissionCard: {
+    width: 116,
+  },
+  submissionImage: {
+    aspectRatio: 1,
+    backgroundColor: '#E3E9EC',
+    borderRadius: 14,
+    width: '100%',
+  },
+  submissionText: {
+    color: '#53626A',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  inviteModalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.24)',
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 18,
+  },
+  invitePanel: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    overflow: 'hidden',
+    paddingTop: 23,
+    width: '100%',
+  },
+  invitePanelTitle: {
+    color: '#10161F',
+    fontSize: 15,
+    fontWeight: '700',
+    paddingHorizontal: 32,
+  },
+  inviteOptionsRow: {
+    flexDirection: 'row',
+    gap: 18,
+    paddingHorizontal: 32,
+    paddingTop: 27,
+  },
+  inviteOption: {
+    alignItems: 'center',
+    gap: 7,
+    width: 72,
+  },
+  kakaoInviteAvatar: {
+    alignItems: 'center',
+    backgroundColor: '#FBE339',
+    borderRadius: 999,
+    height: 62,
+    justifyContent: 'center',
+    width: 62,
+  },
+  kakaoTalkText: {
+    color: '#3A2D00',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  inviteContactAvatar: {
+    backgroundColor: '#E9EDF0',
+    borderRadius: 999,
+    height: 62,
+    position: 'relative',
+    width: 62,
+  },
+  contactKakaoBadge: {
+    alignItems: 'center',
+    backgroundColor: '#FBE339',
+    borderColor: '#ffffff',
+    borderRadius: 999,
+    borderWidth: 2,
+    bottom: 1,
+    height: 21,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 0,
+    width: 21,
+  },
+  contactKakaoText: {
+    color: '#3A2D00',
+    fontSize: 5,
+    fontWeight: '800',
+  },
+  inviteOptionText: {
+    color: '#72787D',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  inviteDivider: {
+    backgroundColor: '#E8ECEF',
+    height: 1,
+    marginTop: 20,
+  },
+  copyInviteButton: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: '#E9EDF0',
+    borderRadius: 16,
+    flexDirection: 'row',
+    height: 64,
+    justifyContent: 'space-between',
+    marginTop: 18,
+    paddingHorizontal: 28,
+    width: '77%',
+  },
+  copyInviteText: {
+    color: '#626E75',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  inviteMessageText: {
+    color: '#409CB7',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 10,
+    paddingHorizontal: 32,
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
 });
