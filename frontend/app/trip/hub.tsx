@@ -1,8 +1,9 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { ScalePressable } from '@/components/scale-pressable';
 import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
@@ -116,13 +117,13 @@ export default function TripHubScreen() {
           <Text style={styles.description}>새 여행을 만들고 진행 중인 일정을 확인해요.</Text>
         </View>
 
-        <Pressable accessibilityRole="button" onPress={() => router.push('/trip')} style={styles.createButton}>
+        <ScalePressable accessibilityRole="button" onPress={() => router.push('/trip')} pressedScale={0.97} style={styles.createButton}>
           <View>
             <Text style={styles.createButtonTitle}>새 일정 만들기</Text>
             <Text style={styles.createButtonSubtitle}>여행 날짜와 동행자를 설정해요</Text>
           </View>
           <Text style={styles.createButtonIcon}>+</Text>
-        </Pressable>
+        </ScalePressable>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>진행 중 여행</Text>
@@ -136,7 +137,7 @@ export default function TripHubScreen() {
 
               return (
                 <View key={schedule.scheduleId} style={styles.scheduleItem}>
-                  <Pressable accessibilityRole="button" onPress={() => openSchedule(schedule)} style={styles.scheduleOpenArea}>
+                  <ScalePressable accessibilityRole="button" onPress={() => openSchedule(schedule)} pressedScale={0.98} style={styles.scheduleOpenArea}>
                     <View style={styles.scheduleThumb}>
                       <Text style={styles.scheduleThumbText}>{schedule.roomName.slice(0, 1)}</Text>
                     </View>
@@ -148,15 +149,16 @@ export default function TripHubScreen() {
                         {formatDateRange(schedule)} · {getPeopleText(schedule)}
                       </Text>
                     </View>
-                  </Pressable>
-                  <Pressable
+                  </ScalePressable>
+                  <ScalePressable
                     accessibilityRole="button"
                     accessibilityLabel={`${schedule.roomName} 삭제`}
                     disabled={isDeleting}
                     onPress={() => confirmDeleteSchedule(schedule)}
+                    pressedScale={0.92}
                     style={styles.deleteButton}>
                     {isDeleting ? <ActivityIndicator color="#D06958" /> : <Text style={styles.deleteButtonText}>삭제</Text>}
-                  </Pressable>
+                  </ScalePressable>
                 </View>
               );
             })}

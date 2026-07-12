@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { ScalePressable } from '@/components/scale-pressable';
 import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { shareKakaoInvite } from '@/lib/kakao-share';
@@ -486,17 +487,20 @@ export default function TripCreateScreen() {
         {message ? <Text style={styles.messageText}>{message}</Text> : null}
       </View>
 
-      <Pressable
-        disabled={isCreatingSchedule}
-        onPress={step === 'date' ? handleDateStepNext : handleNext}
-        style={[
-          styles.nextButton,
-          { paddingVertical: nextButtonPadding, transform: [{ translateY: nextButtonOffset }] },
-          step === 'people' && styles.startTripButton,
-          isCreatingSchedule && styles.disabledButton,
-        ]}>
-        {isCreatingSchedule ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.nextButtonText, step === 'people' && styles.startTripButtonText]}>{step === 'date' ? '다음' : '여행 시작'}</Text>}
-      </Pressable>
+      <View style={{ transform: [{ translateY: nextButtonOffset }] }}>
+        <ScalePressable
+          disabled={isCreatingSchedule}
+          onPress={step === 'date' ? handleDateStepNext : handleNext}
+          pressedScale={0.97}
+          style={[
+            styles.nextButton,
+            { paddingVertical: nextButtonPadding },
+            step === 'people' && styles.startTripButton,
+            isCreatingSchedule && styles.disabledButton,
+          ]}>
+          {isCreatingSchedule ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.nextButtonText, step === 'people' && styles.startTripButtonText]}>{step === 'date' ? '다음' : '여행 시작'}</Text>}
+        </ScalePressable>
+      </View>
 
       <Modal animationType="fade" transparent visible={isPeoplePickerOpen} onRequestClose={() => setIsPeoplePickerOpen(false)}>
         <Pressable accessibilityLabel="인원수 선택 닫기" onPress={() => setIsPeoplePickerOpen(false)} style={styles.modalBackdrop}>
