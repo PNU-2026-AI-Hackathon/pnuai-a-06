@@ -1,7 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
-import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -11,8 +10,6 @@ import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { shareKakaoInvite } from '@/lib/kakao-share';
 import { acceptTripInvite, createKakaoInviteTemplateArgs, createTripInvite, previewTripInvite, type TripInvite } from '@/lib/trip-invite-api';
-
-const kakaoTalk = require('../../assets/svg/kakaotalk.svg');
 
 const companions = [
   { label: '나', color: '#b9d7ee' },
@@ -365,7 +362,7 @@ export default function TripInviteScreen() {
             <View style={styles.inviteOptionsRow}>
               <Pressable accessibilityRole="button" accessibilityLabel="카카오톡으로 초대하기" onPress={handleShareInvite} style={styles.inviteOption}>
                 <View style={[styles.kakaoInviteAvatar, isSharingInvite && styles.disabledButton]}>
-                  {isSharingInvite ? <ActivityIndicator color="#3A2D00" /> : <Image source={kakaoTalk} style={styles.kakaoInviteIcon} contentFit="contain" />}
+                  {isSharingInvite ? <ActivityIndicator color="#3A2D00" /> : <Text style={styles.kakaoTalkText}>TALK</Text>}
                 </View>
                 <Text style={styles.inviteOptionText}>카카오톡</Text>
               </Pressable>
@@ -373,7 +370,7 @@ export default function TripInviteScreen() {
                 <Pressable accessibilityRole="button" accessibilityLabel={`${item.label}에게 초대 공유`} key={`invite-${item.label}`} onPress={handleShareInvite} style={styles.inviteOption}>
                   <View style={[styles.inviteContactAvatar, { backgroundColor: item.color }]}>
                     <View style={styles.contactKakaoBadge}>
-                      <Image source={kakaoTalk} style={styles.contactKakaoIcon} contentFit="contain" />
+                      <Text style={styles.contactKakaoText}>TALK</Text>
                     </View>
                   </View>
                   <Text style={styles.inviteOptionText}>{item.label}</Text>
@@ -529,9 +526,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 62,
   },
-  kakaoInviteIcon: {
-    height: 28,
-    width: 28,
+  kakaoTalkText: {
+    color: '#3A2D00',
+    fontSize: 10,
+    fontWeight: '800',
   },
   inviteContactAvatar: {
     borderRadius: 999,
@@ -552,9 +550,10 @@ const styles = StyleSheet.create({
     right: 0,
     width: 21,
   },
-  contactKakaoIcon: {
-    height: 13,
-    width: 13,
+  contactKakaoText: {
+    color: '#3A2D00',
+    fontSize: 5,
+    fontWeight: '800',
   },
   inviteOptionText: {
     color: '#72787D',

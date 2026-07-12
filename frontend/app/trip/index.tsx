@@ -1,6 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
-import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -8,7 +7,7 @@ import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, StyleSheet, Te
 import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { shareKakaoInvite } from '@/lib/kakao-share';
-import { createDraftSchedule, type TripSchedule } from '@/lib/trip-schedule-api';
+import { createDraftSchedule, updateDraftSchedule, type TripSchedule } from '@/lib/trip-schedule-api';
 import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 
 type TripStep = 'date' | 'people';
@@ -33,8 +32,6 @@ const peopleOptions = Array.from({ length: 10 }, (_, index) => {
     value,
   };
 });
-
-const kakaoTalk = require('../../assets/svg/kakaotalk.svg');
 
 const weekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -222,17 +219,17 @@ export default function TripCreateScreen() {
     router.back();
   };
 
-  const createOrGetDraftSchedule = async () => {
-    if (draftSchedule) {
-      return draftSchedule;
-    }
-
-    const schedule = await createDraftSchedule({
+  const createOrSyncDraftSchedule = async () => {
+    const input = {
       endDate,
       peopleCount,
       roomName,
       startDate,
-    });
+    };
+
+    const schedule = draftSchedule
+      ? await updateDraftSchedule({ ...input, scheduleId: draftSchedule.scheduleId })
+      : await createDraftSchedule(input);
 
     setDraftSchedule(schedule);
 
@@ -256,7 +253,7 @@ export default function TripCreateScreen() {
     try {
       setIsCreatingInvite(true);
       setMessage('');
-      const schedule = await createOrGetDraftSchedule();
+      const schedule = await createOrSyncDraftSchedule();
       const nextInvite = await createTripInvite({ roomName: schedule.roomName, scheduleId: schedule.scheduleId });
       setInviteData(nextInvite);
       setInviteSheetVisible(true);
@@ -305,7 +302,7 @@ export default function TripCreateScreen() {
       Keyboard.dismiss();
       setIsCreatingSchedule(true);
       setMessage('');
-      await createOrGetDraftSchedule();
+      await createOrSyncDraftSchedule();
 
       router.replace('/trip/hub');
     } catch (error) {
@@ -535,7 +532,7 @@ export default function TripCreateScreen() {
             <View style={styles.inviteOptionsRow}>
               <Pressable accessibilityRole="button" accessibilityLabel="카카오톡으로 초대하기" onPress={handleShareInvite} style={styles.inviteOption}>
                 <View style={[styles.kakaoInviteAvatar, isSharingInvite && styles.disabledButton]}>
-                  {isSharingInvite ? <ActivityIndicator color="#3A2D00" /> : <Image source={kakaoTalk} style={styles.kakaoInviteIcon} contentFit="contain" />}
+                  {isSharingInvite ? <ActivityIndicator color="#3A2D00" /> : <Text style={styles.kakaoTalkText}>TALK</Text>}
                 </View>
                 <Text style={styles.inviteOptionText}>카카오톡</Text>
               </Pressable>
@@ -547,7 +544,7 @@ export default function TripCreateScreen() {
                 <Pressable accessibilityRole="button" accessibilityLabel={`${item.label}에게 카카오톡 초대하기`} key={item.label} onPress={handleShareInvite} style={styles.inviteOption}>
                   <View style={[styles.inviteContactAvatar, { backgroundColor: item.color }]}>
                     <View style={styles.contactKakaoBadge}>
-                      <Image source={kakaoTalk} style={styles.contactKakaoIcon} contentFit="contain" />
+                      <Text style={styles.contactKakaoText}>TALK</Text>
                     </View>
                   </View>
                   <Text style={styles.inviteOptionText}>{item.label}</Text>
@@ -890,9 +887,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 56,
   },
-  kakaoInviteIcon: {
-    height: 25,
-    width: 25,
+  kakaoTalkText: {
+    color: '#3A2D00',
+    fontSize: 9,
+    fontWeight: '800',
   },
   inviteContactAvatar: {
     borderRadius: 999,
@@ -913,9 +911,10 @@ const styles = StyleSheet.create({
     right: -2,
     width: 23,
   },
-  contactKakaoIcon: {
-    height: 14,
-    width: 14,
+  contactKakaoText: {
+    color: '#3A2D00',
+    fontSize: 5,
+    fontWeight: '800',
   },
   inviteOptionText: {
     color: '#54676F',

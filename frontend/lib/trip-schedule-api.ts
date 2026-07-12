@@ -1,11 +1,17 @@
 import { API_BASE_URL } from '@/lib/auth-api';
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 
-type CreateScheduleInput = {
+type ScheduleInput = {
   endDate: string;
   peopleCount: string;
   roomName: string;
   startDate: string;
+};
+
+type CreateScheduleInput = ScheduleInput;
+
+type UpdateScheduleInput = ScheduleInput & {
+  scheduleId: string;
 };
 
 type ApiSchedule = {
@@ -87,7 +93,7 @@ function getAccessToken() {
   return token;
 }
 
-async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' | 'DELETE', body?: Record<string, string | number>) {
+async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: Record<string, string | number>) {
   const token = getAccessToken();
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -99,7 +105,7 @@ async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' 
     method,
   });
 
-  const fallbackMessage = method === 'GET' ? '여행 일정을 불러오지 못했습니다.' : method === 'DELETE' ? '여행 일정 삭제에 실패했습니다.' : '여행 일정 생성에 실패했습니다.';
+  const fallbackMessage = method === 'GET' ? '여행 일정을 불러오지 못했습니다.' : method === 'DELETE' ? '여행 일정 삭제에 실패했습니다.' : method === 'PATCH' ? '여행 일정 수정에 실패했습니다.' : '여행 일정 생성에 실패했습니다.';
 
   return readJson<T>(res, fallbackMessage);
 }
@@ -201,6 +207,24 @@ export async function createDraftSchedule(input: CreateScheduleInput) {
   return schedule;
 }
 
+export async function updateDraftSchedule(input: UpdateScheduleInput) {
+  const data = await requestAuthenticatedJson<ApiSchedule>(`/schedules/${encodeURIComponent(input.scheduleId)}`, 'PATCH', {
+    end_date: input.endDate,
+    start_date: input.startDate,
+    title: input.roomName,
+  });
+  const normalizedSchedule = normalizeSchedule(data, input.roomName);
+  const schedule: TripSchedule = {
+    ...normalizedSchedule,
+    endDate: normalizedSchedule.endDate ?? input.endDate,
+    peopleCount: normalizedSchedule.peopleCount ?? input.peopleCount,
+    startDate: normalizedSchedule.startDate ?? input.startDate,
+  };
+
+  cacheTripSchedule(schedule);
+
+  return schedule;
+}
 export async function deleteTripSchedule(scheduleId: string) {
   await requestAuthenticatedJson<Record<string, never>>(`/schedules/${encodeURIComponent(scheduleId)}`, 'DELETE');
   removeCachedTripSchedule(scheduleId);
