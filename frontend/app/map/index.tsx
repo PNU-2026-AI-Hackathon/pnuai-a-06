@@ -423,7 +423,7 @@ export default function BusanMapScreen() {
       {isMissionDeckOpen ? (
         <View style={styles.overlay}>
           <Text style={styles.overlayTitle}>넘겨서 다음 미션 보기</Text>
-          <View style={[styles.frameDeck, { height: frameHeight + 20, width: frameWidth + 72 }]}>
+          <View style={[styles.frameDeck, { height: frameHeight, width: frameWidth + 72 }]}>
             {shouldShowPreviousFrame ? (
               <Image
                 source={getMissionLevel(previousMission).frame}
@@ -858,8 +858,9 @@ const styles = StyleSheet.create({
   pagination: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 42,
+    marginBottom: 12,
     marginTop: 10,
+    transform: [{ translateY: -32 }],
   },
   pageDot: {
     backgroundColor: 'rgba(255, 255, 255, 0.62)',

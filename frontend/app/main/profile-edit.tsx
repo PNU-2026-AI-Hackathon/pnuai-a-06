@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 
+import { BOTTOM_NAVIGATION_RESERVED_HEIGHT } from '@/components/bottom-navigation-bar';
 import { ProfileAvatar, profileIconOptions, type ProfileIconKey } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -259,7 +260,7 @@ export default function ProfileEditScreen() {
         style={[
           styles.container,
           {
-            paddingBottom: bottomActionInset,
+            paddingBottom: bottomActionInset - 48,
             paddingHorizontal: horizontalPadding,
             paddingTop: topInset,
           },
@@ -328,7 +329,8 @@ export default function ProfileEditScreen() {
             style={[
               styles.profileSheet,
               {
-                paddingBottom: bottomActionInset - 50,
+                marginBottom: BOTTOM_NAVIGATION_RESERVED_HEIGHT - 42,
+                paddingBottom: Math.max(bottomActionInset - 20, 18),
                 transform: [{ translateY: sheetTranslateY }],
               },
             ]}>

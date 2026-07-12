@@ -148,7 +148,7 @@ export default function TripCreateScreen() {
   const contentTopGap = isTallScreen ? 36 : 22;
   const nextButtonPadding = isTallScreen ? 18 : 15;
   const bottomButtonInset = Math.max(bottomActionInset - 8, 0);
-  const nextButtonOffset = 22;
+  const nextButtonOffset = 32;
   const titleSize = isCompactWidth ? 21 : 23;
   const today = useMemo(() => new Date(), []);
   const minStartDate = useMemo(() => parseDateValue(formatDateValue(today)), [today]);
