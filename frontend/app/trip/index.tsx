@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -8,7 +8,7 @@ import { ScalePressable } from '@/components/scale-pressable';
 import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { shareKakaoInvite } from '@/lib/kakao-share';
-import { createDraftSchedule, updateDraftSchedule, type TripSchedule } from '@/lib/trip-schedule-api';
+import { addMissionToSchedule, createDraftSchedule, updateDraftSchedule, type TripSchedule } from '@/lib/trip-schedule-api';
 import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 
 type TripStep = 'date' | 'people';
@@ -137,7 +137,13 @@ const getInviteUrl = (invite: TripInvite | null) => {
   return invite.inviteUrl ?? createFallbackInviteUrl(invite.inviteToken);
 };
 
+function getParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 export default function TripCreateScreen() {
+  const params = useLocalSearchParams<{ pendingMissionId?: string | string[] }>();
+  const pendingMissionId = getParamValue(params.pendingMissionId);
   const {
     bottomActionInset,
     horizontalPadding,
@@ -303,7 +309,13 @@ export default function TripCreateScreen() {
       Keyboard.dismiss();
       setIsCreatingSchedule(true);
       setMessage('');
-      await createOrSyncDraftSchedule();
+      const schedule = await createOrSyncDraftSchedule();
+
+      if (pendingMissionId) {
+        await addMissionToSchedule(schedule.scheduleId, pendingMissionId);
+        router.replace({ pathname: '/trip/active', params: { scheduleId: schedule.scheduleId } });
+        return;
+      }
 
       router.replace('/trip/hub');
     } catch (error) {

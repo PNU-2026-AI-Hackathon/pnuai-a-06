@@ -14,6 +14,28 @@ type UpdateScheduleInput = ScheduleInput & {
   scheduleId: string;
 };
 
+type ApiMission = {
+  code?: string;
+  description?: string;
+  district_code?: string;
+  district_label?: string;
+  id?: string | number;
+  place_label?: string | null;
+  target_photo_url?: string | null;
+  theme?: string;
+  title?: string;
+  type?: string;
+};
+
+type ApiScheduleMission = {
+  created_at?: string;
+  id?: string | number;
+  mission?: ApiMission;
+  mission_id?: string | number;
+  status?: string;
+  updated_at?: string;
+};
+
 type ApiSchedule = {
   companion_count?: string | number;
   companions?: unknown[];
@@ -23,6 +45,7 @@ type ApiSchedule = {
   end_date?: string;
   id?: string | number;
   member_count?: string | number;
+  missions?: ApiScheduleMission[];
   participant_count?: string | number;
   peopleCount?: string | number;
   people_count?: string | number;
@@ -43,9 +66,24 @@ type ApiScheduleList = ApiSchedule[] | {
   schedules?: ApiSchedule[];
 };
 
+export type TripScheduleMission = {
+  description: string;
+  districtLabel?: string | null;
+  missionCode?: string | null;
+  missionId: string;
+  photoUrl?: string | null;
+  placeLabel?: string | null;
+  scheduleMissionId: string;
+  status?: string;
+  theme?: string | null;
+  title: string;
+  type?: string | null;
+};
+
 export type TripSchedule = {
   createdAt?: string;
   endDate?: string;
+  missions: TripScheduleMission[];
   peopleCount?: string;
   roomName: string;
   scheduleId: string;
@@ -110,6 +148,41 @@ async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' 
   return readJson<T>(res, fallbackMessage);
 }
 
+function normalizePhotoUrl(photoUrl: string | null | undefined) {
+  if (!photoUrl) {
+    return null;
+  }
+
+  return photoUrl.startsWith('http') ? photoUrl : `${API_BASE_URL}${photoUrl}`;
+}
+
+function normalizeScheduleMission(data: ApiScheduleMission): TripScheduleMission {
+  const scheduleMissionId = data.id;
+  const missionId = data.mission_id ?? data.mission?.id;
+
+  if (scheduleMissionId === undefined || scheduleMissionId === null || scheduleMissionId === '') {
+    throw new Error('스케줄 미션 응답에 id가 없습니다.');
+  }
+
+  if (missionId === undefined || missionId === null || missionId === '') {
+    throw new Error('스케줄 미션 응답에 mission_id가 없습니다.');
+  }
+
+  return {
+    description: data.mission?.description ?? '미션 설명이 아직 없습니다.',
+    districtLabel: data.mission?.district_label,
+    missionCode: data.mission?.code ?? null,
+    missionId: String(missionId),
+    photoUrl: normalizePhotoUrl(data.mission?.target_photo_url),
+    placeLabel: data.mission?.place_label,
+    scheduleMissionId: String(scheduleMissionId),
+    status: data.status,
+    theme: data.mission?.theme ?? null,
+    title: data.mission?.title ?? '미션명',
+    type: data.mission?.type ?? null,
+  };
+}
+
 function normalizeSchedule(data: ApiSchedule, fallbackRoomName: string): TripSchedule {
   const scheduleId = data.schedule_id ?? data.id ?? data.room_id;
 
@@ -123,6 +196,7 @@ function normalizeSchedule(data: ApiSchedule, fallbackRoomName: string): TripSch
   return {
     createdAt: data.created_at ?? data.createdAt,
     endDate: data.end_date ?? data.endDate,
+    missions: Array.isArray(data.missions) ? data.missions.map(normalizeScheduleMission) : [],
     peopleCount: peopleCount === undefined || peopleCount === null ? undefined : String(peopleCount),
     roomName: data.schedule_name ?? data.room_name ?? data.title ?? fallbackRoomName,
     scheduleId: String(scheduleId),
@@ -161,7 +235,7 @@ export function getCachedTripSchedules() {
 
   try {
     const parsed = JSON.parse(raw) as TripSchedule[];
-    return Array.isArray(parsed) ? sortTripSchedules(parsed.filter((item) => item.scheduleId && item.roomName)) : [];
+    return Array.isArray(parsed) ? sortTripSchedules(parsed.filter((item) => item.scheduleId && item.roomName).map((item) => ({ ...item, missions: item.missions ?? [] }))) : [];
   } catch {
     return [];
   }
@@ -186,6 +260,14 @@ export async function listTripSchedules() {
   saveScheduleCache(schedules);
 
   return schedules;
+}
+
+export async function getTripSchedule(scheduleId: string) {
+  const data = await requestAuthenticatedJson<ApiSchedule>(`/schedules/${encodeURIComponent(scheduleId)}`, 'GET');
+  const schedule = normalizeSchedule(data, '이름 없는 여행');
+  cacheTripSchedule(schedule);
+
+  return schedule;
 }
 
 export async function createDraftSchedule(input: CreateScheduleInput) {
@@ -225,6 +307,31 @@ export async function updateDraftSchedule(input: UpdateScheduleInput) {
 
   return schedule;
 }
+
+export async function addMissionToSchedule(scheduleId: string, missionId: string) {
+  const numericMissionId = Number(missionId);
+  const data = await requestAuthenticatedJson<ApiScheduleMission>(`/schedules/${encodeURIComponent(scheduleId)}/missions`, 'POST', {
+    mission_id: Number.isFinite(numericMissionId) ? numericMissionId : missionId,
+  });
+
+  const scheduleMission = normalizeScheduleMission(data);
+
+  try {
+    await getTripSchedule(scheduleId);
+  } catch {
+    const cachedSchedule = getCachedTripSchedules().find((schedule) => schedule.scheduleId === scheduleId);
+
+    if (cachedSchedule) {
+      cacheTripSchedule({
+        ...cachedSchedule,
+        missions: [scheduleMission, ...cachedSchedule.missions.filter((mission) => mission.scheduleMissionId !== scheduleMission.scheduleMissionId)],
+      });
+    }
+  }
+
+  return scheduleMission;
+}
+
 export async function deleteTripSchedule(scheduleId: string) {
   await requestAuthenticatedJson<Record<string, never>>(`/schedules/${encodeURIComponent(scheduleId)}`, 'DELETE');
   removeCachedTripSchedule(scheduleId);
