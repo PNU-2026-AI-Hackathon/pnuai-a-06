@@ -4,9 +4,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 type TopBarProps = {
   onBack?: () => void;
   title: string;
+  titleNumberOfLines?: number;
 };
 
-export function TopBar({ onBack, title }: TopBarProps) {
+export function TopBar({ onBack, title, titleNumberOfLines = 1 }: TopBarProps) {
   const handleBack = onBack ?? (() => router.back());
 
   return (
@@ -14,7 +15,7 @@ export function TopBar({ onBack, title }: TopBarProps) {
       <Pressable accessibilityLabel="뒤로 가기" onPress={handleBack} style={styles.backButton}>
         <Text style={styles.backIcon}>‹</Text>
       </Pressable>
-      <Text style={styles.title}>{title}</Text>
+      <Text numberOfLines={titleNumberOfLines} style={styles.title}>{title}</Text>
       <View style={styles.spacer} />
     </View>
   );
@@ -39,8 +40,11 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#10161F',
+    flex: 1,
     fontSize: 16,
     fontWeight: '600',
+    lineHeight: 22,
+    textAlign: 'center',
   },
   spacer: {
     width: 48,

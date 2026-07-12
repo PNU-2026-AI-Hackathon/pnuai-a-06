@@ -1,13 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions, type CameraType, type FlashMode } from 'expo-camera';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { revealMissionSession, uploadMissionSessionPhoto } from '@/lib/mission-session-api';
 
 const missionFrame = require('../../assets/svg/mission_level/standard_frame.svg');
 const MISSION_CARD_SOURCE_WIDTH = 164;
@@ -16,7 +17,35 @@ const MISSION_CARD_WIDTH = 350;
 const MISSION_CARD_HEIGHT = Math.round(MISSION_CARD_WIDTH * (MISSION_CARD_SOURCE_HEIGHT / MISSION_CARD_SOURCE_WIDTH));
 const MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT = 66;
 
+function getParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function runWithNetworkRetry<T>(task: () => Promise<T>, retries = 1): Promise<T> {
+  try {
+    return await task();
+  } catch (error) {
+    const isNetworkFailure = error instanceof TypeError || (error instanceof Error && error.message.includes('Network request failed'));
+
+    if (!isNetworkFailure || retries <= 0) {
+      throw error;
+    }
+
+    await wait(700);
+    return runWithNetworkRetry(task, retries - 1);
+  }
+}
+
 export default function MissionCaptureScreen() {
+  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const scheduleId = getParamValue(params.scheduleId);
+  const sessionId = getParamValue(params.sessionId);
   const cameraRef = useRef<CameraView | null>(null);
   const missionCardTranslateY = useRef(new Animated.Value(0)).current;
   const missionCardOffsetY = useRef(0);
@@ -27,6 +56,9 @@ export default function MissionCaptureScreen() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
   const [isMissionComplete, setIsMissionComplete] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState('');
+  const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
   const missionCardCollapsedBottom = bottomSafeInset - (MISSION_CARD_HEIGHT - MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT);
   const missionCardExpandedY = missionCardCollapsedBottom - height / 2 + MISSION_CARD_HEIGHT / 2;
   const backdropOpacity = missionCardTranslateY.interpolate({
@@ -36,6 +68,32 @@ export default function MissionCaptureScreen() {
   });
 
   const hasPermission = permission?.granted;
+
+  useEffect(() => {
+    if (returnCountdown === null) {
+      return;
+    }
+
+    if (returnCountdown <= 0) {
+      if (scheduleId) {
+        router.replace({
+          pathname: '/trip/active',
+          params: { scheduleId },
+        });
+      } else {
+        router.back();
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setReturnCountdown((currentValue) => (currentValue === null ? null : currentValue - 1));
+    }, 1000);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [returnCountdown, scheduleId]);
 
   const animateMissionCard = useCallback(
     (toValue: number) => {
@@ -104,10 +162,34 @@ export default function MissionCaptureScreen() {
   const handleRetake = () => {
     setCapturedPhotoUri(null);
     setIsMissionComplete(false);
+    setUploadMessage('');
+    setReturnCountdown(null);
   };
 
-  const handleComplete = () => {
-    setIsMissionComplete(true);
+  const handleComplete = async () => {
+    if (!capturedPhotoUri || isUploading) {
+      return;
+    }
+
+    if (!sessionId) {
+      setIsMissionComplete(true);
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      setUploadMessage('');
+      setReturnCountdown(null);
+      await runWithNetworkRetry(() => uploadMissionSessionPhoto(sessionId, capturedPhotoUri), 1);
+      await runWithNetworkRetry(() => revealMissionSession(sessionId), 1);
+      setIsMissionComplete(true);
+      setUploadMessage('사진을 업로드했어요.');
+      setReturnCountdown(3);
+    } catch (error) {
+      setUploadMessage(error instanceof Error ? error.message : '사진 업로드에 실패했어요.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   if (!permission) {
@@ -143,6 +225,8 @@ export default function MissionCaptureScreen() {
         <StatusBar style="dark" />
         <View style={styles.reviewHeader}>
           {isMissionComplete ? <Text style={styles.completeTitle}>미션 완료!</Text> : null}
+          {uploadMessage ? <Text style={styles.uploadMessage}>{uploadMessage}</Text> : null}
+          {returnCountdown !== null ? <Text style={styles.countdownText}>{returnCountdown}초 후 여행 화면으로 돌아가요</Text> : null}
         </View>
 
         <View style={styles.previewWrap}>
@@ -150,11 +234,11 @@ export default function MissionCaptureScreen() {
         </View>
 
         <View style={styles.reviewActions}>
-          <ScalePressable accessibilityLabel="다시 찍기" onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton]}>
+          <ScalePressable accessibilityLabel="다시 찍기" disabled={isMissionComplete || isUploading} onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
             <Text style={[styles.reviewButtonText, styles.retakeButtonText]}>다시 찍기</Text>
           </ScalePressable>
-          <ScalePressable accessibilityLabel="완료하기" onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton]}>
-            <Text style={[styles.reviewButtonText, styles.completeButtonText]}>완료하기</Text>
+          <ScalePressable accessibilityLabel="완료하기" disabled={isMissionComplete || isUploading} onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
+            {isUploading ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.reviewButtonText, styles.completeButtonText]}>{sessionId ? '업로드하기' : '완료하기'}</Text>}
           </ScalePressable>
         </View>
       </View>
@@ -229,7 +313,7 @@ const styles = StyleSheet.create({
   },
   reviewHeader: {
     alignItems: 'center',
-    height: 36,
+    minHeight: 72,
     justifyContent: 'center',
     marginBottom: 24,
   },
@@ -237,6 +321,20 @@ const styles = StyleSheet.create({
     color: '#2D3C43',
     fontSize: 24,
     fontWeight: '600',
+  },
+  uploadMessage: {
+    color: '#409CB7',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  countdownText: {
+    color: '#8A9194',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 5,
+    textAlign: 'center',
   },
   previewWrap: {
     alignSelf: 'center',
@@ -409,9 +507,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
-
-
-
-
-
