@@ -1,13 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions, type CameraType, type FlashMode } from 'expo-camera';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { revealMissionSession, uploadMissionSessionPhoto } from '@/lib/mission-session-api';
 
 const missionFrame = require('../../assets/svg/mission_level/standard_frame.svg');
 const MISSION_CARD_SOURCE_WIDTH = 164;
@@ -16,7 +17,35 @@ const MISSION_CARD_WIDTH = 350;
 const MISSION_CARD_HEIGHT = Math.round(MISSION_CARD_WIDTH * (MISSION_CARD_SOURCE_HEIGHT / MISSION_CARD_SOURCE_WIDTH));
 const MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT = 66;
 
+function getParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function runWithNetworkRetry<T>(task: () => Promise<T>, retries = 1): Promise<T> {
+  try {
+    return await task();
+  } catch (error) {
+    const isNetworkFailure = error instanceof TypeError || (error instanceof Error && error.message.includes('Network request failed'));
+
+    if (!isNetworkFailure || retries <= 0) {
+      throw error;
+    }
+
+    await wait(700);
+    return runWithNetworkRetry(task, retries - 1);
+  }
+}
+
 export default function MissionCaptureScreen() {
+  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const scheduleId = getParamValue(params.scheduleId);
+  const sessionId = getParamValue(params.sessionId);
   const cameraRef = useRef<CameraView | null>(null);
   const missionCardTranslateY = useRef(new Animated.Value(0)).current;
   const missionCardOffsetY = useRef(0);
@@ -25,6 +54,11 @@ export default function MissionCaptureScreen() {
   const [facing, setFacing] = useState<CameraType>('back');
   const [flash, setFlash] = useState<FlashMode>('off');
   const [isCapturing, setIsCapturing] = useState(false);
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
+  const [isMissionComplete, setIsMissionComplete] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState('');
+  const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
   const missionCardCollapsedBottom = bottomSafeInset - (MISSION_CARD_HEIGHT - MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT);
   const missionCardExpandedY = missionCardCollapsedBottom - height / 2 + MISSION_CARD_HEIGHT / 2;
   const backdropOpacity = missionCardTranslateY.interpolate({
@@ -34,6 +68,32 @@ export default function MissionCaptureScreen() {
   });
 
   const hasPermission = permission?.granted;
+
+  useEffect(() => {
+    if (returnCountdown === null) {
+      return;
+    }
+
+    if (returnCountdown <= 0) {
+      if (scheduleId) {
+        router.replace({
+          pathname: '/trip/active',
+          params: { scheduleId },
+        });
+      } else {
+        router.back();
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setReturnCountdown((currentValue) => (currentValue === null ? null : currentValue - 1));
+    }, 1000);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [returnCountdown, scheduleId]);
 
   const animateMissionCard = useCallback(
     (toValue: number) => {
@@ -89,10 +149,46 @@ export default function MissionCaptureScreen() {
 
     try {
       setIsCapturing(true);
-      await cameraRef.current.takePictureAsync({ quality: 0.9 });
-      router.push('/trip/result');
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9 });
+      if (photo?.uri) {
+        setCapturedPhotoUri(photo.uri);
+        setIsMissionComplete(false);
+      }
     } finally {
       setIsCapturing(false);
+    }
+  };
+
+  const handleRetake = () => {
+    setCapturedPhotoUri(null);
+    setIsMissionComplete(false);
+    setUploadMessage('');
+    setReturnCountdown(null);
+  };
+
+  const handleComplete = async () => {
+    if (!capturedPhotoUri || isUploading) {
+      return;
+    }
+
+    if (!sessionId) {
+      setIsMissionComplete(true);
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      setUploadMessage('');
+      setReturnCountdown(null);
+      await runWithNetworkRetry(() => uploadMissionSessionPhoto(sessionId, capturedPhotoUri), 1);
+      await runWithNetworkRetry(() => revealMissionSession(sessionId), 1);
+      setIsMissionComplete(true);
+      setUploadMessage('사진을 업로드했어요.');
+      setReturnCountdown(3);
+    } catch (error) {
+      setUploadMessage(error instanceof Error ? error.message : '사진 업로드에 실패했어요.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -117,6 +213,32 @@ export default function MissionCaptureScreen() {
           <Text style={styles.permissionText}>미션 인증 사진을 촬영하려면 카메라 접근을 허용해 주세요.</Text>
           <ScalePressable onPress={requestPermission} pressedScale={0.96} style={styles.permissionButton}>
             <Text style={styles.permissionButtonText}>권한 허용</Text>
+          </ScalePressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (capturedPhotoUri) {
+    return (
+      <View style={[styles.reviewContainer, { paddingBottom: bottomSafeInset + 25, paddingTop: topSafeInset + 70 }]}>
+        <StatusBar style="dark" />
+        <View style={styles.reviewHeader}>
+          {isMissionComplete ? <Text style={styles.completeTitle}>미션 완료!</Text> : null}
+          {uploadMessage ? <Text style={styles.uploadMessage}>{uploadMessage}</Text> : null}
+          {returnCountdown !== null ? <Text style={styles.countdownText}>{returnCountdown}초 후 여행 화면으로 돌아가요</Text> : null}
+        </View>
+
+        <View style={styles.previewWrap}>
+          <Image source={{ uri: capturedPhotoUri }} style={styles.previewImage} contentFit="cover" />
+        </View>
+
+        <View style={styles.reviewActions}>
+          <ScalePressable accessibilityLabel="다시 찍기" disabled={isMissionComplete || isUploading} onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
+            <Text style={[styles.reviewButtonText, styles.retakeButtonText]}>다시 찍기</Text>
+          </ScalePressable>
+          <ScalePressable accessibilityLabel="완료하기" disabled={isMissionComplete || isUploading} onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
+            {isUploading ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.reviewButtonText, styles.completeButtonText]}>{sessionId ? '업로드하기' : '완료하기'}</Text>}
           </ScalePressable>
         </View>
       </View>
@@ -183,6 +305,78 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: '#000000',
     flex: 1,
+  },
+  reviewContainer: {
+    backgroundColor: '#F4F7FA',
+    flex: 1,
+    paddingHorizontal: 36,
+  },
+  reviewHeader: {
+    alignItems: 'center',
+    minHeight: 72,
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  completeTitle: {
+    color: '#2D3C43',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  uploadMessage: {
+    color: '#409CB7',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  countdownText: {
+    color: '#8A9194',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 5,
+    textAlign: 'center',
+  },
+  previewWrap: {
+    alignSelf: 'center',
+    backgroundColor: '#E5EEF3',
+    borderRadius: 18,
+    flex: 1,
+    maxHeight: 520,
+    minHeight: 300,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  previewImage: {
+    height: '100%',
+    width: '100%',
+  },
+  reviewActions: {
+    flexDirection: 'row',
+    gap: 18,
+    marginTop: 30,
+  },
+  reviewButton: {
+    alignItems: 'center',
+    borderRadius: 19,
+    flex: 1,
+    height: 58,
+    justifyContent: 'center',
+  },
+  retakeButton: {
+    backgroundColor: '#C9E4EE',
+  },
+  completeButton: {
+    backgroundColor: '#409CB7',
+  },
+  reviewButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  retakeButtonText: {
+    color: '#409CB7',
+  },
+  completeButtonText: {
+    color: '#FFFFFF',
   },
   topControls: {
     flexDirection: 'row',
@@ -313,9 +507,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
-
-
-
-
-
