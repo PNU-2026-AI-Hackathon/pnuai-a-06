@@ -9,7 +9,7 @@ import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } fro
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
-import { getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, uploadMissionSessionPhoto } from '@/lib/mission-session-api';
+import { getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, uploadMissionSessionPhoto, type MissionSession } from '@/lib/mission-session-api';
 
 const missionFrame = require('../../assets/svg/mission_level/standard_frame.svg');
 const MISSION_CARD_SOURCE_WIDTH = 164;
@@ -26,6 +26,24 @@ function wait(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function formatRemainingTime(ms: number) {
+  const safeMs = Math.max(0, ms);
+  const totalSeconds = Math.ceil(safeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getRemainingMs(deadline: string | null | undefined, now: number) {
+  if (!deadline) {
+    return null;
+  }
+
+  const deadlineTime = new Date(deadline).getTime();
+  return Number.isFinite(deadlineTime) ? deadlineTime - now : null;
 }
 
 async function runWithNetworkRetry<T>(task: () => Promise<T>, retries = 1): Promise<T> {
@@ -68,6 +86,8 @@ export default function MissionCaptureScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
+  const [session, setSession] = useState<MissionSession | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const missionCardCollapsedBottom = bottomSafeInset - (MISSION_CARD_HEIGHT - MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT);
   const missionCardExpandedY = missionCardCollapsedBottom - height / 2 + MISSION_CARD_HEIGHT / 2;
   const backdropOpacity = missionCardTranslateY.interpolate({
@@ -77,6 +97,51 @@ export default function MissionCaptureScreen() {
   });
 
   const hasPermission = permission?.granted;
+  const shootingRemainingMs = getRemainingMs(session?.shootingEndsAt ?? session?.photoUploadEndsAt, now);
+  const uploadRemainingMs = getRemainingMs(session?.photoUploadEndsAt ?? session?.shootingEndsAt, now);
+  const isShootingExpired = shootingRemainingMs !== null && shootingRemainingMs <= 0;
+  const isUploadExpired = uploadRemainingMs !== null && uploadRemainingMs <= 0;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadSessionTimer() {
+      try {
+        if (sessionId) {
+          const nextSession = await getMissionSession(sessionId);
+          if (isActive) {
+            setSession(nextSession);
+          }
+          return;
+        }
+
+        if (scheduleId && scheduleMissionId) {
+          const latestSession = await getLatestMissionSession(scheduleId, scheduleMissionId);
+          if (isActive) {
+            setSession(latestSession);
+          }
+        }
+      } catch {
+        // Timer metadata is optional; upload flow still resolves the authoritative session.
+      }
+    }
+
+    loadSessionTimer();
+
+    return () => {
+      isActive = false;
+    };
+  }, [scheduleId, scheduleMissionId, sessionId]);
 
   useEffect(() => {
     if (returnCountdown === null) {
@@ -152,7 +217,7 @@ export default function MissionCaptureScreen() {
   };
 
   const handleCapture = async () => {
-    if (!cameraRef.current || isCapturing) {
+    if (!cameraRef.current || isCapturing || isShootingExpired) {
       return;
     }
 
@@ -217,16 +282,24 @@ export default function MissionCaptureScreen() {
   };
 
   const handleComplete = async () => {
-    if (!capturedPhotoUri || isUploading) {
+    if (!capturedPhotoUri || isUploading || isUploadExpired) {
       return;
     }
 
     try {
       setIsUploading(true);
-      setUploadMessage('');
+      setUploadMessage('세션을 확인하는 중이에요.');
       setReturnCountdown(null);
       const uploadSessionId = await resolveUploadSessionId();
+      const uploadSession = await getMissionSession(uploadSessionId);
+      setSession(uploadSession);
+      const deadlineMs = getRemainingMs(uploadSession.photoUploadEndsAt ?? uploadSession.shootingEndsAt, Date.now());
+      if (deadlineMs !== null && deadlineMs <= 0) {
+        throw new Error('제한 시간이 종료되어 업로드할 수 없어요.');
+      }
+      setUploadMessage('제출 가능 여부를 확인하는 중이에요.');
       await ensureCurrentUserCanSubmit(uploadSessionId);
+      setUploadMessage('사진을 업로드하는 중이에요.');
       await runWithNetworkRetry(() => uploadMissionSessionPhoto(uploadSessionId, capturedPhotoUri), 1);
 
 
@@ -272,6 +345,7 @@ export default function MissionCaptureScreen() {
       <View style={[styles.reviewContainer, { paddingBottom: bottomSafeInset + 25, paddingTop: topSafeInset + 70 }]}>
         <StatusBar style="dark" />
         <View style={styles.reviewHeader}>
+          {uploadRemainingMs !== null ? <Text style={[styles.timeAttackText, isUploadExpired && styles.timeAttackDanger]}>업로드 제한 {formatRemainingTime(uploadRemainingMs)}</Text> : null}
           {isMissionComplete ? <Text style={styles.completeTitle}>미션 완료!</Text> : null}
           {uploadMessage ? <Text style={styles.uploadMessage}>{uploadMessage}</Text> : null}
           {returnCountdown !== null ? <Text style={styles.countdownText}>{returnCountdown}초 후 여행 화면으로 돌아가요</Text> : null}
@@ -285,7 +359,7 @@ export default function MissionCaptureScreen() {
           <ScalePressable accessibilityLabel="다시 찍기" disabled={isMissionComplete || isUploading} onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
             <Text style={[styles.reviewButtonText, styles.retakeButtonText]}>다시 찍기</Text>
           </ScalePressable>
-          <ScalePressable accessibilityLabel="완료하기" disabled={isMissionComplete || isUploading} onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
+          <ScalePressable accessibilityLabel="완료하기" disabled={isMissionComplete || isUploading || isUploadExpired} onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton, (isMissionComplete || isUploading || isUploadExpired) && styles.disabledControl]}>
             {isUploading ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.reviewButtonText, styles.completeButtonText]}>{sessionId ? '업로드하기' : '완료하기'}</Text>}
           </ScalePressable>
         </View>
@@ -307,6 +381,12 @@ export default function MissionCaptureScreen() {
       />
 
       <View pointerEvents="box-none" style={[styles.topControls, { paddingTop: topSafeInset + 24 }]}>
+        {shootingRemainingMs !== null ? (
+          <View style={[styles.timeAttackBadge, isShootingExpired && styles.timeAttackBadgeDanger]}>
+            <Ionicons color="#ffffff" name="timer-outline" size={17} />
+            <Text style={styles.timeAttackBadgeText}>{formatRemainingTime(shootingRemainingMs)}</Text>
+          </View>
+        ) : null}
         <ScalePressable accessibilityLabel="닫기" onPress={() => router.back()} pressedScale={0.86} style={styles.iconButton}>
           <Ionicons color="#ffffff" name="close" size={30} />
         </ScalePressable>
@@ -333,10 +413,10 @@ export default function MissionCaptureScreen() {
         <View pointerEvents="box-none" style={[styles.captureControls, { bottom: bottomSafeInset + 52 }]}>
           <ScalePressable
             accessibilityLabel="사진 촬영"
-            disabled={isCapturing}
+            disabled={isCapturing || isShootingExpired}
             onPress={handleCapture}
             pressedScale={0.92}
-            style={[styles.shutterOuter, isCapturing && styles.disabledControl]}>
+            style={[styles.shutterOuter, (isCapturing || isShootingExpired) && styles.disabledControl]}>
             <View style={styles.shutterInner} />
           </ScalePressable>
 
@@ -376,6 +456,33 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 6,
     textAlign: 'center',
+  },
+  timeAttackText: {
+    color: '#D86C59',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  timeAttackDanger: {
+    color: '#C94435',
+  },
+  timeAttackBadge: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(18, 24, 32, 0.72)',
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  timeAttackBadgeDanger: {
+    backgroundColor: 'rgba(201, 68, 53, 0.88)',
+  },
+  timeAttackBadgeText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '900',
   },
   countdownText: {
     color: '#8A9194',

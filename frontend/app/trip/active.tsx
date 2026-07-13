@@ -15,6 +15,7 @@ import { shareKakaoInvite } from '@/lib/kakao-share';
 import {
   completeMissionSession,
   createMissionSession,
+  getActiveMissionSession,
   getLatestMissionSession,
   getMissionSession,
   isMissionSessionNotFoundError,
@@ -84,6 +85,20 @@ function isAlreadyJoinedSessionError(error: unknown) {
   return message.includes('이미') || message.includes('already') || message.includes('joined') || message.includes('member');
 }
 
+function hasAllComments(session: MissionSession) {
+  const requiredCommentsPerPhoto = session.members.length;
+
+  return requiredCommentsPerPhoto > 0 && session.submissions.length > 0 && session.submissions.every((submission) => submission.comments.length >= requiredCommentsPerPhoto);
+}
+
+function isFinishedSession(session: MissionSession | undefined) {
+  return Boolean(session && (session.status === 'VOTING' || session.status === 'COMPLETED' || hasAllComments(session)));
+}
+
+function isReviewableSession(session: MissionSession) {
+  return session.status === 'REVEALED' && session.submissions.length > 0 && !isFinishedSession(session);
+}
+
 function getMissionLocation(mission: TripScheduleMission) {
   if (mission.districtLabel && mission.placeLabel) {
     return `${mission.districtLabel}(${mission.placeLabel})`;
@@ -110,9 +125,11 @@ export default function ActiveTripScreen() {
   const [inviteMessage, setInviteMessage] = useState('');
   const [missionListVisible, setMissionListVisible] = useState(false);
   const [sessionPanelVisible, setSessionPanelVisible] = useState(false);
+  const [reviewAlertSession, setReviewAlertSession] = useState<MissionSession | null>(null);
   const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
   const [inviteData, setInviteData] = useState<TripInvite | null>(null);
   const missions = schedule?.missions ?? [];
+  const activeMissions = missions.filter((mission) => !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
   const inviteUrl = getInviteUrl(inviteData);
 
   const rememberFeedSession = useCallback((nextSession: MissionSession, fallbackScheduleMissionId?: string) => {
@@ -137,6 +154,12 @@ export default function ActiveTripScreen() {
         saveCachedRevealedSessions(scheduleId, nextSessions);
       }
 
+      if (isReviewableSession(normalizedSession)) {
+        setReviewAlertSession(normalizedSession);
+      } else if (isFinishedSession(normalizedSession)) {
+        setReviewAlertSession((currentAlert) => (currentAlert?.id === normalizedSession.id ? null : currentAlert));
+      }
+
       return nextSessions;
     });
   }, [scheduleId]);
@@ -156,7 +179,9 @@ export default function ActiveTripScreen() {
       return;
     }
 
-    setRevealedSessions(readCachedRevealedSessions(scheduleId));
+    const cachedRevealedSessions = readCachedRevealedSessions(scheduleId);
+    setReviewAlertSession(null);
+    setRevealedSessions(cachedRevealedSessions);
 
     let isActive = true;
 
@@ -171,16 +196,26 @@ export default function ActiveTripScreen() {
 
         setSchedule(nextSchedule);
 
-        await Promise.all(nextSchedule.missions.map(async (mission) => {
+        void Promise.all(Object.values(cachedRevealedSessions).map(async (cachedSession) => {
           try {
-            const latestSession = await getLatestMissionSession(nextSchedule.scheduleId, mission.scheduleMissionId);
+            const latestSession = await getMissionSession(cachedSession.id);
             if (isActive) {
-              rememberFeedSession(latestSession, mission.scheduleMissionId);
+              rememberFeedSession(latestSession, cachedSession.scheduleMissionId);
             }
           } catch {
-            // A mission can legitimately have no session yet.
+            // Cached feed sessions are best-effort and can disappear server-side.
           }
         }));
+
+        void getActiveMissionSession(nextSchedule.scheduleId)
+          .then((activeSession) => {
+            if (isActive) {
+              rememberFeedSession(activeSession);
+            }
+          })
+          .catch(() => {
+            // A schedule can legitimately have no active mission session yet.
+          });
 
         if (initialSessionId) {
           try {
@@ -357,12 +392,45 @@ export default function ActiveTripScreen() {
     });
   };
 
+  const openReview = (targetSession: MissionSession | null) => {
+    if (!targetSession?.id) {
+      return;
+    }
+
+    setReviewAlertSession(null);
+    router.push({
+      pathname: '/trip/review',
+      params: {
+        ...(scheduleId ? { scheduleId } : {}),
+        sessionId: targetSession.id,
+      },
+    });
+  };
   const getMissionPhotos = (mission: TripScheduleMission) => {
     return revealedSessions[mission.scheduleMissionId]?.submissions.map((submission) => submission.imageUrl) ?? [];
   };
 
+  const openFeedSession = (targetSession: MissionSession | undefined) => {
+    if (!targetSession?.id) {
+      return;
+    }
+
+    if (isFinishedSession(targetSession)) {
+      router.push({
+        pathname: '/trip/result',
+        params: {
+          ...(scheduleId ? { scheduleId } : {}),
+          sessionId: targetSession.id,
+        },
+      });
+      return;
+    }
+
+    openReview(targetSession);
+  };
+
   const completedMissionFeeds = missions
-    .map((mission) => ({ mission, photos: getMissionPhotos(mission) }))
+    .map((mission) => ({ mission, photos: getMissionPhotos(mission), session: revealedSessions[mission.scheduleMissionId] }))
     .filter((item) => item.photos.length > 0);
 
   return (
@@ -396,7 +464,7 @@ export default function ActiveTripScreen() {
             {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Ionicons color="#8A9194" name="person-add" size={20} />}
             <Text style={styles.inviteTileText}>초대하기</Text>
           </ScalePressable>
-          {missions.map((mission) => (
+          {activeMissions.map((mission) => (
             <ScalePressable key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={styles.photoTile}>
               <Svg height="100%" pointerEvents="none" style={styles.photoTileGradient} viewBox="0 0 82 96" width="100%">
                 <Defs>
@@ -440,8 +508,8 @@ export default function ActiveTripScreen() {
               <Text style={styles.emptyText}>카메라로 미션 사진을 찍으면 여기에 보여요.</Text>
             </View>
           ) : (
-            completedMissionFeeds.map(({ mission, photos }) => (
-              <ScalePressable key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.99} style={styles.feedMissionItem}>
+            completedMissionFeeds.map(({ mission, photos, session: feedSession }) => (
+              <ScalePressable key={mission.scheduleMissionId} onPress={() => openFeedSession(feedSession)} pressedScale={0.99} style={styles.feedMissionItem}>
                 <View style={styles.feedIcon}>
                   <Ionicons color="#ffffff" name="camera" size={20} />
                 </View>
@@ -460,12 +528,32 @@ export default function ActiveTripScreen() {
         </View>
       </ScrollView>
 
+      {reviewAlertSession ? (
+        <View style={[styles.reviewAlert, { bottom: bottomSafeInset + 106, left: horizontalPadding, right: horizontalPadding }]}>
+          <View style={styles.reviewAlertCopy}>
+            <Text style={styles.reviewAlertTitle}>댓글을 남길 시간이 왔어요</Text>
+            <Text style={styles.reviewAlertText}>{reviewAlertSession.missionTitle} · 사진 {reviewAlertSession.submissions.length}장</Text>
+          </View>
+          <ScalePressable onPress={() => openReview(reviewAlertSession)} pressedScale={0.94} style={styles.reviewAlertButton}>
+            <Text style={styles.reviewAlertButtonText}>열기</Text>
+          </ScalePressable>
+          <ScalePressable accessibilityLabel="댓글 알림 닫기" onPress={() => setReviewAlertSession(null)} pressedScale={0.86} style={styles.reviewAlertClose}>
+            <Ionicons color="#6A747A" name="close" size={18} />
+          </ScalePressable>
+        </View>
+      ) : null}
+
       <Modal animationType="fade" transparent visible={missionListVisible} onRequestClose={() => setMissionListVisible(false)}>
         <Pressable accessibilityLabel="담긴 미션 닫기" onPress={() => setMissionListVisible(false)} style={styles.modalBackdrop}>
           <Pressable style={styles.missionPanel}>
             <Text style={styles.panelTitle}>담긴 미션</Text>
             <ScrollView contentContainerStyle={styles.panelMissionList} showsVerticalScrollIndicator={false}>
-              {missions.map((mission) => (
+              {activeMissions.length === 0 ? (
+                <View style={styles.panelEmptyBox}>
+                  <Text style={styles.emptyTitle}>진행할 미션이 없어요</Text>
+                  <Text style={styles.emptyText}>완료된 미션은 피드에서 계속 볼 수 있어요.</Text>
+                </View>
+              ) : activeMissions.map((mission) => (
                 <ScalePressable accessibilityRole="button" key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.98} style={styles.panelMissionItem}>
                   {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.panelMissionPhoto} contentFit="cover" /> : <View style={styles.panelMissionPhotoPlaceholder} />}
                   <View style={styles.panelMissionCopy}>
@@ -499,6 +587,7 @@ export default function ActiveTripScreen() {
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => readyMissionSession(requireSessionId()), '준비 완료 처리했어요.')} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>ready</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => startMissionSession(requireSessionId()), '촬영 시작 처리했어요.')} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>start</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={openCapture} pressedScale={0.95} style={[styles.sessionActionButton, styles.captureActionButton]}><Text style={[styles.sessionActionText, styles.captureActionText]}>촬영</Text></ScalePressable>
+              <ScalePressable disabled={!session?.id || isSessionBusy || !session?.submissions.length} onPress={() => openReview(session)} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>댓글</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => revealMissionSession(requireSessionId()), '사진을 공개했어요.', { refreshAfter: true })} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>reveal</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => completeMissionSession(requireSessionId()), '미션을 완료했어요.', { refreshAfter: true })} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>complete</Text></ScalePressable>
             </View>
@@ -763,6 +852,56 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
+  reviewAlert: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#D7EAF0',
+    borderRadius: 18,
+    borderWidth: 1,
+    elevation: 8,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 76,
+    padding: 12,
+    position: 'absolute',
+    shadowColor: '#000000',
+    shadowOffset: { height: 6, width: 0 },
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    zIndex: 20,
+  },
+  reviewAlertCopy: {
+    flex: 1,
+  },
+  reviewAlertTitle: {
+    color: '#111820',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  reviewAlertText: {
+    color: '#6F7A80',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  reviewAlertButton: {
+    alignItems: 'center',
+    backgroundColor: '#6EA8BE',
+    borderRadius: 12,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  reviewAlertButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  reviewAlertClose: {
+    alignItems: 'center',
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
+  },
   modalBackdrop: {
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.28)',
@@ -787,6 +926,10 @@ const styles = StyleSheet.create({
   },
   panelMissionList: {
     gap: 12,
+  },
+  panelEmptyBox: {
+    alignItems: 'center',
+    paddingVertical: 26,
   },
   panelMissionItem: {
     backgroundColor: '#F4F7F8',

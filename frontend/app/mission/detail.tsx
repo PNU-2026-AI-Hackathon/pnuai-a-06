@@ -5,8 +5,8 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { fetchMissions, type MissionItem } from '@/lib/mission-api';
-import { addMissionToSchedule, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
+import { fetchMissions, getCachedMissions, type MissionItem } from '@/lib/mission-api';
+import { addMissionToSchedule, getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
 
 type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
 
@@ -95,10 +95,10 @@ export default function MissionDetailScreen() {
   const focusedDistrictCode = getParamValue(params.districtCode) || districtCodeByLabel[focusedDistrict] || '';
   const focusedMissionCode = getParamValue(params.missionCode) ?? '';
   const [selectedTheme, setSelectedTheme] = useState<MissionTheme>(getValidTheme(params.theme));
-  const [missions, setMissions] = useState<MissionItem[]>([]);
+  const [missions, setMissions] = useState<MissionItem[]>(() => getCachedMissions());
   const [schedules, setSchedules] = useState<TripSchedule[]>([]);
   const [selectedMission, setSelectedMission] = useState<MissionItem | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => getCachedMissions().length === 0);
   const [isSchedulePickerVisible, setIsSchedulePickerVisible] = useState(false);
   const [isAddingMission, setIsAddingMission] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -119,7 +119,13 @@ export default function MissionDetailScreen() {
 
     async function loadMissions() {
       try {
-        setIsLoading(true);
+        const cachedMissions = getCachedMissions();
+        if (cachedMissions.length > 0) {
+          setMissions(cachedMissions);
+          setIsLoading(false);
+        } else {
+          setIsLoading(true);
+        }
         setErrorMessage('');
         const missionList = await fetchMissions({});
 
@@ -128,8 +134,9 @@ export default function MissionDetailScreen() {
         }
       } catch (error) {
         if (isActive) {
-          setMissions([]);
-          setErrorMessage(error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.');
+          const cachedMissions = getCachedMissions();
+          setMissions(cachedMissions);
+          setErrorMessage(cachedMissions.length === 0 ? (error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.') : '');
         }
       } finally {
         if (isActive) {
@@ -170,6 +177,12 @@ export default function MissionDetailScreen() {
       setIsAddingMission(true);
       setActionMessage('');
       setSelectedMission(mission);
+      const cachedSchedules = getCachedTripSchedules();
+      if (cachedSchedules.length > 0) {
+        setSchedules(cachedSchedules);
+        setIsSchedulePickerVisible(true);
+      }
+
       const nextSchedules = await listTripSchedules();
       setSchedules(nextSchedules);
 

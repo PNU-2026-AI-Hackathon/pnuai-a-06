@@ -1,6 +1,10 @@
+import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
+
 const API_BASE_URL = 'http://211.213.193.67:7020';
 
 type MissionApiItem = Record<string, unknown>;
+
+const MISSION_CACHE_KEY = 'mission_list_cache';
 
 export type MissionItem = {
   id: string;
@@ -93,6 +97,25 @@ function normalizePhotoUrl(photoUrl: string) {
 
 export function getMissionPhotoUrl(missionCode: string) {
   return `${API_BASE_URL}/missions/${encodeURIComponent(missionCode)}/photo`;
+}
+
+export function getCachedMissions() {
+  const raw = getAuthItem(MISSION_CACHE_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as MissionItem[];
+    return Array.isArray(parsed) ? parsed.filter((mission) => mission.id && mission.title) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMissionCache(missions: MissionItem[]) {
+  setAuthItem(MISSION_CACHE_KEY, JSON.stringify(missions));
 }
 
 export async function fetchMissions(params: { districtCode?: string; theme?: string }) {

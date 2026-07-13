@@ -23,9 +23,20 @@ type ApiMissionSessionMember = {
   user_id?: number | string;
 };
 
+type ApiMissionComment = {
+  content?: string;
+  created_at?: string;
+  id?: number | string;
+  user?: ApiMissionSessionUser;
+  user_id?: number | string;
+};
+
 type ApiMissionSubmission = {
   captured_at?: string | null;
+  comments?: ApiMissionComment[];
   id?: number | string;
+  like_count?: number;
+  likes_count?: number;
   photo_url?: string;
   uploaded_at?: string;
   user?: ApiMissionSessionUser;
@@ -33,14 +44,22 @@ type ApiMissionSubmission = {
 };
 
 type ApiMissionSession = {
+  comment_deadline_at?: string | null;
+  comment_ends_at?: string | null;
+  commenting_ends_at?: string | null;
   completed_at?: string | null;
   created_at?: string;
   created_by_user_id?: number | string;
   id?: number | string;
   members?: ApiMissionSessionMember[];
   mission?: ApiMission;
+  photo_deadline_at?: string | null;
+  photo_upload_deadline_at?: string | null;
   revealed_at?: string | null;
   schedule_mission_id?: number | string;
+  shooting_deadline_at?: string | null;
+  shooting_ends_at?: string | null;
+  shooting_expires_at?: string | null;
   started_at?: string | null;
   status?: MissionSessionStatus;
   submissions?: ApiMissionSubmission[];
@@ -59,14 +78,25 @@ export type MissionSession = {
     userId: string;
     nickname?: string | null;
   }[];
+  commentEndsAt?: string | null;
   missionTitle: string;
+  photoUploadEndsAt?: string | null;
   revealedAt?: string | null;
   scheduleMissionId: string;
+  shootingEndsAt?: string | null;
   startedAt?: string | null;
   status: MissionSessionStatus;
   submissions: {
+    comments: {
+      content: string;
+      createdAt?: string;
+      id: string;
+      userId: string;
+      nickname?: string | null;
+    }[];
     id: string;
     imageUrl: string;
+    likeCount: number;
     photoUrl: string;
     uploadedAt?: string;
     userId: string;
@@ -135,6 +165,19 @@ function normalizePhotoUrl(photoUrl: string) {
   return photoUrl.startsWith('http') ? photoUrl : `${API_BASE_URL}${photoUrl}`;
 }
 
+function createRequestTimeout(ms: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, ms);
+
+  return { controller, timer };
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
   const text = await res.text();
   const data = parseJsonOrText(text);
@@ -150,14 +193,35 @@ async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
   return data;
 }
 
-async function requestJson<T>(path: string, method: 'GET' | 'POST') {
+async function requestJson<T>(path: string, method: 'GET' | 'POST', body?: Record<string, string | number>) {
   const token = getAccessToken();
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    method,
-  });
+  const { controller, timer } = createRequestTimeout(15000);
 
-  return readJson<T>(res, '미션 세션 요청에 실패했습니다.');
+  try {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      body: body ? JSON.stringify(body) : undefined,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      method,
+      signal: controller.signal,
+    });
+
+    return readJson<T>(res, '미션 세션 요청에 실패했습니다.');
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error('서버 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function pickFirstDateValue(...values: (string | null | undefined)[]) {
+  return values.find((value) => typeof value === 'string' && value.trim()) ?? null;
 }
 
 function normalizeSession(data: ApiMissionSession): MissionSession {
@@ -166,6 +230,7 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
   }
 
   return {
+    commentEndsAt: pickFirstDateValue(data.comment_ends_at, data.comment_deadline_at, data.commenting_ends_at),
     completedAt: data.completed_at,
     createdAt: data.created_at,
     createdByUserId: String(data.created_by_user_id ?? ''),
@@ -177,19 +242,64 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
       userId: String(member.user_id ?? member.user?.id ?? ''),
     })),
     missionTitle: data.mission?.title ?? '미션',
+    photoUploadEndsAt: pickFirstDateValue(data.photo_upload_deadline_at, data.photo_deadline_at),
     revealedAt: data.revealed_at,
     scheduleMissionId: String(data.schedule_mission_id ?? ''),
+    shootingEndsAt: pickFirstDateValue(data.shooting_ends_at, data.shooting_deadline_at, data.shooting_expires_at),
     startedAt: data.started_at,
     status: data.status ?? 'WAITING',
     submissions: (data.submissions ?? []).map((submission) => ({
+      comments: (submission.comments ?? []).map((comment) => ({
+        content: comment.content ?? '',
+        createdAt: comment.created_at,
+        id: String(comment.id ?? ''),
+        nickname: comment.user?.nickname,
+        userId: String(comment.user_id ?? comment.user?.id ?? ''),
+      })).filter((comment) => comment.content),
       id: String(submission.id ?? ''),
       imageUrl: normalizePhotoUrl(submission.photo_url ?? ''),
+      likeCount: Number(submission.like_count ?? submission.likes_count ?? 0),
       nickname: submission.user?.nickname,
       photoUrl: submission.photo_url ?? '',
       uploadedAt: submission.uploaded_at,
       userId: String(submission.user_id ?? submission.user?.id ?? ''),
     })).filter((submission) => submission.photoUrl),
   };
+}
+
+function getWebSocketUrl(sessionId: string) {
+  const token = getAccessToken();
+  const wsBaseUrl = API_BASE_URL.replace(/^http/, 'ws');
+
+  return `${wsBaseUrl}/mission-sessions/${encodeURIComponent(sessionId)}/ws?token=${encodeURIComponent(token)}`;
+}
+
+export function connectMissionSessionSocket(
+  sessionId: string,
+  handlers: {
+    onError?: () => void;
+    onMessage: (message: { session?: MissionSession; type?: string }) => void;
+  }
+) {
+  const socket = new WebSocket(getWebSocketUrl(sessionId));
+
+  socket.onmessage = (event) => {
+    try {
+      const message = JSON.parse(String(event.data)) as { payload?: { session?: ApiMissionSession }; type?: string };
+      handlers.onMessage({
+        session: message.payload?.session ? normalizeSession(message.payload.session) : undefined,
+        type: message.type,
+      });
+    } catch {
+      // Ignore malformed socket payloads and recover through GET refresh.
+    }
+  };
+
+  socket.onerror = () => {
+    handlers.onError?.();
+  };
+
+  return socket;
 }
 
 export async function createMissionSession(scheduleId: string, scheduleMissionId: string) {
@@ -204,6 +314,16 @@ export async function getMissionSession(sessionId: string) {
 
 export async function getLatestMissionSession(scheduleId: string, scheduleMissionId: string) {
   const data = await requestJson<ApiMissionSession | null>(`/schedules/${encodeURIComponent(scheduleId)}/missions/${encodeURIComponent(scheduleMissionId)}/session`, 'GET');
+
+  if (!data || data.id === undefined || data.id === null) {
+    throw new MissionSessionApiError('진행 중인 미션 세션이 없습니다.', 404);
+  }
+
+  return normalizeSession(data);
+}
+
+export async function getActiveMissionSession(scheduleId: string) {
+  const data = await requestJson<ApiMissionSession | null>(`/schedules/${encodeURIComponent(scheduleId)}/active-mission-session`, 'GET');
 
   if (!data || data.id === undefined || data.id === null) {
     throw new MissionSessionApiError('진행 중인 미션 세션이 없습니다.', 404);
@@ -237,6 +357,17 @@ export async function completeMissionSession(sessionId: string) {
   return normalizeSession(data);
 }
 
+export async function postMissionSessionComment(sessionId: string, submissionId: string, content: string) {
+  await requestJson<ApiMissionComment>(`/mission-sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(submissionId)}/comments`, 'POST', {
+    content,
+  });
+}
+
+export async function likeMissionSessionSubmission(sessionId: string, submissionId: string) {
+  const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(submissionId)}/like`, 'POST');
+  return normalizeSession(data);
+}
+
 export async function uploadMissionSessionPhoto(sessionId: string, photoUri: string) {
   const token = getAccessToken();
   const formData = new FormData();
@@ -247,11 +378,24 @@ export async function uploadMissionSessionPhoto(sessionId: string, photoUri: str
     uri: photoUri,
   } as unknown as Blob);
 
-  const res = await fetch(`${API_BASE_URL}/mission-sessions/${encodeURIComponent(sessionId)}/photo`, {
-    body: formData,
-    headers: { Authorization: `Bearer ${token}` },
-    method: 'POST',
-  });
+  const { controller, timer } = createRequestTimeout(30000);
 
-  return readJson<ApiMissionSubmission>(res, '사진 업로드에 실패했습니다.');
+  try {
+    const res = await fetch(`${API_BASE_URL}/mission-sessions/${encodeURIComponent(sessionId)}/photo`, {
+      body: formData,
+      headers: { Authorization: `Bearer ${token}` },
+      method: 'POST',
+      signal: controller.signal,
+    });
+
+    return readJson<ApiMissionSubmission>(res, '사진 업로드에 실패했습니다.');
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error('사진 업로드 응답이 지연되고 있어요. 네트워크를 확인하고 다시 시도해 주세요.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
