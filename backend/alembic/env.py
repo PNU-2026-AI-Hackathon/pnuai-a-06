@@ -6,7 +6,10 @@ from sqlalchemy import engine_from_config, pool
 from app.core.config import get_settings
 from app.db.base import Base
 from app.models.missions import Mission, MissionSet  # noqa: F401
-from app.models.schedules import MissionSchedule, ScheduleInviteLink, ScheduleMember, ScheduleMission  # noqa: F401
+from app.models.schedules import (  # noqa: F401
+    MissionSchedule, ScheduleInviteLink, ScheduleMember, ScheduleMission,
+    MissionSession, MissionSessionMember, MissionSubmission,
+)
 from app.models.users import User  # noqa: F401
 
 config = context.config

@@ -54,6 +54,9 @@ class MissionResponse(BaseModel):
     target_photo_url: str | None = Field(
         description="Static image URL for the mission target photo."
     )
+    emoji_url: str | None = Field(
+        description="Static image URL for the mission emoji asset."
+    )
     reward_item_name: str = Field(description="Reward item name displayed after mission progress.")
     reward_item_icon: str = Field(description="Temporary reward item icon.")
     sort_order: int = Field(description="Display order inside the basket.")

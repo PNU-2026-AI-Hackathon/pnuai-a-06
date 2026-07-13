@@ -62,6 +62,7 @@ class Mission(Base):
     target_keyword: Mapped[str | None] = mapped_column(String(100), nullable=True)
     target_photo_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     target_photo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    emoji_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     reward_item_name: Mapped[str] = mapped_column(String(100), nullable=False)
     reward_item_icon: Mapped[str] = mapped_column(String(20), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

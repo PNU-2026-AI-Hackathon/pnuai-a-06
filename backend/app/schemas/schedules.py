@@ -213,6 +213,9 @@ class MissionScheduleResponse(BaseModel):
     companions: list[ScheduleMemberResponse] = Field(
         description="Invited/participating users. The creator is kept separate."
     )
+    participants: list[ScheduleUserResponse] = Field(
+        description="Creator and accepted schedule participants with nickname and profile image."
+    )
     missions: list[ScheduleMissionResponse] = Field(
         description="Missions added to this schedule."
     )
