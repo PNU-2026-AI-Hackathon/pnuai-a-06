@@ -16,6 +16,7 @@ from app.routers.schedules import (
     schedule_missions_router,
     schedules_router,
 )
+from app.routers.mission_sessions import router as mission_sessions_router
 
 settings = get_settings()
 logger = logging.getLogger("app.requests")
@@ -102,6 +103,7 @@ app = FastAPI(
                 "share invitations, and invitation accept/decline."
             ),
         },
+        {"name": "mission sessions", "description": "Authenticated team mission execution and photo sharing APIs."},
     ],
 )
 
@@ -150,6 +152,7 @@ app.include_router(schedules_router)
 app.include_router(schedule_missions_router)
 app.include_router(schedule_invitations_router)
 app.include_router(invitations_router)
+app.include_router(mission_sessions_router)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
