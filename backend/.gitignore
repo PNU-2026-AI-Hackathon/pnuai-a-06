@@ -3,6 +3,9 @@ logs/
 .uvicorn-*.pid
 .pgdata/
 logging.ini
-app/static/mission-photos/*.jpg
+# Runtime uploads and local/static image assets are not committed.
+app/static/**
+!app/static/mission-photos/
+!app/static/mission-photos/.gitkeep
 app/db/profile-images/*
 !app/db/profile-images/.gitkeep
