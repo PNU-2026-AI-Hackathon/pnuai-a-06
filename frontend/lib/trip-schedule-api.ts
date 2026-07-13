@@ -93,7 +93,23 @@ export type TripSchedule = {
 
 const SCHEDULE_CACHE_KEY = 'trip_schedules_cache';
 
+function parseJsonOrText(text: string) {
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 function getErrorMessage(data: unknown, fallback: string) {
+  if (typeof data === 'string') {
+    return data.trim() || fallback;
+  }
+
   if (data !== null && typeof data === 'object') {
     const container = data as Record<string, unknown>;
     const message = container.detail ?? container.message;
@@ -112,10 +128,14 @@ function getErrorMessage(data: unknown, fallback: string) {
 
 async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
   const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+  const data = parseJsonOrText(text);
 
   if (!res.ok) {
     throw new Error(getErrorMessage(data, fallbackMessage));
+  }
+
+  if (typeof data === 'string') {
+    throw new Error(fallbackMessage);
   }
 
   return data;

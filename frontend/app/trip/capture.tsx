@@ -8,7 +8,8 @@ import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } fro
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { revealMissionSession, uploadMissionSessionPhoto } from '@/lib/mission-session-api';
+import { getAuthItem } from '@/lib/auth-storage';
+import { getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, uploadMissionSessionPhoto } from '@/lib/mission-session-api';
 
 const missionFrame = require('../../assets/svg/mission_level/standard_frame.svg');
 const MISSION_CARD_SOURCE_WIDTH = 164;
@@ -42,9 +43,17 @@ async function runWithNetworkRetry<T>(task: () => Promise<T>, retries = 1): Prom
   }
 }
 
+
+function isDuplicateSubmissionError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+
+  return message.includes('이미') || message.includes('already') || message.includes('duplicate') || message.includes('submitted') || message.includes('한 번');
+}
+
 export default function MissionCaptureScreen() {
-  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const params = useLocalSearchParams<{ scheduleId?: string | string[]; scheduleMissionId?: string | string[]; sessionId?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
+  const scheduleMissionId = getParamValue(params.scheduleMissionId);
   const sessionId = getParamValue(params.sessionId);
   const cameraRef = useRef<CameraView | null>(null);
   const missionCardTranslateY = useRef(new Animated.Value(0)).current;
@@ -166,13 +175,49 @@ export default function MissionCaptureScreen() {
     setReturnCountdown(null);
   };
 
-  const handleComplete = async () => {
-    if (!capturedPhotoUri || isUploading) {
+  const ensureCurrentUserCanSubmit = async (uploadSessionId: string) => {
+    const currentUserId = getAuthItem('user_id');
+
+    if (!currentUserId) {
       return;
     }
 
-    if (!sessionId) {
-      setIsMissionComplete(true);
+    const currentSession = await getMissionSession(uploadSessionId);
+    const hasSubmitted = currentSession.submissions.some((submission) => submission.userId === currentUserId);
+
+    if (hasSubmitted) {
+      throw new Error('이미 수행한 미션이에요. 한 미션은 한 번만 제출할 수 있어요.');
+    }
+  };
+
+  const resolveUploadSessionId = async () => {
+    if (sessionId) {
+      try {
+        const currentSession = await getMissionSession(sessionId);
+        return currentSession.id;
+      } catch (error) {
+        if (!isMissionSessionNotFoundError(error) || !scheduleId || !scheduleMissionId) {
+          throw error;
+        }
+      }
+    }
+
+    if (!scheduleId || !scheduleMissionId) {
+      throw new Error('미션 세션 정보가 없습니다.');
+    }
+
+    const latestSession = await getLatestMissionSession(scheduleId, scheduleMissionId);
+
+    try {
+      const joinedSession = await joinMissionSession(latestSession.id);
+      return joinedSession.id;
+    } catch {
+      return latestSession.id;
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!capturedPhotoUri || isUploading) {
       return;
     }
 
@@ -180,13 +225,16 @@ export default function MissionCaptureScreen() {
       setIsUploading(true);
       setUploadMessage('');
       setReturnCountdown(null);
-      await runWithNetworkRetry(() => uploadMissionSessionPhoto(sessionId, capturedPhotoUri), 1);
-      await runWithNetworkRetry(() => revealMissionSession(sessionId), 1);
+      const uploadSessionId = await resolveUploadSessionId();
+      await ensureCurrentUserCanSubmit(uploadSessionId);
+      await runWithNetworkRetry(() => uploadMissionSessionPhoto(uploadSessionId, capturedPhotoUri), 1);
+
+
       setIsMissionComplete(true);
       setUploadMessage('사진을 업로드했어요.');
       setReturnCountdown(3);
     } catch (error) {
-      setUploadMessage(error instanceof Error ? error.message : '사진 업로드에 실패했어요.');
+      setUploadMessage(isDuplicateSubmissionError(error) ? '이미 수행한 미션이에요. 한 미션은 한 번만 제출할 수 있어요.' : error instanceof Error ? error.message : '사진 업로드에 실패했어요.');
     } finally {
       setIsUploading(false);
     }

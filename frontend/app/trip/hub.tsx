@@ -34,7 +34,10 @@ export default function TripHubScreen() {
   const refreshSchedules = useCallback(() => {
     let isActive = true;
 
-    setSchedules(getCachedTripSchedules());
+    const cachedSchedules = getCachedTripSchedules();
+    if (cachedSchedules.length > 0) {
+      setSchedules(cachedSchedules);
+    }
     setIsLoading(true);
     setMessage('');
 

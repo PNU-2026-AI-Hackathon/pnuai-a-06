@@ -52,11 +52,8 @@ function isJoinedInviteStatus(status: string | undefined) {
   return ['ACCEPTED', 'JOINED', 'APPROVED', 'ACTIVE', 'MEMBER', 'OWNER', 'CREATOR', 'HOST', 'INVITER'].includes(normalizedStatus);
 }
 
-function openActiveTrip(invite: TripInvite | null) {
-  router.replace({
-    pathname: '/trip/active',
-    params: invite?.roomId ? { scheduleId: invite.roomId } : undefined,
-  });
+function openTripHub() {
+  router.replace('/trip/hub');
 }
 
 function createFallbackInviteUrl(inviteToken: string) {
@@ -132,7 +129,7 @@ export default function TripInviteScreen() {
     setInvitePreview(null);
 
     previewTripInvite(inviteToken)
-      .then(async (preview) => {
+      .then((preview) => {
         if (!isMounted) {
           return;
         }
@@ -140,32 +137,11 @@ export default function TripInviteScreen() {
         setInvitePreview(preview);
 
         if (isJoinedInviteStatus(preview.status)) {
-          openActiveTrip(preview);
+          openTripHub();
           return;
         }
 
-        try {
-          setStatus('accepting');
-          await acceptTripInvite({ inviteToken });
-
-          if (!isMounted) {
-            return;
-          }
-
-          openActiveTrip(preview);
-        } catch (error) {
-          if (!isMounted) {
-            return;
-          }
-
-          if (isAccessibleTripError(error)) {
-            openActiveTrip(preview);
-            return;
-          }
-
-          setStatus('ready');
-          setMessage(getErrorMessage(error));
-        }
+        setStatus('ready');
       })
       .catch((error) => {
         if (!isMounted) {
@@ -250,9 +226,10 @@ export default function TripInviteScreen() {
       await acceptTripInvite({ inviteToken });
       setStatus('success');
       setMessage('동행자 방에 입장했어요.');
+      openTripHub();
     } catch (error) {
       if (isAccessibleTripError(error)) {
-        openActiveTrip(invitePreview);
+        openTripHub();
         return;
       }
 
@@ -289,7 +266,7 @@ export default function TripInviteScreen() {
           </Pressable>
         ) : null}
 
-        {status === 'success' ? <FlowButton label="진행 중 여행으로" onPress={() => openActiveTrip(invitePreview)} /> : null}
+        {status === 'success' ? <FlowButton label="여행 목록으로" onPress={openTripHub} /> : null}
         {status === 'error' ? <FlowButton label="돌아가기" onPress={() => router.back()} /> : null}
       </View>
     );

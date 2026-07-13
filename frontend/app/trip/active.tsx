@@ -17,6 +17,7 @@ import {
   createMissionSession,
   getLatestMissionSession,
   getMissionSession,
+  isMissionSessionNotFoundError,
   joinMissionSession,
   readyMissionSession,
   revealMissionSession,
@@ -77,6 +78,12 @@ function saveCachedRevealedSessions(scheduleId: string, sessions: Record<string,
   setAuthItem(getRevealedSessionCacheKey(scheduleId), JSON.stringify(sessions));
 }
 
+function isAlreadyJoinedSessionError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+
+  return message.includes('이미') || message.includes('already') || message.includes('joined') || message.includes('member');
+}
+
 function getMissionLocation(mission: TripScheduleMission) {
   if (mission.districtLabel && mission.placeLabel) {
     return `${mission.districtLabel}(${mission.placeLabel})`;
@@ -110,7 +117,7 @@ export default function ActiveTripScreen() {
 
   const rememberFeedSession = useCallback((nextSession: MissionSession, fallbackScheduleMissionId?: string) => {
     const scheduleMissionId = nextSession.scheduleMissionId || fallbackScheduleMissionId;
-    const shouldShowInFeed = ['REVEALED', 'COMPLETED'].includes(nextSession.status) && nextSession.submissions.length > 0 && scheduleMissionId;
+    const shouldShowInFeed = nextSession.submissions.length > 0 && scheduleMissionId;
 
     if (!shouldShowInFeed) {
       return;
@@ -272,12 +279,34 @@ export default function ActiveTripScreen() {
       setSessionMessage('');
       setSelectedMission(mission);
       setMissionListVisible(false);
-      const nextSession = await createMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+
+      let nextSession: MissionSession;
+
+      try {
+        const existingSession = await getLatestMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+
+        try {
+          nextSession = await joinMissionSession(existingSession.id);
+        } catch (error) {
+          if (!isAlreadyJoinedSessionError(error)) {
+            throw error;
+          }
+
+          nextSession = await getMissionSession(existingSession.id);
+        }
+      } catch (error) {
+        if (!isMissionSessionNotFoundError(error)) {
+          throw error;
+        }
+
+        nextSession = await createMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+      }
+
       setSession(nextSession);
       rememberFeedSession(nextSession, mission.scheduleMissionId);
       setSessionPanelVisible(true);
     } catch (error) {
-      setSessionMessage(error instanceof Error ? error.message : '미션 세션을 만들지 못했어요.');
+      setSessionMessage(error instanceof Error ? error.message : '미션 세션을 열지 못했어요.');
       setSessionPanelVisible(true);
     } finally {
       setIsSessionBusy(false);
@@ -408,7 +437,7 @@ export default function ActiveTripScreen() {
           ) : completedMissionFeeds.length === 0 ? (
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>아직 찍은 사진이 없어요</Text>
-              <Text style={styles.emptyText}>카메라로 미션 사진을 찍고 공개하면 여기에 보여요.</Text>
+              <Text style={styles.emptyText}>카메라로 미션 사진을 찍으면 여기에 보여요.</Text>
             </View>
           ) : (
             completedMissionFeeds.map(({ mission, photos }) => (
@@ -473,7 +502,7 @@ export default function ActiveTripScreen() {
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => revealMissionSession(requireSessionId()), '사진을 공개했어요.', { refreshAfter: true })} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>reveal</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => completeMissionSession(requireSessionId()), '미션을 완료했어요.', { refreshAfter: true })} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>complete</Text></ScalePressable>
             </View>
-            {session?.status === 'REVEALED' && session.submissions.length > 0 ? (
+            {session?.submissions.length ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.submissionRow}>
                 {session.submissions.map((submission) => (
                   <View key={submission.id} style={styles.submissionCard}>

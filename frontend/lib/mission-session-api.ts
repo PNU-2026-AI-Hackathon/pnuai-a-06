@@ -46,7 +46,7 @@ type ApiMissionSession = {
   submissions?: ApiMissionSubmission[];
 };
 
-export type MissionSessionStatus = 'WAITING' | 'READY' | 'SHOOTING' | 'UPLOADING' | 'REVEALED' | 'COMPLETED';
+export type MissionSessionStatus = 'WAITING' | 'READY' | 'SHOOTING' | 'UPLOADING' | 'VOTING' | 'REVEALED' | 'COMPLETED';
 
 export type MissionSession = {
   completedAt?: string | null;
@@ -74,7 +74,37 @@ export type MissionSession = {
   }[];
 };
 
+export class MissionSessionApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'MissionSessionApiError';
+    this.status = status;
+  }
+}
+
+export function isMissionSessionNotFoundError(error: unknown) {
+  return error instanceof MissionSessionApiError && error.status === 404;
+}
+
+function parseJsonOrText(text: string) {
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 function getErrorMessage(data: unknown, fallback: string) {
+  if (typeof data === 'string') {
+    return data.trim() || fallback;
+  }
+
   if (data !== null && typeof data === 'object') {
     const container = data as Record<string, unknown>;
     const message = container.detail ?? container.message;
@@ -107,10 +137,14 @@ function normalizePhotoUrl(photoUrl: string) {
 
 async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
   const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+  const data = parseJsonOrText(text);
 
   if (!res.ok) {
-    throw new Error(getErrorMessage(data, fallbackMessage));
+    throw new MissionSessionApiError(getErrorMessage(data, fallbackMessage), res.status);
+  }
+
+  if (typeof data === 'string') {
+    throw new MissionSessionApiError(fallbackMessage, res.status);
   }
 
   return data;
@@ -169,9 +203,15 @@ export async function getMissionSession(sessionId: string) {
 }
 
 export async function getLatestMissionSession(scheduleId: string, scheduleMissionId: string) {
-  const data = await requestJson<ApiMissionSession>(`/schedules/${encodeURIComponent(scheduleId)}/missions/${encodeURIComponent(scheduleMissionId)}/session`, 'GET');
+  const data = await requestJson<ApiMissionSession | null>(`/schedules/${encodeURIComponent(scheduleId)}/missions/${encodeURIComponent(scheduleMissionId)}/session`, 'GET');
+
+  if (!data || data.id === undefined || data.id === null) {
+    throw new MissionSessionApiError('진행 중인 미션 세션이 없습니다.', 404);
+  }
+
   return normalizeSession(data);
 }
+
 export async function joinMissionSession(sessionId: string) {
   const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/join`, 'POST');
   return normalizeSession(data);
