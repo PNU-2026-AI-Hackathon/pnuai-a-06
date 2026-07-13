@@ -25,6 +25,7 @@ from app.services.schedules import (
     build_share_invitation_response,
     create_schedule_share_invitation,
     create_schedule,
+    delete_schedule,
     get_accessible_schedule,
     get_any_invitation_preview,
     invite_schedule_member,
@@ -193,6 +194,30 @@ def update_mission_schedule(
             detail="Mission schedule not found.",
         )
     return schedule
+
+
+@schedules_router.delete(
+    "/{schedule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a schedule",
+    description="Only the schedule creator can delete the schedule and its related members, missions, and invitations.",
+    responses={404: {"description": "Schedule was not found or the user is not the creator."}},
+)
+def delete_mission_schedule(
+    schedule_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    deleted = delete_schedule(
+        db,
+        schedule_id=schedule_id,
+        creator_id=current_user.id,
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mission schedule not found.",
+        )
 
 
 @schedule_invitations_router.post(

@@ -130,13 +130,15 @@ def user_can_add_schedule_mission(schedule: MissionSchedule, user_id: int) -> bo
 
 
 def list_user_schedules(db: Session, user_id: int) -> list[MissionSchedule]:
+    member_access = select(ScheduleMember.id).where(
+        ScheduleMember.schedule_id == MissionSchedule.id,
+        ScheduleMember.user_id == user_id,
+    ).exists()
     stmt = (
         select(MissionSchedule)
-        .outerjoin(ScheduleMember, ScheduleMember.schedule_id == MissionSchedule.id)
-        .where(or_(MissionSchedule.creator_id == user_id, ScheduleMember.user_id == user_id))
+        .where(or_(MissionSchedule.creator_id == user_id, member_access))
         .options(*_schedule_load_options())
         .order_by(MissionSchedule.start_date, MissionSchedule.id)
-        .distinct()
     )
     return [_sort_schedule_children(schedule) for schedule in db.scalars(stmt).all()]
 
@@ -324,6 +326,21 @@ def update_schedule(
 
     db.commit()
     return _load_schedule(db, schedule.id)
+
+
+def delete_schedule(
+    db: Session,
+    *,
+    schedule_id: int,
+    creator_id: int,
+) -> bool:
+    schedule = db.get(MissionSchedule, schedule_id)
+    if schedule is None or schedule.creator_id != creator_id:
+        return False
+
+    db.delete(schedule)
+    db.commit()
+    return True
 
 
 def invite_schedule_member(
