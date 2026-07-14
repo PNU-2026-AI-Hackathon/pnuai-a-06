@@ -1,12 +1,18 @@
 import { useFocusEffect } from '@react-navigation/native';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
-import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { getAuthItem } from '@/lib/auth-storage';
 import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
+
+const birdIcon = require('../../assets/svg/active/3d_bird.svg');
+const crownIcon = require('../../assets/svg/active/crown.svg');
+const CARD_DRAG_STEP = 60;
+const CARD_SHIFT_DISTANCE = 100;
 
 function formatDateRange(schedule: TripSchedule) {
   if (!schedule.startDate && !schedule.endDate) {
@@ -20,15 +26,144 @@ function formatDateRange(schedule: TripSchedule) {
   return schedule.startDate ?? schedule.endDate ?? '날짜 미정';
 }
 
-function getPeopleText(schedule: TripSchedule) {
-  return schedule.peopleCount ? `${schedule.peopleCount}명` : '인원 미정';
+function isCreatorSchedule(schedule: TripSchedule) {
+  const currentUserId = getAuthItem('user_id');
+
+  if (currentUserId && schedule.creatorId) {
+    return currentUserId === schedule.creatorId;
+  }
+
+  return schedule.permissions.canDeleteSchedule;
+}
+
+function moveScheduleItem(items: TripSchedule[], scheduleId: string, offset: number) {
+  const fromIndex = items.findIndex((item) => item.scheduleId === scheduleId);
+
+  if (fromIndex < 0) {
+    return items;
+  }
+
+  const toIndex = Math.max(0, Math.min(items.length - 1, fromIndex + offset));
+
+  if (fromIndex === toIndex) {
+    return items;
+  }
+
+  const nextItems = [...items];
+  const [movedItem] = nextItems.splice(fromIndex, 1);
+  nextItems.splice(toIndex, 0, movedItem);
+
+  return nextItems;
+}
+
+type ScheduleCardProps = {
+  deletingScheduleId: string | null;
+  isEditing: boolean;
+  dragPreviewOffset: number;
+  isDragging: boolean;
+  onDelete: (schedule: TripSchedule) => void;
+  onDragCancel: () => void;
+  onDragEnd: (scheduleId: string, dragY: number) => void;
+  onDragMove: (scheduleId: string, dragY: number) => void;
+  onDragStart: (scheduleId: string) => void;
+  onOpen: (schedule: TripSchedule) => void;
+  schedule: TripSchedule;
+};
+
+function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEditing, onDelete, onDragCancel, onDragEnd, onDragMove, onDragStart, onOpen, schedule }: ScheduleCardProps) {
+  const dragY = useRef(new Animated.Value(0)).current;
+  const previewY = useRef(new Animated.Value(0)).current;
+  const isDeleting = deletingScheduleId === schedule.scheduleId;
+  const canDelete = schedule.permissions.canDeleteSchedule;
+  const isCreator = isCreatorSchedule(schedule);
+  const isEditingRef = useRef(isEditing);
+  isEditingRef.current = isEditing;
+  useEffect(() => {
+    Animated.spring(previewY, {
+      friction: 7,
+      tension: 180,
+      toValue: dragPreviewOffset,
+      useNativeDriver: true,
+    }).start();
+  }, [dragPreviewOffset, previewY]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => isEditingRef.current,
+      onStartShouldSetPanResponderCapture: () => isEditingRef.current,
+      onMoveShouldSetPanResponder: (_, gestureState) => isEditingRef.current && Math.abs(gestureState.dy) > 2 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => isEditingRef.current && Math.abs(gestureState.dy) > 2 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+      onPanResponderGrant: () => {
+        dragY.setValue(0);
+        onDragStart(schedule.scheduleId);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        dragY.setValue(gestureState.dy);
+        onDragMove(schedule.scheduleId, gestureState.dy);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
+        onDragEnd(schedule.scheduleId, gestureState.dy);
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
+        onDragCancel();
+      },
+    })
+  ).current;
+
+  const cardContent = (
+    <>
+      <View style={styles.scheduleBody}>
+        <View style={styles.scheduleThumb}>
+          {isCreator ? <Image source={crownIcon} style={styles.crownBadge} contentFit="contain" /> : null}
+          <Text style={styles.scheduleThumbText}>{schedule.roomName.slice(0, 1)}</Text>
+        </View>
+        <View style={styles.scheduleInfo}>
+          <Text numberOfLines={1} style={styles.scheduleTitle}>{schedule.roomName}</Text>
+          <Text numberOfLines={1} style={styles.scheduleDate}>{formatDateRange(schedule)}</Text>
+        </View>
+      </View>
+
+      {isEditing ? (
+        <View style={styles.editActions}>
+          {canDelete ? (
+            <Pressable accessibilityLabel={`${schedule.roomName} 삭제`} disabled={isDeleting} onPress={() => onDelete(schedule)} style={styles.deletePill}>
+              {isDeleting ? <ActivityIndicator color="#D06958" /> : <Text style={styles.deletePillText}>삭제</Text>}
+            </Pressable>
+          ) : null}
+          <View style={styles.dragHandleBox} {...panResponder.panHandlers}>
+            <Text style={styles.dragHandle}>≡</Text>
+          </View>
+        </View>
+      ) : (
+        <Text style={styles.chevron}>›</Text>
+      )}
+    </>
+  );
+
+  return (
+    <Animated.View style={[styles.scheduleCardWrap, isDragging && styles.draggingScheduleCardWrap, { transform: [{ translateY: Animated.add(dragY, previewY) }] }]}>
+      {isEditing ? (
+        <View style={[styles.scheduleCard, isCreator && styles.creatorScheduleCard, styles.editingScheduleCard]}>
+          {cardContent}
+        </View>
+      ) : (
+        <ScalePressable accessibilityRole="button" onPress={() => onOpen(schedule)} pressedScale={0.985} style={[styles.scheduleCard, isCreator && styles.creatorScheduleCard]}>
+          {cardContent}
+        </ScalePressable>
+      )}
+    </Animated.View>
+  );
 }
 
 export default function TripHubScreen() {
   const { bottomActionInset, horizontalPadding, topInset } = useResponsiveLayout();
   const [schedules, setSchedules] = useState<TripSchedule[]>(() => getCachedTripSchedules());
   const [isLoading, setIsLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
+  const [activeDrag, setActiveDrag] = useState<{ dragY: number; scheduleId: string } | null>(null);
   const [message, setMessage] = useState('');
 
   const refreshSchedules = useCallback(() => {
@@ -92,8 +227,7 @@ export default function TripHubScreen() {
       setDeletingScheduleId(schedule.scheduleId);
       setMessage('');
       await deleteTripSchedule(schedule.scheduleId);
-      const nextSchedules = getCachedTripSchedules();
-      setSchedules(nextSchedules);
+      setSchedules((currentSchedules) => currentSchedules.filter((item) => item.scheduleId !== schedule.scheduleId));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '여행 일정 삭제에 실패했어요.');
     } finally {
@@ -113,70 +247,102 @@ export default function TripHubScreen() {
     ]);
   };
 
-  return (
-    <View
-      style={[
-        styles.container,
-        {
-          paddingHorizontal: horizontalPadding,
-          paddingTop: topInset,
-        },
-      ]}>
-      <TopBar title="여행" onBack={() => router.back()} />
+  const getDragIndexOffset = (dragY: number) => {
+    const roundedOffset = Math.round(dragY / CARD_DRAG_STEP);
+    return roundedOffset === 0 && Math.abs(dragY) > 10 ? Math.sign(dragY) : roundedOffset;
+  };
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomActionInset }]} keyboardShouldPersistTaps="handled" removeClippedSubviews={false} showsVerticalScrollIndicator={false} style={styles.scrollArea}>
-        <View style={styles.headerBlock}>
-          <Text style={styles.heading}>여행 일정</Text>
-          <Text style={styles.description}>새 여행을 만들고 진행 중인 일정을 확인해요.</Text>
+  const handleDragEnd = (scheduleId: string, dragY: number) => {
+    const offset = getDragIndexOffset(dragY);
+    setActiveDrag(null);
+
+    if (offset === 0) {
+      return;
+    }
+
+    setSchedules((currentSchedules) => moveScheduleItem(currentSchedules, scheduleId, offset));
+    setMessage('변경한 순서는 이 화면에서만 적용돼요. 서버 저장 API가 생기면 영구 저장할 수 있어요.');
+  };
+
+  const handleDragMove = (scheduleId: string, dragY: number) => {
+    setActiveDrag({ dragY, scheduleId });
+  };
+
+  const getSchedulePreviewOffset = (scheduleId: string, index: number) => {
+    if (!activeDrag || activeDrag.scheduleId === scheduleId) {
+      return 0;
+    }
+
+    const activeIndex = schedules.findIndex((schedule) => schedule.scheduleId === activeDrag.scheduleId);
+    if (activeIndex < 0) {
+      return 0;
+    }
+
+    const targetIndex = Math.max(0, Math.min(schedules.length - 1, activeIndex + getDragIndexOffset(activeDrag.dragY)));
+
+    if (activeIndex < targetIndex && index > activeIndex && index <= targetIndex) {
+      return -CARD_SHIFT_DISTANCE;
+    }
+
+    if (activeIndex > targetIndex && index >= targetIndex && index < activeIndex) {
+      return CARD_SHIFT_DISTANCE;
+    }
+
+    return 0;
+  };
+
+  return (
+    <View style={[styles.container, { paddingHorizontal: horizontalPadding, paddingTop: topInset }]}>
+      <View style={styles.topBar}>
+        <Pressable accessibilityLabel="뒤로 가기" onPress={() => router.back()} style={styles.backButton}>
+          <Text style={styles.backIcon}>‹</Text>
+        </Pressable>
+        <Text style={styles.topTitle}>일정 관리</Text>
+        <View style={styles.topSpacer} />
+      </View>
+
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomActionInset + 28 }]} keyboardShouldPersistTaps="handled" removeClippedSubviews={false} scrollEnabled={!isEditing} showsVerticalScrollIndicator={false} style={styles.scrollArea}>
+        <View style={styles.createCard}>
+          <View style={styles.createTopRow}>
+            <Image source={birdIcon} style={styles.birdIcon} contentFit="contain" />
+            <View style={styles.createCopy}>
+              <Text style={styles.createTitle}>여행을 떠나볼까요?</Text>
+              <Text style={styles.createSubtitle}>여행 날짜와 동행자를 설정해요</Text>
+            </View>
+          </View>
+          <ScalePressable accessibilityRole="button" onPress={() => router.push('/trip')} pressedScale={0.98} style={styles.createButton}>
+            <Text style={styles.createButtonText}>새 일정 만들기</Text>
+          </ScalePressable>
         </View>
 
-        <ScalePressable accessibilityRole="button" onPress={() => router.push('/trip')} pressedScale={0.97} style={styles.createButton}>
-          <View>
-            <Text style={styles.createButtonTitle}>새 일정 만들기</Text>
-            <Text style={styles.createButtonSubtitle}>여행 날짜와 동행자를 설정해요</Text>
-          </View>
-          <Text style={styles.createButtonIcon}>+</Text>
-        </ScalePressable>
-
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>진행 중 여행</Text>
-          {isLoading ? <ActivityIndicator color="#6EA4BF" /> : null}
+          <Text style={styles.sectionTitle}>여행 목록</Text>
+          <View style={styles.sectionActions}>
+            {isLoading ? <ActivityIndicator color="#6EA4BF" /> : null}
+            <Pressable accessibilityLabel={isEditing ? '여행 목록 편집 완료' : '여행 목록 편집'} onPress={() => { setActiveDrag(null); setIsEditing((value) => !value); }} style={styles.moreButton}>
+              <Text style={[styles.moreIcon, isEditing && styles.doneText]}>{isEditing ? '완료' : '•••'}</Text>
+            </Pressable>
+          </View>
         </View>
 
         {schedules.length > 0 ? (
           <View style={styles.scheduleList}>
-            {schedules.map((schedule) => {
-              const isDeleting = deletingScheduleId === schedule.scheduleId;
-
-              return (
-                <View key={schedule.scheduleId} style={styles.scheduleItem}>
-                  <ScalePressable accessibilityRole="button" onPress={() => openSchedule(schedule)} pressedScale={0.98} style={styles.scheduleOpenArea}>
-                    <View style={styles.scheduleThumb}>
-                      <Text style={styles.scheduleThumbText}>{schedule.roomName.slice(0, 1)}</Text>
-                    </View>
-                    <View style={styles.scheduleInfo}>
-                      <Text numberOfLines={1} style={styles.scheduleTitle}>
-                        {schedule.roomName}
-                      </Text>
-                      <Text numberOfLines={1} style={styles.scheduleMeta}>
-                        {formatDateRange(schedule)} · {getPeopleText(schedule)}
-                      </Text>
-                    </View>
-                  </ScalePressable>
-                  {schedule.permissions.canDeleteSchedule ? (
-                    <ScalePressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${schedule.roomName} 삭제`}
-                      disabled={isDeleting}
-                      onPress={() => confirmDeleteSchedule(schedule)}
-                      pressedScale={0.92}
-                      style={styles.deleteButton}>
-                      {isDeleting ? <ActivityIndicator color="#D06958" /> : <Text style={styles.deleteButtonText}>삭제</Text>}
-                    </ScalePressable>
-                  ) : null}
-                </View>
-              );
-            })}
+            {schedules.map((schedule, index) => (
+              <ScheduleCard
+                deletingScheduleId={deletingScheduleId}
+                dragPreviewOffset={getSchedulePreviewOffset(schedule.scheduleId, index)}
+                isDragging={activeDrag?.scheduleId === schedule.scheduleId}
+                isEditing={isEditing}
+                key={schedule.scheduleId}
+                onDelete={confirmDeleteSchedule}
+                onDragCancel={() => setActiveDrag(null)}
+                onDragEnd={handleDragEnd}
+                onDragMove={handleDragMove}
+                onDragStart={(scheduleId) => setActiveDrag({ dragY: 0, scheduleId })}
+                onOpen={openSchedule}
+                schedule={schedule}
+              />
+            ))}
           </View>
         ) : (
           <View style={styles.emptyBox}>
@@ -200,141 +366,276 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingTop: 30,
+    paddingTop: 34,
   },
-  headerBlock: {
-    marginBottom: 26,
+  topBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    height: 48,
+    justifyContent: 'space-between',
   },
-  heading: {
+  backButton: {
+    alignItems: 'flex-start',
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  backIcon: {
     color: '#10161F',
-    fontSize: 25,
-    fontWeight: '700',
-    lineHeight: 33,
+    fontSize: 42,
+    lineHeight: 42,
   },
-  description: {
+  topTitle: {
+    color: '#10161F',
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 24,
+    textAlign: 'center',
+  },
+  topSpacer: {
+    width: 48,
+  },
+  createCard: {
+    backgroundColor: '#E9F8FF',
+    borderRadius: 32,
+    minHeight: 174,
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+  },
+  createTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 20,
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  birdIcon: {
+    height: 88,
+    width: 88,
+  },
+  createCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  createTitle: {
+    color: '#10161F',
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  createSubtitle: {
     color: '#8A9194',
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '400',
+    lineHeight: 16,
+    marginTop: 10,
   },
   createButton: {
     alignItems: 'center',
-    backgroundColor: '#EAF5F9',
-    borderRadius: 18,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 92,
-    paddingHorizontal: 22,
-    paddingVertical: 18,
+    alignSelf: 'stretch',
+    backgroundColor: '#63B5CD',
+    borderRadius: 999,
+    height: 46,
+    justifyContent: 'center',
   },
-  createButtonTitle: {
-    color: '#10161F',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  createButtonSubtitle: {
-    color: '#6F7B81',
+  createButtonText: {
+    color: '#ffffff',
     fontSize: 12,
-    marginTop: 7,
-  },
-  createButtonIcon: {
-    color: '#6EA4BF',
-    fontSize: 32,
-    fontWeight: '300',
-    lineHeight: 36,
+    fontWeight: '600',
   },
   sectionHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 34,
-    minHeight: 26,
+    marginTop: 48,
+    minHeight: 34,
   },
   sectionTitle: {
-    color: '#10161F',
-    fontSize: 18,
-    fontWeight: '700',
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 30,
+  },
+  sectionActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  moreButton: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    height: 30,
+    justifyContent: 'center',
+    minWidth: 26,
+    paddingTop: 0,
+  },
+  moreIcon: {
+    color: '#8A9194',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+    lineHeight: 13,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+  },
+  doneText: {
+    color: '#6EA4BF',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
   },
   scheduleList: {
-    gap: 10,
-    marginTop: 14,
+    gap: 12,
+    marginTop: 18,
   },
-  scheduleItem: {
+  scheduleCardWrap: {
+    position: 'relative',
+    zIndex: 1,
+  },
+  draggingScheduleCardWrap: {
+    elevation: 8,
+    zIndex: 10,
+  },
+  crownBadge: {
+    height: 24,
+    left: -5,
+    position: 'absolute',
+    top: -12,
+    transform: [{ rotate: '-18deg' }],
+    width: 24,
+    zIndex: 3,
+  },
+  scheduleCard: {
     alignItems: 'center',
-    borderBottomColor: '#E5E9EB',
-    borderBottomWidth: 1,
+    backgroundColor: '#E9F8FF',
+    borderRadius: 20,
     flexDirection: 'row',
-    minHeight: 76,
-    paddingVertical: 12,
+    minHeight: 88,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
   },
-  scheduleOpenArea: {
+  creatorScheduleCard: {
+    backgroundColor: '#EAF6FB',
+  },
+  editingScheduleCard: {
+    borderColor: '#DAE5EA',
+    borderWidth: 1,
+  },
+  scheduleBody: {
     alignItems: 'center',
     flex: 1,
     flexDirection: 'row',
+    minWidth: 0,
   },
   scheduleThumb: {
     alignItems: 'center',
-    backgroundColor: '#D6EAF5',
-    borderRadius: 16,
-    height: 52,
+    backgroundColor: '#D8EEF7',
+    borderRadius: 18,
+    height: 48,
     justifyContent: 'center',
-    width: 52,
+    overflow: 'visible',
+    position: 'relative',
+    width: 48,
   },
   scheduleThumbText: {
     color: '#4D8DA9',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   scheduleInfo: {
     flex: 1,
-    marginLeft: 14,
+    marginLeft: 18,
+    minWidth: 0,
   },
   scheduleTitle: {
-    color: '#10161F',
+    color: '#000000',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '500',
+    lineHeight: 22,
   },
-  scheduleMeta: {
-    color: '#8A9194',
+  scheduleDate: {
+    color: '#7A909A',
     fontSize: 12,
-    marginTop: 6,
+    fontWeight: '400',
+    lineHeight: 18,
+    marginTop: 4,
   },
-  deleteButton: {
+  chevron: {
+    color: '#8A9194',
+    fontSize: 44,
+    fontWeight: '300',
+    lineHeight: 44,
+    marginLeft: 16,
+  },
+  editActions: {
     alignItems: 'center',
-    minHeight: 42,
-    justifyContent: 'center',
-    paddingLeft: 12,
-    paddingVertical: 8,
+    flexDirection: 'row',
+    gap: 12,
+    marginLeft: 12,
   },
-  deleteButtonText: {
+  deletePill: {
+    alignItems: 'center',
+    backgroundColor: '#FFF0EC',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 38,
+    minWidth: 58,
+    paddingHorizontal: 12,
+  },
+  deletePillText: {
     color: '#D06958',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '800',
+  },
+  dragHandleBox: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    width: 34,
+  },
+  dragHandle: {
+    color: '#9AA1A5',
+    fontSize: 24,
+    fontWeight: '800',
+    lineHeight: 26,
   },
   emptyBox: {
     alignItems: 'center',
-    backgroundColor: '#F5F7F8',
-    borderRadius: 16,
-    marginTop: 14,
-    paddingHorizontal: 20,
-    paddingVertical: 34,
+    backgroundColor: '#D1E1EB',
+    borderRadius: 18,
+    marginTop: 18,
+    paddingHorizontal: 24,
+    paddingVertical: 38,
   },
   emptyTitle: {
-    color: '#10161F',
+    color: '#000000',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   emptyDescription: {
     color: '#8A9194',
     fontSize: 12,
     lineHeight: 18,
-    marginTop: 8,
+    marginTop: 4,
     textAlign: 'center',
   },
   messageText: {
     color: '#D06958',
     fontSize: 12,
+    fontWeight: '600',
     lineHeight: 18,
     marginTop: 14,
   },
 });
+
+
+
+
+
+
+
+
+
+
+

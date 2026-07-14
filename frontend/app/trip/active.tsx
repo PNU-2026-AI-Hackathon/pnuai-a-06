@@ -739,8 +739,8 @@ const styles = StyleSheet.create({
     width: 44,
   },
   headerIcon: {
-    height: 24,
-    width: 24,
+    height: 20,
+    width: 20,
   },
   sectionLabel: {
     color: '#8A9194',
@@ -850,7 +850,7 @@ const styles = StyleSheet.create({
   },
   feedCameraIcon: {
     height: 18,
-    width: 20,
+    width: 18,
   },
   feedCopy: {
     flex: 1,
