@@ -6,7 +6,8 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, getCachedMissions, type MissionItem } from '@/lib/mission-api';
-import { addMissionToSchedule, getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
+import { getLatestMissionSession, isMissionSessionNotFoundError, type MissionSession } from '@/lib/mission-session-api';
+import { addMissionToSchedule, getCachedTripSchedules, getTripSchedule, listTripSchedules, removeMissionFromSchedule, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
 type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
 
@@ -90,17 +91,22 @@ function formatScheduleDate(schedule: TripSchedule) {
 
 export default function MissionDetailScreen() {
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
-  const params = useLocalSearchParams<{ district?: string; districtCode?: string; missionCode?: string; theme?: string }>();
+  const params = useLocalSearchParams<{ district?: string; districtCode?: string; missionCode?: string; scheduleId?: string; theme?: string }>();
   const focusedDistrict = getParamValue(params.district) ?? '금정구';
   const focusedDistrictCode = getParamValue(params.districtCode) || districtCodeByLabel[focusedDistrict] || '';
   const focusedMissionCode = getParamValue(params.missionCode) ?? '';
+  const targetScheduleId = getParamValue(params.scheduleId);
   const [selectedTheme, setSelectedTheme] = useState<MissionTheme>(getValidTheme(params.theme));
   const [missions, setMissions] = useState<MissionItem[]>(() => getCachedMissions());
   const [schedules, setSchedules] = useState<TripSchedule[]>([]);
+  const [targetSchedule, setTargetSchedule] = useState<TripSchedule | null>(null);
+  const [targetSessions, setTargetSessions] = useState<Record<string, MissionSession>>({});
   const [selectedMission, setSelectedMission] = useState<MissionItem | null>(null);
   const [isLoading, setIsLoading] = useState(() => getCachedMissions().length === 0);
   const [isSchedulePickerVisible, setIsSchedulePickerVisible] = useState(false);
   const [isAddingMission, setIsAddingMission] = useState(false);
+  const [isLoadingTargetSessions, setIsLoadingTargetSessions] = useState(false);
+  const [busyMissionId, setBusyMissionId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const sortedMissions = useMemo(
@@ -113,6 +119,18 @@ export default function MissionDetailScreen() {
       }),
     [focusedDistrict, focusedDistrictCode, focusedMissionCode, missions, selectedTheme]
   );
+  const targetScheduleMissionByMissionId = useMemo(() => {
+    const missionMap = new Map<string, TripScheduleMission>();
+
+    targetSchedule?.missions.forEach((mission) => {
+      missionMap.set(mission.missionId, mission);
+      if (mission.missionCode) {
+        missionMap.set(mission.missionCode, mission);
+      }
+    });
+
+    return missionMap;
+  }, [targetSchedule]);
 
   useEffect(() => {
     let isActive = true;
@@ -152,6 +170,72 @@ export default function MissionDetailScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!targetScheduleId) {
+      setTargetSchedule(null);
+      setTargetSessions({});
+      return;
+    }
+
+    let isActive = true;
+
+    getTripSchedule(targetScheduleId)
+      .then((schedule) => {
+        if (isActive) {
+          setTargetSchedule(schedule);
+        }
+      })
+      .catch((error) => {
+        if (isActive) {
+          setActionMessage(error instanceof Error ? error.message : '일정 정보를 불러오지 못했어요.');
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [targetScheduleId]);
+  useEffect(() => {
+    if (!targetScheduleId || !targetSchedule) {
+      setTargetSessions({});
+      setIsLoadingTargetSessions(false);
+      return;
+    }
+
+    let isActive = true;
+    const scheduleId = targetScheduleId;
+    const schedule = targetSchedule;
+
+    async function loadTargetSessions() {
+      setIsLoadingTargetSessions(true);
+
+      const entries = await Promise.all(
+        schedule.missions.map(async (mission) => {
+          try {
+            const session = await getLatestMissionSession(scheduleId, mission.scheduleMissionId);
+            return [mission.scheduleMissionId, session] as const;
+          } catch (error) {
+            if (isMissionSessionNotFoundError(error)) {
+              return null;
+            }
+
+            return null;
+          }
+        })
+      );
+
+      if (isActive) {
+        setTargetSessions(Object.fromEntries(entries.filter((entry): entry is readonly [string, MissionSession] => Boolean(entry))));
+        setIsLoadingTargetSessions(false);
+      }
+    }
+
+    loadTargetSessions();
+
+    return () => {
+      isActive = false;
+    };
+  }, [targetSchedule, targetScheduleId]);
   const closeSchedulePicker = () => {
     if (isAddingMission) {
       return;
@@ -168,7 +252,89 @@ export default function MissionDetailScreen() {
     });
   };
 
+  const getAddedScheduleMission = (mission: MissionItem) => {
+    return targetScheduleMissionByMissionId.get(String(mission.id)) ?? targetScheduleMissionByMissionId.get(String(mission.code ?? '')) ?? null;
+  };
+
+  const getAddedMissionState = (mission: MissionItem) => {
+    const addedMission = getAddedScheduleMission(mission);
+
+    if (!addedMission) {
+      return { addedMission, isCompleted: false, isInProgress: false };
+    }
+
+    const session = targetSessions[addedMission.scheduleMissionId];
+    const scheduleStatus = normalizeValue(addedMission.status);
+    const sessionStatus = normalizeValue(session?.status);
+    const completedStatuses = new Set(['COMPLETED', 'COMPLETE', 'FINISHED', 'DONE']);
+    const progressStatuses = new Set(['ACTIVE', 'IN_PROGRESS', 'ONGOING', 'STARTED', 'WAITING', 'READY', 'SHOOTING', 'UPLOADING', 'VOTING', 'REVEALED']);
+    const isCompleted = completedStatuses.has(scheduleStatus) || completedStatuses.has(sessionStatus);
+    const isInProgress = !isCompleted && (Boolean(session) || progressStatuses.has(scheduleStatus) || progressStatuses.has(sessionStatus));
+
+    return { addedMission, isCompleted, isInProgress };
+  };
+
+  const refreshTargetSchedule = async () => {
+    if (!targetScheduleId) {
+      return null;
+    }
+
+    const nextSchedule = await getTripSchedule(targetScheduleId);
+    setTargetSchedule(nextSchedule);
+
+    return nextSchedule;
+  };
+
+  const handleDirectMissionToggle = async (mission: MissionItem) => {
+    if (!targetScheduleId || busyMissionId) {
+      return;
+    }
+
+    const addedMission = getAddedScheduleMission(mission);
+    const { isCompleted, isInProgress } = getAddedMissionState(mission);
+
+    if (addedMission && (isCompleted || isInProgress)) {
+      setActionMessage(isCompleted ? '완료된 미션은 뺄 수 없습니다.' : '진행 중인 미션은 뺄 수 없습니다.');
+      return;
+    }
+
+    if (addedMission && !targetSchedule?.permissions.canRemoveMission) {
+      setActionMessage('미션 삭제 권한이 없습니다.');
+      return;
+    }
+
+    if (!addedMission && !targetSchedule?.permissions.canAddMission) {
+      setActionMessage('미션 추가 권한이 없습니다.');
+      return;
+    }
+
+    try {
+      setBusyMissionId(mission.id);
+      setActionMessage('');
+
+      if (addedMission) {
+        await removeMissionFromSchedule(targetScheduleId, addedMission.scheduleMissionId);
+        await refreshTargetSchedule();
+        setActionMessage(`${mission.title} 미션을 뺐어요.`);
+        return;
+      }
+
+      await addMissionToSchedule(targetScheduleId, mission.id);
+      await refreshTargetSchedule();
+      setActionMessage(`${mission.title} 미션을 담았어요.`);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : '미션 요청에 실패했어요.');
+    } finally {
+      setBusyMissionId(null);
+    }
+  };
+
   const handleAddPress = async (mission: MissionItem) => {
+    if (targetScheduleId) {
+      await handleDirectMissionToggle(mission);
+      return;
+    }
+
     if (isAddingMission) {
       return;
     }
@@ -287,7 +453,15 @@ export default function MissionDetailScreen() {
             </View>
           ) : (
             <View style={styles.missionList}>
-              {sortedMissions.map((mission) => (
+              {sortedMissions.map((mission) => {
+                const { addedMission, isCompleted, isInProgress } = targetScheduleId ? getAddedMissionState(mission) : { addedMission: null, isCompleted: false, isInProgress: false };
+                const isMissionBusy = busyMissionId === mission.id || (isAddingMission && selectedMission?.id === mission.id);
+                const isScheduleLoading = Boolean(targetScheduleId && !targetSchedule);
+                const isCheckingSession = Boolean(addedMission && isLoadingTargetSessions);
+                const isRemoveDisabled = Boolean(addedMission && (!targetSchedule?.permissions.canRemoveMission || isCompleted || isInProgress));
+                const missionButtonLabel = isCheckingSession ? '확인 중' : isCompleted ? '완료' : isInProgress ? '진행 중' : addedMission ? '빼기' : '담기';
+
+                return (
                 <View key={mission.id} style={styles.missionCard}>
                   <View style={styles.missionHeaderRow}>
                     <View style={styles.missionTitleGroup}>
@@ -296,12 +470,12 @@ export default function MissionDetailScreen() {
                     </View>
                     <ScalePressable
                       accessibilityRole="button"
-                      accessibilityLabel={`${mission.title} 담기`}
-                      disabled={isAddingMission}
+                      accessibilityLabel={`${mission.title} ${missionButtonLabel}`}
+                      disabled={isMissionBusy || isScheduleLoading || isRemoveDisabled}
                       onPress={() => handleAddPress(mission)}
                       pressedScale={0.94}
-                      style={[styles.addMissionButton, isAddingMission && styles.disabledButton]}>
-                      {isAddingMission && selectedMission?.id === mission.id ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.addMissionButtonText}>담기</Text>}
+                      style={[addedMission ? styles.removeMissionButton : styles.addMissionButton, (isMissionBusy || isScheduleLoading || isRemoveDisabled) && styles.disabledButton]}>
+                      {isMissionBusy ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.addMissionButtonText}>{missionButtonLabel}</Text>}
                     </ScalePressable>
                   </View>
                   <Text style={styles.descriptionText}>{mission.description}</Text>
@@ -311,7 +485,8 @@ export default function MissionDetailScreen() {
                     <View style={styles.photoPlaceholder} />
                   )}
                 </View>
-              ))}
+                );
+              })}
             </View>
           )}
         </View>
@@ -458,6 +633,15 @@ const styles = StyleSheet.create({
   addMissionButton: {
     alignItems: 'center',
     backgroundColor: '#409CB7',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 38,
+    minWidth: 62,
+    paddingHorizontal: 16,
+  },
+  removeMissionButton: {
+    alignItems: 'center',
+    backgroundColor: '#D06958',
     borderRadius: 999,
     justifyContent: 'center',
     minHeight: 38,

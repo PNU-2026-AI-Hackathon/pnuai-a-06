@@ -36,6 +36,19 @@ type ApiScheduleMission = {
   updated_at?: string;
 };
 
+type ApiScheduleUser = {
+  email?: string | null;
+  id?: string | number;
+  nickname?: string | null;
+};
+
+type ApiScheduleMember = {
+  invite_email?: string | null;
+  status?: string;
+  user?: ApiScheduleUser | null;
+  user_id?: string | number;
+};
+
 type ApiSchedule = {
   can_add_mission?: boolean;
   can_delete_schedule?: boolean;
@@ -46,9 +59,10 @@ type ApiSchedule = {
   can_remove_mission?: boolean;
   can_update_schedule?: boolean;
   companion_count?: string | number;
-  companions?: unknown[];
+  companions?: ApiScheduleMember[];
   created_at?: string;
   createdAt?: string;
+  creator?: ApiScheduleUser | null;
   creator_id?: string | number;
   endDate?: string;
   end_date?: string;
@@ -56,6 +70,7 @@ type ApiSchedule = {
   member_count?: string | number;
   missions?: ApiScheduleMission[];
   participant_count?: string | number;
+  participants?: ApiScheduleUser[];
   peopleCount?: string | number;
   people_count?: string | number;
   permissions?: ApiSchedulePermissions;
@@ -109,6 +124,12 @@ export type TripScheduleMission = {
   type?: string | null;
 };
 
+export type TripScheduleUser = {
+  email?: string | null;
+  id?: string;
+  nickname?: string | null;
+};
+
 export type TripSchedulePermissions = {
   canAddMission: boolean;
   canDeleteSchedule: boolean;
@@ -123,6 +144,7 @@ export type TripSchedule = {
   creatorId?: string;
   endDate?: string;
   missions: TripScheduleMission[];
+  participants: TripScheduleUser[];
   permissions: TripSchedulePermissions;
   peopleCount?: string;
   roomName: string;
@@ -298,6 +320,58 @@ function normalizeSchedulePermissions(data: ApiSchedule, creatorId: string | und
   };
 }
 
+function normalizeScheduleUser(data: ApiScheduleUser | null | undefined): TripScheduleUser | null {
+  if (!data) {
+    return null;
+  }
+
+  const id = data.id === undefined || data.id === null ? undefined : String(data.id);
+  const nickname = data.nickname ?? null;
+  const email = data.email ?? null;
+
+  if (!id && !nickname && !email) {
+    return null;
+  }
+
+  return { email, id, nickname };
+}
+
+function normalizeScheduleParticipants(data: ApiSchedule) {
+  const participants = Array.isArray(data.participants) ? data.participants.map(normalizeScheduleUser).filter((user): user is TripScheduleUser => Boolean(user)) : [];
+  const participantIds = new Set(participants.map((user) => user.id).filter(Boolean));
+  const creator = normalizeScheduleUser(data.creator);
+
+  if (creator?.id && !participantIds.has(creator.id)) {
+    participants.unshift(creator);
+    participantIds.add(creator.id);
+  } else if (creator && !creator.id && participants.length === 0) {
+    participants.unshift(creator);
+  }
+
+  if (Array.isArray(data.companions)) {
+    data.companions.forEach((companion) => {
+      if (companion.status && companion.status !== 'ACCEPTED') {
+        return;
+      }
+
+      const user = normalizeScheduleUser(companion.user ?? (companion.user_id === undefined ? null : { id: companion.user_id, email: companion.invite_email }));
+      if (!user) {
+        return;
+      }
+
+      if (user.id && participantIds.has(user.id)) {
+        return;
+      }
+
+      participants.push(user);
+      if (user.id) {
+        participantIds.add(user.id);
+      }
+    });
+  }
+
+  return participants;
+}
 function normalizeSchedule(data: ApiSchedule, fallbackRoomName: string): TripSchedule {
   const scheduleId = data.schedule_id ?? data.id ?? data.room_id;
 
@@ -314,6 +388,7 @@ function normalizeSchedule(data: ApiSchedule, fallbackRoomName: string): TripSch
     creatorId,
     endDate: data.end_date ?? data.endDate,
     missions: Array.isArray(data.missions) ? data.missions.map(normalizeScheduleMission) : [],
+    participants: normalizeScheduleParticipants(data),
     peopleCount: peopleCount === undefined || peopleCount === null ? undefined : String(peopleCount),
     permissions: normalizeSchedulePermissions(data, creatorId),
     roomName: data.schedule_name ?? data.room_name ?? data.title ?? fallbackRoomName,
@@ -353,7 +428,7 @@ export function getCachedTripSchedules() {
 
   try {
     const parsed = JSON.parse(raw) as TripSchedule[];
-    return Array.isArray(parsed) ? sortTripSchedules(parsed.filter((item) => item.scheduleId && item.roomName).map((item) => ({ ...item, missions: item.missions ?? [], permissions: item.permissions ?? DEFAULT_MEMBER_PERMISSIONS }))) : [];
+    return Array.isArray(parsed) ? sortTripSchedules(parsed.filter((item) => item.scheduleId && item.roomName).map((item) => ({ ...item, missions: item.missions ?? [], participants: item.participants ?? [], permissions: item.permissions ?? DEFAULT_MEMBER_PERMISSIONS }))) : [];
   } catch {
     return [];
   }
@@ -450,6 +525,22 @@ export async function addMissionToSchedule(scheduleId: string, missionId: string
   return scheduleMission;
 }
 
+export async function removeMissionFromSchedule(scheduleId: string, scheduleMissionId: string) {
+  await requestAuthenticatedJson<Record<string, never>>(`/schedules/${encodeURIComponent(scheduleId)}/missions/${encodeURIComponent(scheduleMissionId)}`, 'DELETE');
+
+  try {
+    await getTripSchedule(scheduleId);
+  } catch {
+    const cachedSchedule = getCachedTripSchedules().find((schedule) => schedule.scheduleId === scheduleId);
+
+    if (cachedSchedule) {
+      cacheTripSchedule({
+        ...cachedSchedule,
+        missions: cachedSchedule.missions.filter((mission) => mission.scheduleMissionId !== scheduleMissionId),
+      });
+    }
+  }
+}
 export async function deleteTripSchedule(scheduleId: string) {
   await requestAuthenticatedJson<Record<string, never>>(`/schedules/${encodeURIComponent(scheduleId)}`, 'DELETE');
   removeCachedTripSchedule(scheduleId);

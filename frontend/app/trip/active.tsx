@@ -54,6 +54,9 @@ function getInviteUrl(invite: TripInvite | null) {
   return invite.inviteUrl ?? createFallbackInviteUrl(invite.inviteToken);
 }
 
+const activeCameraIcon = require('../../assets/svg/active/camera.svg');
+const activeAddPeopleIcon = require('../../assets/svg/active/add_people.svg');
+const activeSettingIcon = require('../../assets/svg/active/setting.svg');
 const REVEALED_SESSION_CACHE_PREFIX = 'trip_revealed_sessions:';
 
 function getRevealedSessionCacheKey(scheduleId: string) {
@@ -110,6 +113,14 @@ function getMissionLocation(mission: TripScheduleMission) {
   }
 
   return mission.placeLabel ?? mission.districtLabel ?? '부산';
+}
+
+function getParticipantText(schedule: TripSchedule | null) {
+  const names = schedule?.participants
+    .map((participant) => participant.nickname || participant.email)
+    .filter((value): value is string => Boolean(value));
+
+  return names && names.length > 0 ? names.join(' · ') : '동행자 정보 없음';
 }
 
 export default function ActiveTripScreen() {
@@ -331,6 +342,18 @@ export default function ActiveTripScreen() {
     setInviteMessage('초대 링크를 복사했어요.');
   };
 
+  const openMissionDetail = () => {
+    if (!schedule?.scheduleId) {
+      setMessage('일정 정보가 없습니다.');
+      return;
+    }
+
+    router.push({
+      pathname: '/mission/detail',
+      params: { scheduleId: schedule.scheduleId },
+    });
+  };
+
   const openMissionSession = async (mission: TripScheduleMission) => {
     if (!schedule?.scheduleId || isSessionBusy) {
       return;
@@ -476,22 +499,29 @@ export default function ActiveTripScreen() {
         <View style={styles.tripHeader}>
           <View style={styles.tripTitleBlock}>
             <Text numberOfLines={2} style={styles.tripTitle}>{schedule?.roomName ?? '여행 일정'}</Text>
-            <Text style={styles.companionsText}>나 · 선우 · 이정</Text>
+            <Text style={styles.companionsText}>{getParticipantText(schedule)}</Text>
           </View>
-          <ScalePressable accessibilityLabel="담긴 미션 보기" onPress={() => setMissionListVisible(true)} pressedScale={0.9} style={styles.settingsButton}>
-            <Ionicons color="#8A9194" name="options-outline" size={28} />
-          </ScalePressable>
+          <View style={styles.headerActions}>
+            {canInviteCompanion ? (
+              <ScalePressable accessibilityLabel="동행자 추가" disabled={!schedule || isCreatingInvite} onPress={handleCreateInvite} pressedScale={0.9} style={styles.settingsButton}>
+                {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Image source={activeAddPeopleIcon} style={styles.headerIcon} contentFit="contain" />}
+              </ScalePressable>
+            ) : null}
+            <ScalePressable accessibilityLabel="담긴 미션 보기" onPress={() => setMissionListVisible(true)} pressedScale={0.9} style={styles.settingsButton}>
+              <Image source={activeSettingIcon} style={styles.headerIcon} contentFit="contain" />
+            </ScalePressable>
+          </View>
         </View>
-        <Text style={styles.sectionLabel}>담긴 미션</Text>
+        <Text style={styles.sectionLabel}>담은 미션들</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={{ marginHorizontal: -horizontalPadding }}
           contentContainerStyle={[styles.photoStrip, { paddingHorizontal: horizontalPadding }]}>
-          {canInviteCompanion ? (
-            <ScalePressable accessibilityRole="button" accessibilityLabel="동행자 추가" disabled={!schedule || isCreatingInvite} onPress={handleCreateInvite} pressedScale={0.96} style={styles.inviteTile}>
-              {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Ionicons color="#8A9194" name="person-add" size={20} />}
-              <Text style={styles.inviteTileText}>초대하기</Text>
+          {canAddMission ? (
+            <ScalePressable accessibilityRole="button" accessibilityLabel="미션 상세 리스트 열기" disabled={!schedule} onPress={openMissionDetail} pressedScale={0.96} style={styles.inviteTile}>
+              <Image source={activeCameraIcon} style={styles.inviteTileIcon} contentFit="contain" />
+              <Text style={styles.inviteTileText}>미션하기</Text>
             </ScalePressable>
           ) : null}
           {activeMissions.map((mission) => (
@@ -529,7 +559,7 @@ export default function ActiveTripScreen() {
               <Text style={styles.emptyTitle}>아직 담긴 미션이 없어요</Text>
               <Text style={styles.emptyText}>미션 상세 리스트에서 원하는 미션을 담아보세요.</Text>
               {canAddMission ? (
-                <ScalePressable onPress={() => router.push('/mission/detail')} pressedScale={0.96} style={styles.emptyButton}>
+                <ScalePressable onPress={openMissionDetail} pressedScale={0.96} style={styles.emptyButton}>
                   <Text style={styles.emptyButtonText}>미션 보러가기</Text>
                 </ScalePressable>
               ) : null}
@@ -543,7 +573,7 @@ export default function ActiveTripScreen() {
             completedMissionFeeds.map(({ mission, photos, session: feedSession }) => (
               <ScalePressable key={mission.scheduleMissionId} onPress={() => openFeedSession(feedSession)} pressedScale={0.99} style={styles.feedMissionItem}>
                 <View style={styles.feedIcon}>
-                  <Ionicons color="#ffffff" name="camera" size={20} />
+                  <Image source={activeCameraIcon} style={styles.feedCameraIcon} contentFit="contain" />
                 </View>
                 <View style={styles.feedCopy}>
                   <Text style={styles.feedTitle}>{mission.title}</Text>
@@ -648,14 +678,7 @@ export default function ActiveTripScreen() {
                 </View>
                 <Text style={styles.inviteOptionText}>카카오톡</Text>
               </Pressable>
-              {[{ label: '연진이' }, { label: '김민지' }].map((item) => (
-                <Pressable accessibilityRole="button" accessibilityLabel={`${item.label}에게 초대 공유`} key={item.label} onPress={handleShareInvite} style={styles.inviteOption}>
-                  <View style={styles.inviteContactAvatar}>
-                    <View style={styles.contactKakaoBadge}><Text style={styles.contactKakaoText}>TALK</Text></View>
-                  </View>
-                  <Text style={styles.inviteOptionText}>{item.label}</Text>
-                </Pressable>
-              ))}
+
             </View>
             <View style={styles.inviteDivider} />
             <Pressable accessibilityRole="button" accessibilityLabel="초대 링크 복사하기" onPress={handleCopyInviteLink} style={styles.copyInviteButton}>
@@ -704,11 +727,20 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 4,
   },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
   settingsButton: {
     alignItems: 'center',
     height: 44,
     justifyContent: 'center',
     width: 44,
+  },
+  headerIcon: {
+    height: 24,
+    width: 24,
   },
   sectionLabel: {
     color: '#8A9194',
@@ -734,6 +766,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 10,
     width: 80,
+  },
+  inviteTileIcon: {
+    height: 20,
+    width: 22,
   },
   inviteTileText: {
     color: '#8A9194',
@@ -811,6 +847,10 @@ const styles = StyleSheet.create({
     height: 42,
     justifyContent: 'center',
     width: 42,
+  },
+  feedCameraIcon: {
+    height: 18,
+    width: 20,
   },
   feedCopy: {
     flex: 1,
