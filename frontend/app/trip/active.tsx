@@ -483,6 +483,7 @@ export default function ActiveTripScreen() {
   const completedMissionFeeds = missions
     .map((mission) => ({ mission, photos: getMissionPhotos(mission), session: revealedSessions[mission.scheduleMissionId] }))
     .filter((item) => item.photos.length > 0);
+  const hasSavedMissions = missions.length > 0;
 
   return (
     <View style={styles.container}>
@@ -490,11 +491,12 @@ export default function ActiveTripScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingBottom: bottomSafeInset + 94,
+            paddingBottom: hasSavedMissions ? bottomSafeInset + 94 : 0,
             paddingHorizontal: horizontalPadding,
             paddingTop: topSafeInset + 28,
           },
         ]}
+        scrollEnabled={hasSavedMissions || isLoading || Boolean(message)}
         showsVerticalScrollIndicator={false}>
         <View style={styles.tripHeader}>
           <View style={styles.tripTitleBlock}>
@@ -543,7 +545,7 @@ export default function ActiveTripScreen() {
         </ScrollView>
         {inviteMessage && !inviteSheetVisible ? <Text style={styles.inlineMessage}>{inviteMessage}</Text> : null}
 
-        <View style={styles.feedPanel}>
+        <View style={[styles.feedPanel, !hasSavedMissions && styles.emptyFeedPanel]}>
           <Text style={styles.dayLabel}>오늘 · 여행 2일차</Text>
           {isLoading ? (
             <View style={styles.stateBox}>
@@ -695,10 +697,11 @@ export default function ActiveTripScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#F4F7FA',
+    backgroundColor: '#ffffff',
     flex: 1,
   },
   scrollContent: {
+    backgroundColor: '#F4F7FA',
     paddingTop: 28,
   },
   tripHeader: {
@@ -823,6 +826,10 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     paddingHorizontal: 24,
     paddingTop: 18,
+  },
+  emptyFeedPanel: {
+    minHeight: 0,
+    paddingBottom: 30,
   },
   dayLabel: {
     borderBottomColor: '#E7EAEB',

@@ -11,7 +11,7 @@ import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, type Tri
 
 const birdIcon = require('../../assets/svg/active/3d_bird.svg');
 const crownIcon = require('../../assets/svg/active/crown.svg');
-const CARD_DRAG_STEP = 60;
+const CARD_DRAG_STEP = 82;
 const CARD_SHIFT_DISTANCE = 100;
 
 function formatDateRange(schedule: TripSchedule) {
@@ -79,12 +79,7 @@ function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEdi
   const isEditingRef = useRef(isEditing);
   isEditingRef.current = isEditing;
   useEffect(() => {
-    Animated.spring(previewY, {
-      friction: 7,
-      tension: 180,
-      toValue: dragPreviewOffset,
-      useNativeDriver: true,
-    }).start();
+    previewY.setValue(dragPreviewOffset);
   }, [dragPreviewOffset, previewY]);
 
   const panResponder = useRef(
@@ -102,7 +97,7 @@ function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEdi
         onDragMove(schedule.scheduleId, gestureState.dy);
       },
       onPanResponderRelease: (_, gestureState) => {
-        Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
+        dragY.setValue(0);
         onDragEnd(schedule.scheduleId, gestureState.dy);
       },
       onPanResponderTerminate: () => {
@@ -249,7 +244,7 @@ export default function TripHubScreen() {
 
   const getDragIndexOffset = (dragY: number) => {
     const roundedOffset = Math.round(dragY / CARD_DRAG_STEP);
-    return roundedOffset === 0 && Math.abs(dragY) > 10 ? Math.sign(dragY) : roundedOffset;
+    return roundedOffset === 0 && Math.abs(dragY) > 28 ? Math.sign(dragY) : roundedOffset;
   };
 
   const handleDragEnd = (scheduleId: string, dragY: number) => {
