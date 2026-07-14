@@ -85,6 +85,7 @@ function isAlreadyJoinedSessionError(error: unknown) {
   return message.includes('이미') || message.includes('already') || message.includes('joined') || message.includes('member');
 }
 
+
 function hasAllComments(session: MissionSession) {
   const requiredCommentsPerPhoto = session.members.length;
 
@@ -97,6 +98,10 @@ function isFinishedSession(session: MissionSession | undefined) {
 
 function isReviewableSession(session: MissionSession) {
   return session.status === 'REVEALED' && session.submissions.length > 0 && !isFinishedSession(session);
+}
+
+function isCompletedScheduleMission(mission: TripScheduleMission) {
+  return mission.status === 'COMPLETED';
 }
 
 function getMissionLocation(mission: TripScheduleMission) {
@@ -129,7 +134,9 @@ export default function ActiveTripScreen() {
   const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
   const [inviteData, setInviteData] = useState<TripInvite | null>(null);
   const missions = schedule?.missions ?? [];
-  const activeMissions = missions.filter((mission) => !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
+  const activeMissions = missions.filter((mission) => !isCompletedScheduleMission(mission) && !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
+  const canAddMission = schedule?.permissions.canAddMission ?? false;
+  const canInviteCompanion = schedule?.permissions.canInviteCompanion ?? false;
   const inviteUrl = getInviteUrl(inviteData);
 
   const rememberFeedSession = useCallback((nextSession: MissionSession, fallbackScheduleMissionId?: string) => {
@@ -207,6 +214,21 @@ export default function ActiveTripScreen() {
           }
         }));
 
+        void Promise.all(nextSchedule.missions.map(async (mission) => {
+          try {
+            const latestSession = await getLatestMissionSession(nextSchedule.scheduleId, mission.scheduleMissionId);
+            if (isActive) {
+              rememberFeedSession(latestSession, mission.scheduleMissionId);
+            }
+          } catch (error) {
+            if (!isMissionSessionNotFoundError(error)) {
+              throw error;
+            }
+          }
+        })).catch(() => {
+          // Schedule rendering should not fail just because one session refresh failed.
+        });
+
         void getActiveMissionSession(nextSchedule.scheduleId)
           .then((activeSession) => {
             if (isActive) {
@@ -260,6 +282,11 @@ export default function ActiveTripScreen() {
   };
 
   const handleCreateInvite = async () => {
+    if (!schedule?.permissions.canInviteCompanion) {
+      setInviteMessage('동행자 추가 권한이 없습니다.');
+      return;
+    }
+
     if (!schedule || isCreatingInvite) {
       return;
     }
@@ -311,6 +338,7 @@ export default function ActiveTripScreen() {
 
     try {
       setIsSessionBusy(true);
+      setSession(null);
       setSessionMessage('');
       setSelectedMission(mission);
       setMissionListVisible(false);
@@ -460,10 +488,12 @@ export default function ActiveTripScreen() {
           showsHorizontalScrollIndicator={false}
           style={{ marginHorizontal: -horizontalPadding }}
           contentContainerStyle={[styles.photoStrip, { paddingHorizontal: horizontalPadding }]}>
-          <ScalePressable accessibilityRole="button" accessibilityLabel="동행자 추가" disabled={!schedule || isCreatingInvite} onPress={handleCreateInvite} pressedScale={0.96} style={styles.inviteTile}>
-            {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Ionicons color="#8A9194" name="person-add" size={20} />}
-            <Text style={styles.inviteTileText}>초대하기</Text>
-          </ScalePressable>
+          {canInviteCompanion ? (
+            <ScalePressable accessibilityRole="button" accessibilityLabel="동행자 추가" disabled={!schedule || isCreatingInvite} onPress={handleCreateInvite} pressedScale={0.96} style={styles.inviteTile}>
+              {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Ionicons color="#8A9194" name="person-add" size={20} />}
+              <Text style={styles.inviteTileText}>초대하기</Text>
+            </ScalePressable>
+          ) : null}
           {activeMissions.map((mission) => (
             <ScalePressable key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={styles.photoTile}>
               <Svg height="100%" pointerEvents="none" style={styles.photoTileGradient} viewBox="0 0 82 96" width="100%">
@@ -498,9 +528,11 @@ export default function ActiveTripScreen() {
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>아직 담긴 미션이 없어요</Text>
               <Text style={styles.emptyText}>미션 상세 리스트에서 원하는 미션을 담아보세요.</Text>
-              <ScalePressable onPress={() => router.push('/mission/detail')} pressedScale={0.96} style={styles.emptyButton}>
-                <Text style={styles.emptyButtonText}>미션 보러가기</Text>
-              </ScalePressable>
+              {canAddMission ? (
+                <ScalePressable onPress={() => router.push('/mission/detail')} pressedScale={0.96} style={styles.emptyButton}>
+                  <Text style={styles.emptyButtonText}>미션 보러가기</Text>
+                </ScalePressable>
+              ) : null}
             </View>
           ) : completedMissionFeeds.length === 0 ? (
             <View style={styles.emptyBox}>

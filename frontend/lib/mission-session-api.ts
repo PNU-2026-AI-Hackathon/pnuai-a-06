@@ -51,6 +51,7 @@ type ApiMissionSession = {
   created_at?: string;
   created_by_user_id?: number | string;
   id?: number | string;
+  session_id?: number | string;
   members?: ApiMissionSessionMember[];
   mission?: ApiMission;
   photo_deadline_at?: string | null;
@@ -225,7 +226,9 @@ function pickFirstDateValue(...values: (string | null | undefined)[]) {
 }
 
 function normalizeSession(data: ApiMissionSession): MissionSession {
-  if (data.id === undefined || data.id === null) {
+  const sessionId = data.id ?? data.session_id;
+
+  if (sessionId === undefined || sessionId === null) {
     throw new Error('미션 세션 응답에 id가 없습니다.');
   }
 
@@ -234,7 +237,7 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
     completedAt: data.completed_at,
     createdAt: data.created_at,
     createdByUserId: String(data.created_by_user_id ?? ''),
-    id: String(data.id),
+    id: String(sessionId),
     members: (data.members ?? []).map((member) => ({
       joinedAt: member.joined_at,
       nickname: member.user?.nickname,

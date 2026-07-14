@@ -79,6 +79,11 @@ export default function TripHubScreen() {
   };
 
   const deleteSchedule = async (schedule: TripSchedule) => {
+    if (!schedule.permissions.canDeleteSchedule) {
+      setMessage('일정 삭제 권한이 없습니다.');
+      return;
+    }
+
     if (deletingScheduleId) {
       return;
     }
@@ -97,6 +102,11 @@ export default function TripHubScreen() {
   };
 
   const confirmDeleteSchedule = (schedule: TripSchedule) => {
+    if (!schedule.permissions.canDeleteSchedule) {
+      setMessage('일정 삭제 권한이 없습니다.');
+      return;
+    }
+
     Alert.alert('일정 삭제', `${schedule.roomName} 일정을 삭제할까요?`, [
       { text: '취소', style: 'cancel' },
       { text: '삭제', onPress: () => deleteSchedule(schedule), style: 'destructive' },
@@ -153,15 +163,17 @@ export default function TripHubScreen() {
                       </Text>
                     </View>
                   </ScalePressable>
-                  <ScalePressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${schedule.roomName} 삭제`}
-                    disabled={isDeleting}
-                    onPress={() => confirmDeleteSchedule(schedule)}
-                    pressedScale={0.92}
-                    style={styles.deleteButton}>
-                    {isDeleting ? <ActivityIndicator color="#D06958" /> : <Text style={styles.deleteButtonText}>삭제</Text>}
-                  </ScalePressable>
+                  {schedule.permissions.canDeleteSchedule ? (
+                    <ScalePressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${schedule.roomName} 삭제`}
+                      disabled={isDeleting}
+                      onPress={() => confirmDeleteSchedule(schedule)}
+                      pressedScale={0.92}
+                      style={styles.deleteButton}>
+                      {isDeleting ? <ActivityIndicator color="#D06958" /> : <Text style={styles.deleteButtonText}>삭제</Text>}
+                    </ScalePressable>
+                  ) : null}
                 </View>
               );
             })}

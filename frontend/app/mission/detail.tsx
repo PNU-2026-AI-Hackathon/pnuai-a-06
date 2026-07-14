@@ -178,19 +178,26 @@ export default function MissionDetailScreen() {
       setActionMessage('');
       setSelectedMission(mission);
       const cachedSchedules = getCachedTripSchedules();
-      if (cachedSchedules.length > 0) {
-        setSchedules(cachedSchedules);
+      const addableCachedSchedules = cachedSchedules.filter((schedule) => schedule.permissions.canAddMission);
+      if (addableCachedSchedules.length > 0) {
+        setSchedules(addableCachedSchedules);
         setIsSchedulePickerVisible(true);
       }
 
       const nextSchedules = await listTripSchedules();
-      setSchedules(nextSchedules);
+      const addableSchedules = nextSchedules.filter((schedule) => schedule.permissions.canAddMission);
+      setSchedules(addableSchedules);
 
       if (nextSchedules.length === 0) {
         Alert.alert('일정 만들기', '아직 만든 일정이 없어요. 일정을 만드시겠습니까?', [
           { text: '아니요', style: 'cancel' },
           { text: '네', onPress: () => handleCreateScheduleForMission(mission) },
         ]);
+        return;
+      }
+
+      if (addableSchedules.length === 0) {
+        setActionMessage('미션을 추가할 수 있는 일정이 없어요.');
         return;
       }
 
@@ -203,6 +210,11 @@ export default function MissionDetailScreen() {
   };
 
   const handleSelectSchedule = async (schedule: TripSchedule) => {
+    if (!schedule.permissions.canAddMission) {
+      setActionMessage('미션 추가 권한이 없습니다.');
+      return;
+    }
+
     if (!selectedMission || isAddingMission) {
       return;
     }

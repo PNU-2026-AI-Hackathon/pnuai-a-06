@@ -37,10 +37,19 @@ type ApiScheduleMission = {
 };
 
 type ApiSchedule = {
+  can_add_mission?: boolean;
+  can_delete_schedule?: boolean;
+  can_invite_companion?: boolean;
+  can_invite_member?: boolean;
+  can_remove_companion?: boolean;
+  can_remove_member?: boolean;
+  can_remove_mission?: boolean;
+  can_update_schedule?: boolean;
   companion_count?: string | number;
   companions?: unknown[];
   created_at?: string;
   createdAt?: string;
+  creator_id?: string | number;
   endDate?: string;
   end_date?: string;
   id?: string | number;
@@ -49,6 +58,7 @@ type ApiSchedule = {
   participant_count?: string | number;
   peopleCount?: string | number;
   people_count?: string | number;
+  permissions?: ApiSchedulePermissions;
   room_id?: string | number;
   room_name?: string;
   schedule_id?: string | number;
@@ -57,6 +67,25 @@ type ApiSchedule = {
   start_date?: string;
   status?: string;
   title?: string;
+};
+
+type ApiSchedulePermissions = {
+  add_mission?: boolean;
+  canAddMission?: boolean;
+  canDeleteSchedule?: boolean;
+  canInviteCompanion?: boolean;
+  canInviteMember?: boolean;
+  canRemoveCompanion?: boolean;
+  canRemoveMember?: boolean;
+  canRemoveMission?: boolean;
+  canUpdateSchedule?: boolean;
+  delete_schedule?: boolean;
+  invite_companion?: boolean;
+  invite_member?: boolean;
+  remove_companion?: boolean;
+  remove_member?: boolean;
+  remove_mission?: boolean;
+  update_schedule?: boolean;
 };
 
 type ApiScheduleList = ApiSchedule[] | {
@@ -80,10 +109,21 @@ export type TripScheduleMission = {
   type?: string | null;
 };
 
+export type TripSchedulePermissions = {
+  canAddMission: boolean;
+  canDeleteSchedule: boolean;
+  canInviteCompanion: boolean;
+  canRemoveCompanion: boolean;
+  canRemoveMission: boolean;
+  canUpdateSchedule: boolean;
+};
+
 export type TripSchedule = {
   createdAt?: string;
+  creatorId?: string;
   endDate?: string;
   missions: TripScheduleMission[];
+  permissions: TripSchedulePermissions;
   peopleCount?: string;
   roomName: string;
   scheduleId: string;
@@ -203,6 +243,61 @@ function normalizeScheduleMission(data: ApiScheduleMission): TripScheduleMission
   };
 }
 
+const DEFAULT_MEMBER_PERMISSIONS: TripSchedulePermissions = {
+  canAddMission: true,
+  canDeleteSchedule: false,
+  canInviteCompanion: true,
+  canRemoveCompanion: false,
+  canRemoveMission: false,
+  canUpdateSchedule: false,
+};
+
+const DEFAULT_CREATOR_PERMISSIONS: TripSchedulePermissions = {
+  canAddMission: true,
+  canDeleteSchedule: true,
+  canInviteCompanion: true,
+  canRemoveCompanion: true,
+  canRemoveMission: true,
+  canUpdateSchedule: true,
+};
+
+function readPermission(value: boolean | undefined, fallback: boolean) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function normalizeSchedulePermissions(data: ApiSchedule, creatorId: string | undefined): TripSchedulePermissions {
+  const currentUserId = getAuthItem('user_id');
+  const inferredDefaults = currentUserId && creatorId && currentUserId === creatorId ? DEFAULT_CREATOR_PERMISSIONS : DEFAULT_MEMBER_PERMISSIONS;
+  const permissions = data.permissions;
+
+  return {
+    canAddMission: readPermission(
+      permissions?.canAddMission ?? permissions?.add_mission ?? data.can_add_mission,
+      inferredDefaults.canAddMission
+    ),
+    canDeleteSchedule: readPermission(
+      permissions?.canDeleteSchedule ?? permissions?.delete_schedule ?? data.can_delete_schedule,
+      inferredDefaults.canDeleteSchedule
+    ),
+    canInviteCompanion: readPermission(
+      permissions?.canInviteCompanion ?? permissions?.canInviteMember ?? permissions?.invite_companion ?? permissions?.invite_member ?? data.can_invite_companion ?? data.can_invite_member,
+      inferredDefaults.canInviteCompanion
+    ),
+    canRemoveCompanion: readPermission(
+      permissions?.canRemoveCompanion ?? permissions?.canRemoveMember ?? permissions?.remove_companion ?? permissions?.remove_member ?? data.can_remove_companion ?? data.can_remove_member,
+      inferredDefaults.canRemoveCompanion
+    ),
+    canRemoveMission: readPermission(
+      permissions?.canRemoveMission ?? permissions?.remove_mission ?? data.can_remove_mission,
+      inferredDefaults.canRemoveMission
+    ),
+    canUpdateSchedule: readPermission(
+      permissions?.canUpdateSchedule ?? permissions?.update_schedule ?? data.can_update_schedule,
+      inferredDefaults.canUpdateSchedule
+    ),
+  };
+}
+
 function normalizeSchedule(data: ApiSchedule, fallbackRoomName: string): TripSchedule {
   const scheduleId = data.schedule_id ?? data.id ?? data.room_id;
 
@@ -212,12 +307,15 @@ function normalizeSchedule(data: ApiSchedule, fallbackRoomName: string): TripSch
 
   const companionBasedCount = Array.isArray(data.companions) ? data.companions.length + 1 : undefined;
   const peopleCount = data.people_count ?? data.peopleCount ?? data.member_count ?? data.participant_count ?? data.companion_count ?? companionBasedCount;
+  const creatorId = data.creator_id === undefined || data.creator_id === null ? undefined : String(data.creator_id);
 
   return {
     createdAt: data.created_at ?? data.createdAt,
+    creatorId,
     endDate: data.end_date ?? data.endDate,
     missions: Array.isArray(data.missions) ? data.missions.map(normalizeScheduleMission) : [],
     peopleCount: peopleCount === undefined || peopleCount === null ? undefined : String(peopleCount),
+    permissions: normalizeSchedulePermissions(data, creatorId),
     roomName: data.schedule_name ?? data.room_name ?? data.title ?? fallbackRoomName,
     scheduleId: String(scheduleId),
     startDate: data.start_date ?? data.startDate,
@@ -255,7 +353,7 @@ export function getCachedTripSchedules() {
 
   try {
     const parsed = JSON.parse(raw) as TripSchedule[];
-    return Array.isArray(parsed) ? sortTripSchedules(parsed.filter((item) => item.scheduleId && item.roomName).map((item) => ({ ...item, missions: item.missions ?? [] }))) : [];
+    return Array.isArray(parsed) ? sortTripSchedules(parsed.filter((item) => item.scheduleId && item.roomName).map((item) => ({ ...item, missions: item.missions ?? [], permissions: item.permissions ?? DEFAULT_MEMBER_PERMISSIONS }))) : [];
   } catch {
     return [];
   }
