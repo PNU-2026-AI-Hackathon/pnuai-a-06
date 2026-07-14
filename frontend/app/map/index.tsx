@@ -107,6 +107,16 @@ function getMissionLevel(mission?: MissionItem) {
   return missionLevelByType[type];
 }
 
+function prefetchMissionEmojiIcons(missions: MissionItem[]) {
+  const emojiUrls = Array.from(new Set(missions.map((mission) => mission.emojiUrl).filter(Boolean) as string[]));
+
+  if (emojiUrls.length === 0) {
+    return;
+  }
+
+  void Image.prefetch(emojiUrls, 'memory-disk').catch(() => undefined);
+}
+
 function getPolygonBounds(points: string) {
   const coordinates = points.split(' ').map((point) => {
     const [x, y] = point.split(',').map(Number);
@@ -181,6 +191,7 @@ export default function BusanMapScreen() {
         setThemeDistrictError('');
         // 선택 테마에 미션이 있는 구만 요청
         const missions = await fetchMissions({ theme: missionTheme });
+        prefetchMissionEmojiIcons(missions);
         const districts = Array.from(
           new Set(missions.flatMap((mission) => [mission.districtLabel, mission.districtCode].filter(Boolean) as string[]))
         );
@@ -234,6 +245,7 @@ export default function BusanMapScreen() {
         districtCode: target.districtCode,
         ...(selectedMissionTheme ? { theme: selectedMissionTheme } : {}),
       });
+      prefetchMissionEmojiIcons(missions);
       setDeckMissions(missions);
     } catch (error) {
       setDeckMissionError(error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.');
@@ -478,11 +490,20 @@ export default function BusanMapScreen() {
                       }}>
                       {activeMission.title}
                     </Text>
-                    {activeMission.photoUrl ? (
-                      <Image source={{ uri: activeMission.photoUrl }} style={styles.deckMissionPhoto} contentFit="cover" />
-                    ) : (
-                      <View style={styles.deckMissionPhotoPlaceholder} />
-                    )}
+                    <View style={styles.deckMissionIconBox}>
+                      {activeMission.emojiUrl ? (
+                        <Image
+                          source={{ uri: activeMission.emojiUrl }}
+                          style={styles.deckMissionIcon}
+                          cachePolicy="memory-disk"
+                          contentFit="contain"
+                        />
+                      ) : activeMission.rewardItemIcon ? (
+                        <Text style={styles.deckMissionRewardIcon}>{activeMission.rewardItemIcon}</Text>
+                      ) : (
+                        <View style={styles.deckMissionPhotoPlaceholder} />
+                      )}
+                    </View>
                     <Text style={[styles.deckMissionDescription, { color: activeMissionLevel.accentColor }]} numberOfLines={2}>{activeMission.description}</Text>
                   </>
                 ) : (
@@ -823,17 +844,27 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     minHeight: 40,
   },
-  deckMissionPhoto: {
+  deckMissionIconBox: {
+    alignItems: 'center',
     aspectRatio: 1,
-    backgroundColor: '#ffffff',
+    justifyContent: 'center',
     width: '68%',
+  },
+  deckMissionIcon: {
+    height: '100%',
+    width: '100%',
+  },
+  deckMissionRewardIcon: {
+    fontSize: 64,
+    lineHeight: 72,
+    textAlign: 'center',
   },
   deckMissionPhotoPlaceholder: {
     aspectRatio: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.58)',
     borderColor: 'rgba(95, 121, 136, 0.26)',
     borderWidth: 1,
-    width: '68%',
+    width: '100%',
   },
   deckMissionDescription: {
     width: '80%',
