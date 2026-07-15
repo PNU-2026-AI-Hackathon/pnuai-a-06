@@ -111,11 +111,13 @@ function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEdi
     <>
       <View style={styles.scheduleBody}>
         <View style={styles.scheduleThumb}>
-          {isCreator ? <Image source={crownIcon} style={styles.crownBadge} contentFit="contain" /> : null}
           <Text style={styles.scheduleThumbText}>{schedule.roomName.slice(0, 1)}</Text>
         </View>
         <View style={styles.scheduleInfo}>
-          <Text numberOfLines={1} style={styles.scheduleTitle}>{schedule.roomName}</Text>
+          <View style={styles.scheduleTitleRow}>
+            <Text numberOfLines={1} style={styles.scheduleTitle}>{schedule.roomName}</Text>
+            {isCreator ? <Image source={crownIcon} style={styles.crownBadge} contentFit="contain" /> : null}
+          </View>
           <Text numberOfLines={1} style={styles.scheduleDate}>{formatDateRange(schedule)}</Text>
         </View>
       </View>
@@ -493,13 +495,9 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   crownBadge: {
-    height: 24,
-    left: -5,
-    position: 'absolute',
-    top: -12,
-    transform: [{ rotate: '-18deg' }],
-    width: 24,
-    zIndex: 3,
+    height: 15,
+    marginLeft: 8,
+    width: 15,
   },
   scheduleCard: {
     alignItems: 'center',
@@ -529,8 +527,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     height: 48,
     justifyContent: 'center',
-    overflow: 'visible',
-    position: 'relative',
     width: 48,
   },
   scheduleThumbText: {
@@ -543,8 +539,15 @@ const styles = StyleSheet.create({
     marginLeft: 18,
     minWidth: 0,
   },
+  scheduleTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    minWidth: 0,
+  },
   scheduleTitle: {
     color: '#000000',
+    flexShrink: 1,
+    minWidth: 0,
     fontSize: 16,
     fontWeight: '500',
     lineHeight: 22,

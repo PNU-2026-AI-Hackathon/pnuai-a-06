@@ -6,12 +6,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
+import { MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
 import { getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, uploadMissionSessionPhoto, type MissionSession } from '@/lib/mission-session-api';
+import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
-const missionFrame = require('../../assets/svg/mission_level/standard_frame.svg');
 const MISSION_CARD_SOURCE_WIDTH = 164;
 const MISSION_CARD_SOURCE_HEIGHT = 209;
 const MISSION_CARD_WIDTH = 350;
@@ -87,6 +88,9 @@ export default function MissionCaptureScreen() {
   const [uploadMessage, setUploadMessage] = useState('');
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
   const [session, setSession] = useState<MissionSession | null>(null);
+  const [mission, setMission] = useState<TripScheduleMission | null>(null);
+  const [isMissionLoading, setIsMissionLoading] = useState(false);
+  const [missionError, setMissionError] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const missionCardCollapsedBottom = bottomSafeInset - (MISSION_CARD_HEIGHT - MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT);
   const missionCardExpandedY = missionCardCollapsedBottom - height / 2 + MISSION_CARD_HEIGHT / 2;
@@ -142,6 +146,47 @@ export default function MissionCaptureScreen() {
       isActive = false;
     };
   }, [scheduleId, scheduleMissionId, sessionId]);
+
+  useEffect(() => {
+    if (!scheduleId || !scheduleMissionId) {
+      setMission(null);
+      setMissionError('미션 정보가 없습니다.');
+      return;
+    }
+
+    let isActive = true;
+    const currentScheduleId = scheduleId;
+    const currentScheduleMissionId = scheduleMissionId;
+
+    async function loadMission() {
+      try {
+        setIsMissionLoading(true);
+        setMissionError('');
+        const nextSchedule = await getTripSchedule(currentScheduleId);
+        const nextMission = nextSchedule.missions.find((item) => item.scheduleMissionId === currentScheduleMissionId) ?? null;
+
+        if (isActive) {
+          setMission(nextMission);
+          setMissionError(nextMission ? '' : '미션 정보를 찾지 못했어요.');
+        }
+      } catch (error) {
+        if (isActive) {
+          setMission(null);
+          setMissionError(error instanceof Error ? error.message : '미션 정보를 불러오지 못했어요.');
+        }
+      } finally {
+        if (isActive) {
+          setIsMissionLoading(false);
+        }
+      }
+    }
+
+    loadMission();
+
+    return () => {
+      isActive = false;
+    };
+  }, [scheduleId, scheduleMissionId]);
 
   useEffect(() => {
     if (returnCountdown === null) {
@@ -407,7 +452,19 @@ export default function MissionCaptureScreen() {
               transform: [{ translateY: missionCardTranslateY }],
             },
           ]}>
-          <Image source={missionFrame} style={styles.missionFrame} contentFit="contain" />
+          <MissionCard
+            errorMessage={missionError}
+            isLoading={isMissionLoading}
+            mission={mission ? {
+              description: mission.description,
+              iconText: mission.rewardItemIcon,
+              iconUrl: mission.emojiUrl ?? mission.photoUrl,
+              title: mission.title,
+              type: mission.type,
+            } : session ? {
+              title: session.missionTitle,
+            } : null}
+          />
         </Animated.View>
 
         <View pointerEvents="box-none" style={[styles.captureControls, { bottom: bottomSafeInset + 52 }]}>
@@ -570,10 +627,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: MISSION_CARD_WIDTH,
     zIndex: 3,
-  },
-  missionFrame: {
-    height: MISSION_CARD_HEIGHT,
-    width: MISSION_CARD_WIDTH,
   },
   captureControls: {
     alignItems: 'center',

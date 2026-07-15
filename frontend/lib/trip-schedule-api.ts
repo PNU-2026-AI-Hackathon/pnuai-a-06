@@ -19,8 +19,11 @@ type ApiMission = {
   description?: string;
   district_code?: string;
   district_label?: string;
+  emoji_url?: string | null;
   id?: string | number;
+  mission_emoji_url?: string | null;
   place_label?: string | null;
+  reward_item_icon?: string | null;
   target_photo_url?: string | null;
   theme?: string;
   title?: string;
@@ -113,10 +116,12 @@ type ApiScheduleList = ApiSchedule[] | {
 export type TripScheduleMission = {
   description: string;
   districtLabel?: string | null;
+  emojiUrl?: string | null;
   missionCode?: string | null;
   missionId: string;
   photoUrl?: string | null;
   placeLabel?: string | null;
+  rewardItemIcon?: string | null;
   scheduleMissionId: string;
   status?: string;
   theme?: string | null;
@@ -253,10 +258,12 @@ function normalizeScheduleMission(data: ApiScheduleMission): TripScheduleMission
   return {
     description: data.mission?.description ?? '미션 설명이 아직 없습니다.',
     districtLabel: data.mission?.district_label,
+    emojiUrl: normalizePhotoUrl(data.mission?.emoji_url ?? data.mission?.mission_emoji_url),
     missionCode: data.mission?.code ?? null,
     missionId: String(missionId),
     photoUrl: normalizePhotoUrl(data.mission?.target_photo_url),
     placeLabel: data.mission?.place_label,
+    rewardItemIcon: data.mission?.reward_item_icon ?? null,
     scheduleMissionId: String(scheduleMissionId),
     status: data.status,
     theme: data.mission?.theme ?? null,
