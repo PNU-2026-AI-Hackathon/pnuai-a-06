@@ -25,14 +25,6 @@ type CalendarDay = DateParts & {
   isSelectable: boolean;
 };
 
-const peopleOptions = Array.from({ length: 10 }, (_, index) => {
-  const value = String(index + 1);
-
-  return {
-    label: `${value}명`,
-    value,
-  };
-});
 
 const weekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -44,11 +36,6 @@ const formatDateValue = (date: Date) => {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
-const formatDateLabel = (value: string) => {
-  const [year, month, day] = value.split('-');
-
-  return `${Number(year)}.${Number(month)}.${Number(day)}`;
-};
 
 const parseDateValue = (value: string): DateParts => {
   const [year, month, day] = value.split('-').map(Number);
@@ -159,11 +146,9 @@ export default function TripCreateScreen() {
   const today = useMemo(() => new Date(), []);
   const minStartDate = useMemo(() => parseDateValue(formatDateValue(today)), [today]);
   const maxTripDate = useMemo(() => parseDateValue(formatDateValue(addDays(today, 179))), [today]);
-  const [startDate, setStartDate] = useState(formatDateValue(today));
-  const [endDate, setEndDate] = useState(formatDateValue(addDays(today, 6)));
-  const [peopleCount, setPeopleCount] = useState('4');
-  const [scheduleName, setScheduleName] = useState('우정여행');
-  const [isPeoplePickerOpen, setIsPeoplePickerOpen] = useState(false);
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+  const [scheduleName, setScheduleName] = useState('');
   const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
   const [draftSchedule, setDraftSchedule] = useState<TripSchedule | null>(null);
   const [inviteData, setInviteData] = useState<TripInvite | null>(null);
@@ -182,15 +167,23 @@ export default function TripCreateScreen() {
   const calendarDays = useMemo(() => getCalendarDays(calendarMonth, minStartDate, maxTripDate), [calendarMonth, maxTripDate, minStartDate]);
   const canGoPrevMonth = compareDateParts(shiftMonth(calendarMonth, -1), { ...minStartDate, day: 1 }) >= 0;
   const canGoNextMonth = compareDateParts(shiftMonth(calendarMonth, 1), { ...maxTripDate, day: 1 }) <= 0;
-  const roomName = scheduleName.trim() || `B-Cut ${formatDateLabel(startDate)} 여행`;
+  const roomName = scheduleName.trim();
+  const canProceedFromDate = Boolean(startDate);
+  const canStartTrip = roomName.length > 0;
+  const isBottomButtonDisabled = isCreatingSchedule || isCreatingInvite || (step === 'date' ? !canProceedFromDate : !canStartTrip);
   const inviteUrl = getInviteUrl(inviteData);
+
+  const handleScheduleNameChange = (value: string) => {
+    setScheduleName(value);
+    setMessage('');
+  };
 
   const handleDateSelect = (day: CalendarDay) => {
     if (!day.isSelectable) {
       return;
     }
 
-    if (!isSelectingEndDate || day.dateValue < startDate) {
+    if (!startDate || !isSelectingEndDate || day.dateValue < startDate) {
       setStartDate(day.dateValue);
       setEndDate(day.dateValue);
       setIsSelectingEndDate(true);
@@ -203,6 +196,10 @@ export default function TripCreateScreen() {
   };
 
   const handleDateStepNext = () => {
+    if (!startDate) {
+      return;
+    }
+
     setStep('people');
     setMessage('');
   };
@@ -213,12 +210,8 @@ export default function TripCreateScreen() {
       return;
     }
 
-    if (isPeoplePickerOpen) {
-      setIsPeoplePickerOpen(false);
-      return;
-    }
-
     if (step === 'people') {
+      setMessage('');
       setStep('date');
       return;
     }
@@ -227,9 +220,17 @@ export default function TripCreateScreen() {
   };
 
   const createOrSyncDraftSchedule = async () => {
+    if (!startDate || !endDate) {
+      throw new Error('여행 날짜를 선택해 주세요.');
+    }
+
+    if (!roomName) {
+      throw new Error('일정 이름을 입력해 주세요.');
+    }
+
     const input = {
       endDate,
-      peopleCount,
+      peopleCount: '1',
       roomName,
       startDate,
     };
@@ -253,7 +254,12 @@ export default function TripCreateScreen() {
   };
 
   const handleCreateInvite = async () => {
-    if (isCreatingInvite || isCreatingSchedule) {
+    if (isCreatingInvite || isCreatingSchedule || !canProceedFromDate) {
+      return;
+    }
+
+    if (!canStartTrip) {
+      setMessage('일정 이름을 먼저 작성해 주세요.');
       return;
     }
 
@@ -301,7 +307,7 @@ export default function TripCreateScreen() {
   };
 
   const handleNext = async () => {
-    if (isCreatingSchedule || isCreatingInvite) {
+    if (isCreatingSchedule || isCreatingInvite || !canStartTrip) {
       return;
     }
 
@@ -387,7 +393,7 @@ export default function TripCreateScreen() {
 
               <View style={styles.calendarGrid}>
                 {calendarDays.map((day, index) => {
-                  const isSelected = isDateInRange(day.dateValue, startDate, endDate);
+                  const isSelected = startDate && endDate ? isDateInRange(day.dateValue, startDate, endDate) : false;
                   const isStart = day.dateValue === startDate;
                   const isEnd = day.dateValue === endDate;
                   const isSegmentStart = isSelected && isStart;
@@ -438,10 +444,10 @@ export default function TripCreateScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="친구 추가"
-                  disabled={isCreatingInvite || isCreatingSchedule}
+                  disabled={isCreatingInvite || isCreatingSchedule || !canProceedFromDate}
                   onPress={handleCreateInvite}
                   style={styles.invitePerson}>
-                  <View style={[styles.addCircle, (isCreatingInvite || isCreatingSchedule) && styles.disabledButton]}>
+                  <View style={[styles.addCircle, (isCreatingInvite || isCreatingSchedule || !canProceedFromDate) && styles.disabledButton]}>
                     {isCreatingInvite ? <ActivityIndicator color="#409CB7" /> : <Text style={styles.addIcon}>+</Text>}
                   </View>
                   <Text style={styles.inviteLabel}>추가</Text>
@@ -467,8 +473,8 @@ export default function TripCreateScreen() {
                 <View style={styles.inputLine}>
                   <TextInput
                     accessibilityLabel="일정 이름"
-                    onChangeText={setScheduleName}
-                    placeholder="일정 이름"
+                    onChangeText={handleScheduleNameChange}
+                    placeholder="우정여행"
                     placeholderTextColor="#A3AAAE"
                     style={styles.scheduleInput}
                     value={scheduleName}
@@ -480,18 +486,6 @@ export default function TripCreateScreen() {
                   ) : null}
                 </View>
               </View>
-
-              <View style={styles.formBlock}>
-                <Text style={styles.formLabel}>인원수</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="인원수 선택"
-                  onPress={() => setIsPeoplePickerOpen(true)}
-                  style={styles.peopleSelectLine}>
-                  <Text style={styles.peopleSelectText}>{peopleCount}명</Text>
-                  <Text style={styles.peopleSelectChevron}>⌄</Text>
-                </Pressable>
-              </View>
             </View>
           </>
         )}
@@ -501,43 +495,18 @@ export default function TripCreateScreen() {
 
       <View style={{ transform: [{ translateY: nextButtonOffset }] }}>
         <ScalePressable
-          disabled={isCreatingSchedule}
+          disabled={isBottomButtonDisabled}
           onPress={step === 'date' ? handleDateStepNext : handleNext}
           pressedScale={0.97}
           style={[
             styles.nextButton,
             { paddingVertical: nextButtonPadding },
             step === 'people' && styles.startTripButton,
-            isCreatingSchedule && styles.disabledButton,
+            isBottomButtonDisabled && styles.disabledButton,
           ]}>
           {isCreatingSchedule ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.nextButtonText, step === 'people' && styles.startTripButtonText]}>{step === 'date' ? '다음' : '여행 시작'}</Text>}
         </ScalePressable>
       </View>
-
-      <Modal animationType="fade" transparent visible={isPeoplePickerOpen} onRequestClose={() => setIsPeoplePickerOpen(false)}>
-        <Pressable accessibilityLabel="인원수 선택 닫기" onPress={() => setIsPeoplePickerOpen(false)} style={styles.modalBackdrop}>
-          <Pressable style={styles.peoplePanel}>
-            <Text style={styles.peoplePanelTitle}>인원수</Text>
-            {peopleOptions.map((item) => {
-              const isSelected = item.value === peopleCount;
-
-              return (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isSelected }}
-                  key={item.value}
-                  onPress={() => {
-                    setPeopleCount(item.value);
-                    setIsPeoplePickerOpen(false);
-                  }}
-                  style={[styles.peoplePanelItem, isSelected && styles.selectedPeoplePanelItem]}>
-                  <Text style={[styles.peoplePanelText, isSelected && styles.selectedPeoplePanelText]}>{item.label}</Text>
-                </Pressable>
-              );
-            })}
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       <Modal animationType="fade" transparent visible={inviteSheetVisible} onRequestClose={closeInviteSheet}>
         <Pressable accessibilityLabel="초대 닫기" onPress={closeInviteSheet} style={styles.inviteModalBackdrop}>
@@ -783,24 +752,6 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     lineHeight: 42,
   },
-  peopleSelectLine: {
-    alignItems: 'center',
-    borderBottomColor: '#D6D6D6',
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 42,
-  },
-  peopleSelectText: {
-    color: '#10161F',
-    fontSize: 24,
-    fontWeight: '500',
-  },
-  peopleSelectChevron: {
-    color: '#10161F',
-    fontSize: 28,
-    lineHeight: 30,
-  },
   messageText: {
     color: '#D06958',
     fontSize: 12,
@@ -832,25 +783,6 @@ const styles = StyleSheet.create({
   },
   startTripButtonText: {
     color: '#6EA4BF',
-  },
-  modalBackdrop: {
-    backgroundColor: 'rgba(0, 0, 0, 0.28)',
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  peoplePanel: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    paddingBottom: 18,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-  },
-  peoplePanelTitle: {
-    color: '#10161F',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
   },
   inviteModalBackdrop: {
     alignItems: 'center',
@@ -986,22 +918,5 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 10,
     paddingHorizontal: 32,
-  },
-  peoplePanelItem: {
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  selectedPeoplePanelItem: {
-    backgroundColor: '#E8F5F8',
-  },
-  peoplePanelText: {
-    color: '#10161F',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  selectedPeoplePanelText: {
-    color: '#409CB7',
-    fontWeight: '700',
   },
 });

@@ -103,6 +103,10 @@ function isReviewableSession(session: MissionSession) {
   return session.status === 'REVEALED' && session.submissions.length > 0 && !isFinishedSession(session);
 }
 
+function isStartedMissionSession(session: MissionSession) {
+  return Boolean(session.startedAt) || (session.status !== 'WAITING' && session.status !== 'READY');
+}
+
 function isCompletedScheduleMission(mission: TripScheduleMission) {
   return mission.status === 'COMPLETED';
 }
@@ -132,6 +136,7 @@ export default function ActiveTripScreen() {
   const [selectedMission, setSelectedMission] = useState<TripScheduleMission | null>(null);
   const [session, setSession] = useState<MissionSession | null>(null);
   const [revealedSessions, setRevealedSessions] = useState<Record<string, MissionSession>>({});
+  const [missionSessions, setMissionSessions] = useState<Record<string, MissionSession>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSessionBusy, setIsSessionBusy] = useState(false);
   const [isCreatingInvite, setIsCreatingInvite] = useState(false);
@@ -147,11 +152,23 @@ export default function ActiveTripScreen() {
   const missions = schedule?.missions ?? [];
   const activeMissions = missions.filter((mission) => !isCompletedScheduleMission(mission) && !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
   const canAddMission = schedule?.permissions.canAddMission ?? false;
-  const canInviteCompanion = schedule?.permissions.canInviteCompanion ?? false;
+  const hasStartedMissionSession = Object.values(missionSessions).some(isStartedMissionSession);
+  const canInviteCompanion = (schedule?.permissions.canInviteCompanion ?? false) && !hasStartedMissionSession;
   const inviteUrl = getInviteUrl(inviteData);
 
   const rememberFeedSession = useCallback((nextSession: MissionSession, fallbackScheduleMissionId?: string) => {
     const scheduleMissionId = nextSession.scheduleMissionId || fallbackScheduleMissionId;
+
+    if (scheduleMissionId) {
+      setMissionSessions((currentSessions) => ({
+        ...currentSessions,
+        [scheduleMissionId]: {
+          ...nextSession,
+          scheduleMissionId,
+        },
+      }));
+    }
+
     const shouldShowInFeed = nextSession.submissions.length > 0 && scheduleMissionId;
 
     if (!shouldShowInFeed) {
@@ -193,6 +210,7 @@ export default function ActiveTripScreen() {
     if (!scheduleId) {
       setSchedule(null);
       setRevealedSessions({});
+      setMissionSessions({});
       setMessage('일정 정보가 없습니다.');
       return;
     }
@@ -200,6 +218,7 @@ export default function ActiveTripScreen() {
     const cachedRevealedSessions = readCachedRevealedSessions(scheduleId);
     setReviewAlertSession(null);
     setRevealedSessions(cachedRevealedSessions);
+    setMissionSessions(cachedRevealedSessions);
 
     let isActive = true;
 
@@ -295,6 +314,11 @@ export default function ActiveTripScreen() {
   const handleCreateInvite = async () => {
     if (!schedule?.permissions.canInviteCompanion) {
       setInviteMessage('동행자 추가 권한이 없습니다.');
+      return;
+    }
+
+    if (hasStartedMissionSession) {
+      setInviteMessage('이미 시작한 미션이 있어 동행자를 추가할 수 없어요.');
       return;
     }
 
