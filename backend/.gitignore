@@ -9,5 +9,5 @@ app/static/**
 !app/static/mission-emoji/.gitkeep
 !app/static/mission-photos/
 !app/static/mission-photos/.gitkeep
-app/db/profile-images/*
-!app/db/profile-images/.gitkeep
+!app/static/profile-images/
+!app/static/profile-images/.gitkeep

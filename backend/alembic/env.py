@@ -8,7 +8,9 @@ from app.db.base import Base
 from app.models.missions import Mission, MissionSet  # noqa: F401
 from app.models.schedules import (  # noqa: F401
     MissionSchedule, ScheduleInviteLink, ScheduleMember, ScheduleMission,
+    UserScheduleOrder,
     MissionSession, MissionSessionMember, MissionSubmission,
+    MissionSubmissionLike, MissionSubmissionComment,
 )
 from app.models.users import User  # noqa: F401
 

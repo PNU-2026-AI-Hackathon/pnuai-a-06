@@ -11,6 +11,8 @@ from app.schemas.schedules import (
     ReceivedScheduleInvitationResponse,
     ScheduleBasketResponse,
     ScheduleInviteRequest,
+    ScheduleMissionUpdateRequest,
+    ScheduleOrderUpdateRequest,
     ScheduleInvitationPreviewResponse,
     ScheduleMemberResponse,
     ScheduleMemberStatus,
@@ -26,13 +28,19 @@ from app.services.schedules import (
     create_schedule_share_invitation,
     create_schedule,
     delete_schedule,
+    delete_schedule_mission,
     get_accessible_schedule,
     get_any_invitation_preview,
     invite_schedule_member,
     list_received_invitations,
     list_schedule_baskets,
     list_user_schedules,
+    ScheduleDateOverlapError,
+    ScheduleMissionDateError,
+    ScheduleOrderError,
     update_membership_by_invite_token,
+    update_schedule_mission_date,
+    update_user_schedule_order,
     update_schedule,
 )
 
@@ -72,20 +80,43 @@ def read_my_schedules(
         "stored as PENDING companions. The creator is stored separately and is not "
         "duplicated in companions."
     ),
-    responses={404: {"description": "One or more invitee emails were not found."}},
+    responses={
+        404: {"description": "One or more invitee emails were not found."},
+        409: {"description": "The creator already has an overlapping schedule."},
+    },
 )
 def create_mission_schedule(
     payload: MissionScheduleCreateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MissionScheduleResponse:
-    schedule, missing_ids = create_schedule(db, creator_id=current_user.id, payload=payload)
+    try:
+        schedule, missing_ids = create_schedule(db, creator_id=current_user.id, payload=payload)
+    except ScheduleDateOverlapError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if schedule is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"message": "Invitee email not found.", "missing_emails": missing_ids},
         )
     return schedule
+
+
+@schedules_router.put(
+    "/order",
+    response_model=list[MissionScheduleResponse],
+    summary="Update the current user's schedule order",
+    responses={400: {"description": "The order contains duplicate or inaccessible schedules."}},
+)
+def reorder_my_schedules(
+    payload: ScheduleOrderUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[MissionScheduleResponse]:
+    try:
+        return update_user_schedule_order(db, user_id=current_user.id, schedule_ids=payload.schedule_ids)
+    except ScheduleOrderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @schedules_router.get(
@@ -171,6 +202,7 @@ def read_schedule_baskets(
     responses={
         400: {"description": "Invalid date range."},
         404: {"description": "Schedule was not found or the user is not the creator."},
+        409: {"description": "The creator or an accepted participant has an overlapping schedule."},
     },
 )
 def update_mission_schedule(
@@ -186,6 +218,8 @@ def update_mission_schedule(
             creator_id=current_user.id,
             payload=payload,
         )
+    except ScheduleDateOverlapError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if schedule is None:
@@ -312,11 +346,89 @@ def create_schedule_mission(
         schedule_id=schedule_id,
         user_id=current_user.id,
         mission_id=payload.mission_id,
+        planned_date=payload.planned_date,
     )
     if schedule_mission is None:
-        detail = "Mission not found." if error == "mission_not_found" else "Mission schedule not found."
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+        if error == "mission_not_found":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found.")
+        if error == "mission_date_out_of_range":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="planned_date must be within the schedule date range.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission schedule not found.")
     return schedule_mission
+
+
+@schedule_missions_router.patch(
+    "/{schedule_id}/missions/{schedule_mission_id}",
+    response_model=ScheduleMissionResponse,
+    summary="Update a scheduled mission date",
+    responses={
+        400: {"description": "The planned date is outside the schedule range."},
+        404: {"description": "Schedule or schedule mission was not found."},
+    },
+)
+def update_scheduled_mission(
+    schedule_id: int,
+    schedule_mission_id: int,
+    payload: ScheduleMissionUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ScheduleMissionResponse:
+    schedule_mission, error = update_schedule_mission_date(
+        db,
+        schedule_id=schedule_id,
+        schedule_mission_id=schedule_mission_id,
+        creator_id=current_user.id,
+        planned_date=payload.planned_date,
+    )
+    if schedule_mission is None:
+        if error == "mission_date_out_of_range":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="planned_date must be within the schedule date range.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule or schedule mission not found.")
+    return schedule_mission
+
+
+@schedule_missions_router.delete(
+    "/{schedule_id}/missions/{schedule_mission_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a mission from a schedule",
+    description=(
+        "Removes a mission that has not started yet. Missions with an active, "
+        "submitted, or completed execution cannot be removed."
+    ),
+    responses={
+        404: {"description": "Schedule or schedule mission was not found."},
+        403: {"description": "Only the schedule creator can remove a mission."},
+        409: {"description": "The mission is already in progress or completed."},
+    },
+)
+def remove_schedule_mission(
+    schedule_id: int,
+    schedule_mission_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    deleted, error = delete_schedule_mission(
+        db,
+        schedule_id=schedule_id,
+        schedule_mission_id=schedule_mission_id,
+        user_id=current_user.id,
+    )
+    if deleted:
+        return
+    if error == "creator_only":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the schedule creator can remove a mission.",
+        )
+    if error == "mission_in_progress":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A mission that is in progress or completed cannot be removed.",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Mission schedule or schedule mission not found.",
+    )
 
 
 @invitations_router.get(
@@ -390,11 +502,11 @@ def preview_schedule_invitation(
     response_model=ScheduleMemberResponse,
     summary="Accept a schedule invitation link",
     description=(
-        "Accepts an invitation from a shared link. The logged-in user's email must "
-        "match the invited email embedded in the invitation."
+        "Accepts an invitation from a shared link. This flow works for both email "
+        "and Kakao accounts, including Kakao accounts without an email address."
     ),
     responses={
-        403: {"description": "The logged-in user's email does not match the invitation."},
+        403: {"description": "The invitation cannot be accepted by this account."},
         404: {"description": "Invitation was not found or expired."},
     },
 )
@@ -410,17 +522,16 @@ def accept_schedule_invitation(
     )
     if share_member is not None:
         return share_member
+    if share_error == "schedule_date_overlap":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You already have an overlapping schedule.",
+        )
     if share_error in {"invitation_already_used", "creator_cannot_join"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=share_error,
         )
-    if share_error == "email_required":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Logged-in user must have an email to accept this invitation.",
-        )
-
     member, error = update_membership_by_invite_token(
         db,
         invite_token=invite_token,
@@ -431,6 +542,11 @@ def accept_schedule_invitation(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Logged-in user email does not match this invitation.",
+        )
+    if error == "schedule_date_overlap":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You already have an overlapping schedule.",
         )
     if member is None:
         raise HTTPException(

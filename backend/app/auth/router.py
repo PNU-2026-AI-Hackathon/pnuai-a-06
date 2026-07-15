@@ -64,7 +64,7 @@ router = APIRouter(prefix="/auth")
 KAKAO_AUTHORIZE_URL = "https://kauth.kakao.com/oauth/authorize"
 STATE_COOKIE_NAME = "kakao_oauth_state"
 FRONTEND_REDIRECT_COOKIE_NAME = "frontend_redirect_uri"
-PROFILE_IMAGE_DIR = Path("app/db/profile-images")
+PROFILE_IMAGE_DIR = Path("app/static/profile-images")
 PROFILE_IMAGE_MEDIA_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -177,7 +177,7 @@ def save_profile_image(file: UploadFile, user_id: int) -> str:
         if temp_path.exists():
             temp_path.unlink()
 
-    return f"/auth/profile-images/{filename}"
+    return f"/static/profile-images/{filename}"
 
 
 @router.get("/kakao/login", tags=["kakao auth"])

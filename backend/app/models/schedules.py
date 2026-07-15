@@ -81,6 +81,26 @@ class MissionSchedule(Base):
         return [self.creator, *accepted_members]
 
 
+class UserScheduleOrder(Base):
+    __tablename__ = "user_schedule_orders"
+    __table_args__ = (
+        UniqueConstraint("user_id", "schedule_id", name="uq_user_schedule_orders_user_schedule"),
+        UniqueConstraint("user_id", "position", name="uq_user_schedule_orders_user_position"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("mission_schedules.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    user: Mapped[User] = relationship()
+    schedule: Mapped[MissionSchedule] = relationship()
+
+
 class ScheduleMember(Base):
     __tablename__ = "schedule_members"
     __table_args__ = (
@@ -104,7 +124,7 @@ class ScheduleMember(Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING")
-    invite_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    invite_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     invite_token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     invite_token_expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -197,6 +217,10 @@ class ScheduleMission(Base):
         nullable=False,
         index=True,
     )
+    winner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    planned_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="ADDED")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -213,6 +237,7 @@ class ScheduleMission(Base):
     schedule: Mapped[MissionSchedule] = relationship(back_populates="schedule_missions")
     mission: Mapped[Mission] = relationship()
     added_by: Mapped[User] = relationship(foreign_keys=[added_by_user_id])
+    winner: Mapped[User | None] = relationship(foreign_keys=[winner_user_id])
 
     sessions: Mapped[list["MissionSession"]] = relationship(
         back_populates="schedule_mission",
@@ -234,12 +259,18 @@ class MissionSession(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    voting_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    winner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     schedule_mission: Mapped[ScheduleMission] = relationship(back_populates="sessions")
     created_by: Mapped[User] = relationship(foreign_keys=[created_by_user_id])
+    winner: Mapped[User | None] = relationship(foreign_keys=[winner_user_id])
     members: Mapped[list["MissionSessionMember"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
@@ -299,4 +330,64 @@ class MissionSubmission(Base):
     )
 
     session: Mapped[MissionSession] = relationship(back_populates="submissions")
+    user: Mapped[User] = relationship()
+    likes: Mapped[list["MissionSubmissionLike"]] = relationship(
+        back_populates="submission", cascade="all, delete-orphan"
+    )
+    comments: Mapped[list["MissionSubmissionComment"]] = relationship(
+        back_populates="submission", cascade="all, delete-orphan"
+    )
+
+    @property
+    def like_count(self) -> int:
+        return len(self.likes)
+
+
+class MissionSubmissionLike(Base):
+    __tablename__ = "mission_submission_likes"
+    __table_args__ = (
+        UniqueConstraint("session_id", "user_id", name="uq_mission_submission_likes_session_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    submission_id: Mapped[int] = mapped_column(
+        ForeignKey("mission_submissions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("mission_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    submission: Mapped[MissionSubmission] = relationship(back_populates="likes")
+    user: Mapped[User] = relationship()
+
+
+class MissionSubmissionComment(Base):
+    __tablename__ = "mission_submission_comments"
+    __table_args__ = (
+        UniqueConstraint(
+            "submission_id",
+            "user_id",
+            name="uq_mission_submission_comments_submission_user",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    submission_id: Mapped[int] = mapped_column(
+        ForeignKey("mission_submissions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    content: Mapped[str] = mapped_column(String(1000), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    submission: Mapped[MissionSubmission] = relationship(back_populates="comments")
     user: Mapped[User] = relationship()

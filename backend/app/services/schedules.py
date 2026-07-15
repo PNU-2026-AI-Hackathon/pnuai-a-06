@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from secrets import token_urlsafe
 
 from sqlalchemy import or_, select
@@ -6,10 +6,12 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.missions import Mission
 from app.models.schedules import (
+    MissionSession,
     MissionSchedule,
     ScheduleInviteLink,
     ScheduleMember,
     ScheduleMission,
+    UserScheduleOrder,
 )
 from app.models.users import User
 from app.schemas.schedules import (
@@ -21,6 +23,18 @@ from app.schemas.schedules import (
 )
 from app.schemas.missions import Theme
 from app.core.config import get_settings
+
+
+class ScheduleDateOverlapError(Exception):
+    pass
+
+
+class ScheduleMissionDateError(Exception):
+    pass
+
+
+class ScheduleOrderError(Exception):
+    pass
 
 
 def _users_by_email(db: Session, emails: list[str]) -> dict[str, User]:
@@ -47,12 +61,20 @@ def _schedule_load_options():
         selectinload(MissionSchedule.creator),
         selectinload(MissionSchedule.members).selectinload(ScheduleMember.user),
         selectinload(MissionSchedule.schedule_missions).selectinload(ScheduleMission.mission),
+        selectinload(MissionSchedule.schedule_missions).selectinload(ScheduleMission.winner),
     )
 
 
 def _sort_schedule_children(schedule: MissionSchedule) -> MissionSchedule:
     schedule.members.sort(key=lambda member: (member.created_at, member.id))
-    schedule.schedule_missions.sort(key=lambda item: (item.created_at, item.id))
+    schedule.schedule_missions.sort(
+        key=lambda item: (
+            item.planned_date is None,
+            item.planned_date or date.max,
+            item.created_at,
+            item.id,
+        )
+    )
     return schedule
 
 
@@ -129,6 +151,48 @@ def user_can_add_schedule_mission(schedule: MissionSchedule, user_id: int) -> bo
     )
 
 
+def has_overlapping_schedule(
+    db: Session,
+    *,
+    user_id: int,
+    start_date: date,
+    end_date: date,
+    exclude_schedule_id: int | None = None,
+) -> bool:
+    accepted_membership = select(ScheduleMember.id).where(
+        ScheduleMember.schedule_id == MissionSchedule.id,
+        ScheduleMember.user_id == user_id,
+        ScheduleMember.status == ScheduleMemberStatus.ACCEPTED.value,
+    ).exists()
+    stmt = select(MissionSchedule.id).where(
+        MissionSchedule.status != "CANCELLED",
+        MissionSchedule.start_date <= end_date,
+        MissionSchedule.end_date >= start_date,
+        or_(MissionSchedule.creator_id == user_id, accepted_membership),
+    )
+    if exclude_schedule_id is not None:
+        stmt = stmt.where(MissionSchedule.id != exclude_schedule_id)
+    return db.scalar(stmt.limit(1)) is not None
+
+
+def ensure_no_overlapping_schedule(
+    db: Session,
+    *,
+    user_id: int,
+    start_date: date,
+    end_date: date,
+    exclude_schedule_id: int | None = None,
+) -> None:
+    if has_overlapping_schedule(
+        db,
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        exclude_schedule_id=exclude_schedule_id,
+    ):
+        raise ScheduleDateOverlapError("The user already has an overlapping schedule.")
+
+
 def list_user_schedules(db: Session, user_id: int) -> list[MissionSchedule]:
     member_access = select(ScheduleMember.id).where(
         ScheduleMember.schedule_id == MissionSchedule.id,
@@ -138,9 +202,60 @@ def list_user_schedules(db: Session, user_id: int) -> list[MissionSchedule]:
         select(MissionSchedule)
         .where(or_(MissionSchedule.creator_id == user_id, member_access))
         .options(*_schedule_load_options())
-        .order_by(MissionSchedule.start_date, MissionSchedule.id)
     )
-    return [_sort_schedule_children(schedule) for schedule in db.scalars(stmt).all()]
+    schedules = db.scalars(stmt).all()
+    saved_order = {
+        item.schedule_id: item.position
+        for item in db.scalars(
+            select(UserScheduleOrder)
+            .where(UserScheduleOrder.user_id == user_id)
+            .order_by(UserScheduleOrder.position)
+        ).all()
+    }
+    schedules.sort(
+        key=lambda schedule: (
+            saved_order.get(schedule.id, 1_000_000),
+            schedule.start_date,
+            schedule.id,
+        )
+    )
+    return [_sort_schedule_children(schedule) for schedule in schedules]
+
+
+def update_user_schedule_order(
+    db: Session,
+    *,
+    user_id: int,
+    schedule_ids: list[int],
+) -> list[MissionSchedule] | None:
+    if len(schedule_ids) != len(set(schedule_ids)):
+        raise ScheduleOrderError("schedule_ids must not contain duplicates.")
+
+    visible_schedules = list_user_schedules(db, user_id)
+    visible_ids = {schedule.id for schedule in visible_schedules}
+    requested_ids = set(schedule_ids)
+    if not requested_ids.issubset(visible_ids):
+        raise ScheduleOrderError("The order contains a schedule that is not visible to the user.")
+
+    ordered_ids = [*schedule_ids, *(schedule.id for schedule in visible_schedules if schedule.id not in requested_ids)]
+    existing = {
+        item.schedule_id: item
+        for item in db.scalars(
+            select(UserScheduleOrder).where(UserScheduleOrder.user_id == user_id)
+        ).all()
+    }
+    # Free the unique position values before assigning the new order, so a
+    # reorder such as [B, A] cannot collide with A/B's old positions.
+    for item in existing.values():
+        item.position = -(item.position + 1)
+    for position, schedule_id in enumerate(ordered_ids):
+        item = existing.get(schedule_id)
+        if item is None:
+            db.add(UserScheduleOrder(user_id=user_id, schedule_id=schedule_id, position=position))
+        else:
+            item.position = position
+    db.commit()
+    return list_user_schedules(db, user_id)
 
 
 def list_received_invitations(db: Session, user_id: int) -> list[ScheduleMember]:
@@ -191,6 +306,12 @@ def create_schedule(
     missing_emails = [email for email in invitee_emails if email not in users_by_email]
     if missing_emails:
         return None, missing_emails
+    ensure_no_overlapping_schedule(
+        db,
+        user_id=creator_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
 
     schedule = MissionSchedule(
         creator_id=creator_id,
@@ -315,6 +436,22 @@ def update_schedule(
     if next_end_date < next_start_date:
         raise ValueError("end_date must be on or after start_date.")
 
+    if payload.status is None or payload.status.value != "CANCELLED":
+        participant_ids = {schedule.creator_id}
+        participant_ids.update(
+            member.user_id
+            for member in schedule.members
+            if member.status == ScheduleMemberStatus.ACCEPTED.value
+        )
+        for participant_id in participant_ids:
+            ensure_no_overlapping_schedule(
+                db,
+                user_id=participant_id,
+                start_date=next_start_date,
+                end_date=next_end_date,
+                exclude_schedule_id=schedule_id,
+            )
+
     if payload.title is not None:
         schedule.title = payload.title
     if payload.start_date is not None:
@@ -428,6 +565,18 @@ def update_membership_by_invite_token(
     if user.email is None or user.email != member.invite_email:
         return None, "email_mismatch"
 
+    if status == ScheduleMemberStatus.ACCEPTED:
+        try:
+            ensure_no_overlapping_schedule(
+                db,
+                user_id=user.id,
+                start_date=member.schedule.start_date,
+                end_date=member.schedule.end_date,
+                exclude_schedule_id=member.schedule_id,
+            )
+        except ScheduleDateOverlapError:
+            return None, "schedule_date_overlap"
+
     member.user_id = user.id
     member.status = status.value
     db.commit()
@@ -454,8 +603,16 @@ def accept_share_invitation_by_token(
         return None, "invitation_already_used"
     if invitation.schedule.creator_id == user.id:
         return None, "creator_cannot_join"
-    if user.email is None:
-        return None, "email_required"
+    try:
+        ensure_no_overlapping_schedule(
+            db,
+            user_id=user.id,
+            start_date=invitation.schedule.start_date,
+            end_date=invitation.schedule.end_date,
+            exclude_schedule_id=invitation.schedule_id,
+        )
+    except ScheduleDateOverlapError:
+        return None, "schedule_date_overlap"
 
     stmt = select(ScheduleMember).where(
         ScheduleMember.schedule_id == invitation.schedule_id,
@@ -494,12 +651,15 @@ def add_schedule_mission(
     schedule_id: int,
     user_id: int,
     mission_id: int,
+    planned_date: date | None = None,
 ) -> tuple[ScheduleMission | None, str | None]:
     schedule = _load_schedule(db, schedule_id)
     if schedule is None or not user_can_add_schedule_mission(schedule, user_id):
         return None, "schedule_not_found"
     if db.get(Mission, mission_id) is None:
         return None, "mission_not_found"
+    if planned_date is not None and not (schedule.start_date <= planned_date <= schedule.end_date):
+        return None, "mission_date_out_of_range"
 
     stmt = select(ScheduleMission).where(
         ScheduleMission.schedule_id == schedule_id,
@@ -512,6 +672,7 @@ def add_schedule_mission(
             mission_id=mission_id,
             added_by_user_id=user_id,
             status=ScheduleMissionStatus.ADDED.value,
+            planned_date=planned_date,
         )
         db.add(schedule_mission)
 
@@ -522,3 +683,75 @@ def add_schedule_mission(
         .where(ScheduleMission.id == schedule_mission.id)
         .options(selectinload(ScheduleMission.mission))
     ), None
+
+
+def update_schedule_mission_date(
+    db: Session,
+    *,
+    schedule_id: int,
+    schedule_mission_id: int,
+    creator_id: int,
+    planned_date: date | None,
+) -> tuple[ScheduleMission | None, str | None]:
+    schedule = db.get(MissionSchedule, schedule_id)
+    if schedule is None or schedule.creator_id != creator_id:
+        return None, "schedule_not_found"
+    if planned_date is not None and not (schedule.start_date <= planned_date <= schedule.end_date):
+        return None, "mission_date_out_of_range"
+    schedule_mission = db.scalar(
+        select(ScheduleMission)
+        .where(
+            ScheduleMission.id == schedule_mission_id,
+            ScheduleMission.schedule_id == schedule_id,
+        )
+    )
+    if schedule_mission is None:
+        return None, "schedule_mission_not_found"
+    schedule_mission.planned_date = planned_date
+    db.commit()
+    return db.scalar(
+        select(ScheduleMission)
+        .where(ScheduleMission.id == schedule_mission.id)
+        .options(selectinload(ScheduleMission.mission), selectinload(ScheduleMission.winner))
+    ), None
+
+
+def delete_schedule_mission(
+    db: Session,
+    *,
+    schedule_id: int,
+    schedule_mission_id: int,
+    user_id: int,
+) -> tuple[bool, str | None]:
+    schedule = _load_schedule(db, schedule_id)
+    if schedule is None or schedule.creator_id != user_id:
+        return False, "creator_only" if schedule is not None else "schedule_not_found"
+
+    schedule_mission = db.scalar(
+        select(ScheduleMission)
+        .where(
+            ScheduleMission.id == schedule_mission_id,
+            ScheduleMission.schedule_id == schedule_id,
+        )
+        .with_for_update()
+    )
+    if schedule_mission is None:
+        return False, "schedule_mission_not_found"
+
+    if schedule_mission.status != ScheduleMissionStatus.ADDED.value:
+        return False, "mission_in_progress"
+
+    has_started_session = db.scalar(
+        select(MissionSession.id)
+        .where(
+            MissionSession.schedule_mission_id == schedule_mission_id,
+            MissionSession.status != "WAITING",
+        )
+        .limit(1)
+    )
+    if has_started_session is not None:
+        return False, "mission_in_progress"
+
+    db.delete(schedule_mission)
+    db.commit()
+    return True, None

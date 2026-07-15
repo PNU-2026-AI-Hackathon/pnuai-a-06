@@ -109,6 +109,23 @@ class ScheduleMembershipUpdateRequest(BaseModel):
 
 class ScheduleMissionCreateRequest(BaseModel):
     mission_id: int = Field(gt=0, description="Mission id to add to this schedule.")
+    planned_date: date | None = Field(
+        default=None,
+        description="Optional date within the schedule range for performing this mission.",
+    )
+
+
+class ScheduleMissionUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    planned_date: date | None = Field(
+        default=None,
+        description="Date within the schedule range for performing this mission.",
+    )
+
+
+class ScheduleOrderUpdateRequest(BaseModel):
+    schedule_ids: list[int] = Field(min_length=0, description="Schedule ids in the user's desired order.")
 
 
 class ScheduleMemberResponse(BaseModel):
@@ -118,7 +135,7 @@ class ScheduleMemberResponse(BaseModel):
     user_id: int = Field(description="Invited user id.")
     invited_by_user_id: int = Field(description="Creator/inviter user id.")
     status: ScheduleMemberStatus = Field(description="Invitation status.")
-    invite_email: str = Field(description="Email address that was invited.")
+    invite_email: str | None = Field(description="Email address that was invited, if targeted.")
     invite_token: str = Field(description="Share token used by the frontend invite link.")
     invite_url: str | None = Field(description="Frontend share URL for this invitation.")
     invite_token_expires_at: datetime = Field(description="Invite token expiration time.")
@@ -195,9 +212,12 @@ class ScheduleMissionResponse(BaseModel):
     mission_id: int = Field(description="Mission id.")
     added_by_user_id: int = Field(description="User who added this mission.")
     status: ScheduleMissionStatus = Field(description="Schedule mission progress status.")
+    planned_date: date | None = Field(description="Planned execution date within the schedule range.")
     mission: MissionResponse = Field(description="Mission detail.")
     created_at: datetime
     updated_at: datetime
+    winner_user_id: int | None = Field(description="User id with the most likes after mission completion.")
+    winner: ScheduleUserResponse | None = Field(description="Winner profile after mission completion.")
 
 
 class MissionScheduleResponse(BaseModel):
