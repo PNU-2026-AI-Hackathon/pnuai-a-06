@@ -466,7 +466,7 @@ def ensure_can_add_submission(db: Session, session_id: int, user_id: int) -> Non
     submission = db.scalar(select(MissionSubmission).where(
         MissionSubmission.session_id == session_id, MissionSubmission.user_id == user_id
     ))
-    if submission is not None:
+    if submission is not None and submission.judge_status not in ("REJECTED", "ERROR"):
         raise SubmissionAlreadyExists(submission)
 
 
@@ -481,12 +481,18 @@ def add_submission(db: Session, session_id: int, user_id: int, storage_key: str,
     submission = db.scalar(select(MissionSubmission).where(
         MissionSubmission.session_id == session_id, MissionSubmission.user_id == user_id
     ))
-    if submission is not None:
-        raise SubmissionAlreadyExists(submission)
-    submission = MissionSubmission(session_id=session_id, user_id=user_id,
-                                   storage_key=storage_key, photo_url=photo_url,
-                                   captured_at=captured_at)
-    db.add(submission)
+    if submission is None:
+        submission = MissionSubmission(session_id=session_id, user_id=user_id)
+        db.add(submission)
+    submission.storage_key = storage_key
+    submission.photo_url = photo_url
+    submission.captured_at = captured_at
+    submission.judge_status = "PENDING"
+    submission.similarity_score = None
+    submission.judge_reason = None
+    submission.judge_model = None
+    submission.judged_at = None
+    submission.judge_error = None
     session.status = "UPLOADING"
     db.flush()
     member_count = len(session.members)
@@ -502,6 +508,7 @@ def add_submission(db: Session, session_id: int, user_id: int, storage_key: str,
         member_count > 0
         and member_count >= expected_member_count
         and submission_count == member_count
+        and all(item.judge_status == "PASSED" for item in session.submissions)
     ):
         _enter_commentary(session)
     db.commit()

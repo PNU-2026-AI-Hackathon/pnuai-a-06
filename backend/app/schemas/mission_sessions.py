@@ -17,6 +17,15 @@ class MissionSessionStatus(str, Enum):
     COMPLETED = "COMPLETED"
 
 
+class MissionJudgementStatus(str, Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    PASSED = "PASSED"
+    REJECTED = "REJECTED"
+    REVIEW = "REVIEW"
+    ERROR = "ERROR"
+
+
 class MissionSessionCreateResponse(BaseModel):
     id: int
     schedule_mission_id: int
@@ -43,6 +52,11 @@ class MissionSubmissionResponse(BaseModel):
     captured_at: datetime | None
     uploaded_at: datetime
     like_count: int
+    judge_status: MissionJudgementStatus
+    similarity_score: float | None
+    judge_reason: str | None
+    judge_model: str | None
+    judged_at: datetime | None
     comments: list["MissionSubmissionCommentResponse"]
     user: ScheduleUserResponse
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,7 @@ from app.core.security import decode_access_token
 from app.db.session import SessionLocal
 from app.models.schedules import MissionSession
 from app.services.mission_session_ws import manager as mission_session_ws
+from app.services.mission_judgement import judge_submission
 
 router = APIRouter(tags=["mission sessions"])
 storage = LocalStorageService()
@@ -173,7 +174,7 @@ async def start_mission_session(session_id: int, current_user: User = Depends(ge
 
 
 @router.post("/mission-sessions/{session_id}/photo", response_model=MissionSubmissionResponse)
-async def upload_mission_photo(session_id: int, photo: UploadFile = File(...), captured_at: datetime | None = None,
+async def upload_mission_photo(session_id: int, background_tasks: BackgroundTasks, photo: UploadFile = File(...), captured_at: datetime | None = None,
                                current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if photo.content_type is None or not photo.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="An image file is required.")
@@ -217,6 +218,7 @@ async def upload_mission_photo(session_id: int, photo: UploadFile = File(...), c
         await mission_session_ws.broadcast_session(session_state)
         if session_state.status == "VOTING":
             await mission_session_ws.broadcast_session(session_state, "voting_started")
+    background_tasks.add_task(judge_submission, result.id)
     return result
 
 

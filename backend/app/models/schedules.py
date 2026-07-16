@@ -7,6 +7,8 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
+    Float,
     UniqueConstraint,
     func,
 )
@@ -328,6 +330,14 @@ class MissionSubmission(Base):
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    judge_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="PENDING", server_default="PENDING", index=True
+    )
+    similarity_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    judge_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    judge_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    judged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    judge_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped[MissionSession] = relationship(back_populates="submissions")
     user: Mapped[User] = relationship()
