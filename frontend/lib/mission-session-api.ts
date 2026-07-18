@@ -35,9 +35,12 @@ type ApiMissionSubmission = {
   captured_at?: string | null;
   comments?: ApiMissionComment[];
   id?: number | string;
+  judge_reason?: string | null;
+  judge_status?: MissionJudgementStatus | null;
   like_count?: number;
   likes_count?: number;
   photo_url?: string;
+  similarity_score?: number | string | null;
   uploaded_at?: string;
   user?: ApiMissionSessionUser;
   user_id?: number | string;
@@ -67,6 +70,26 @@ type ApiMissionSession = {
 };
 
 export type MissionSessionStatus = 'WAITING' | 'READY' | 'SHOOTING' | 'UPLOADING' | 'VOTING' | 'REVEALED' | 'COMPLETED';
+export type MissionJudgementStatus = 'PENDING' | 'PROCESSING' | 'PASSED' | 'REJECTED' | 'REVIEW' | 'ERROR';
+export type MissionSubmission = {
+  comments: {
+    content: string;
+    createdAt?: string;
+    id: string;
+    userId: string;
+    nickname?: string | null;
+  }[];
+  id: string;
+  imageUrl: string;
+  judgeReason?: string | null;
+  judgeStatus?: MissionJudgementStatus | null;
+  likeCount: number;
+  photoUrl: string;
+  similarityScore?: number | null;
+  uploadedAt?: string;
+  userId: string;
+  nickname?: string | null;
+};
 
 export type MissionSession = {
   completedAt?: string | null;
@@ -87,22 +110,7 @@ export type MissionSession = {
   shootingEndsAt?: string | null;
   startedAt?: string | null;
   status: MissionSessionStatus;
-  submissions: {
-    comments: {
-      content: string;
-      createdAt?: string;
-      id: string;
-      userId: string;
-      nickname?: string | null;
-    }[];
-    id: string;
-    imageUrl: string;
-    likeCount: number;
-    photoUrl: string;
-    uploadedAt?: string;
-    userId: string;
-    nickname?: string | null;
-  }[];
+  submissions: MissionSubmission[];
 };
 
 export class MissionSessionApiError extends Error {
@@ -225,6 +233,41 @@ function pickFirstDateValue(...values: (string | null | undefined)[]) {
   return values.find((value) => typeof value === 'string' && value.trim()) ?? null;
 }
 
+function normalizeSimilarityScore(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const score = Number(value);
+  return Number.isFinite(score) ? score : null;
+}
+
+function normalizeSubmission(submission: ApiMissionSubmission): MissionSubmission {
+  return {
+    comments: (submission.comments ?? []).map((comment) => ({
+      content: comment.content ?? '',
+      createdAt: comment.created_at,
+      id: String(comment.id ?? ''),
+      nickname: comment.user?.nickname,
+      userId: String(comment.user_id ?? comment.user?.id ?? ''),
+    })).filter((comment) => comment.content),
+    id: String(submission.id ?? ''),
+    imageUrl: normalizePhotoUrl(submission.photo_url ?? ''),
+    judgeReason: submission.judge_reason ?? null,
+    judgeStatus: submission.judge_status ?? null,
+    likeCount: Number(submission.like_count ?? submission.likes_count ?? 0),
+    nickname: submission.user?.nickname,
+    photoUrl: submission.photo_url ?? '',
+    similarityScore: normalizeSimilarityScore(submission.similarity_score),
+    uploadedAt: submission.uploaded_at,
+    userId: String(submission.user_id ?? submission.user?.id ?? ''),
+  };
+}
+
+export function getPassedMissionSubmissions(session: MissionSession | null | undefined) {
+  return session?.submissions.filter((submission) => submission.judgeStatus === 'PASSED') ?? [];
+}
+
 function normalizeSession(data: ApiMissionSession): MissionSession {
   const sessionId = data.id ?? data.session_id;
 
@@ -251,22 +294,7 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
     shootingEndsAt: pickFirstDateValue(data.shooting_ends_at, data.shooting_deadline_at, data.shooting_expires_at),
     startedAt: data.started_at,
     status: data.status ?? 'WAITING',
-    submissions: (data.submissions ?? []).map((submission) => ({
-      comments: (submission.comments ?? []).map((comment) => ({
-        content: comment.content ?? '',
-        createdAt: comment.created_at,
-        id: String(comment.id ?? ''),
-        nickname: comment.user?.nickname,
-        userId: String(comment.user_id ?? comment.user?.id ?? ''),
-      })).filter((comment) => comment.content),
-      id: String(submission.id ?? ''),
-      imageUrl: normalizePhotoUrl(submission.photo_url ?? ''),
-      likeCount: Number(submission.like_count ?? submission.likes_count ?? 0),
-      nickname: submission.user?.nickname,
-      photoUrl: submission.photo_url ?? '',
-      uploadedAt: submission.uploaded_at,
-      userId: String(submission.user_id ?? submission.user?.id ?? ''),
-    })).filter((submission) => submission.photoUrl),
+    submissions: (data.submissions ?? []).map(normalizeSubmission).filter((submission) => submission.photoUrl),
   };
 }
 
@@ -391,7 +419,8 @@ export async function uploadMissionSessionPhoto(sessionId: string, photoUri: str
       signal: controller.signal,
     });
 
-    return readJson<ApiMissionSubmission>(res, '사진 업로드에 실패했습니다.');
+    const data = await readJson<ApiMissionSubmission>(res, '사진 업로드에 실패했습니다.');
+    return normalizeSubmission(data);
   } catch (error) {
     if (isAbortError(error)) {
       throw new Error('사진 업로드 응답이 지연되고 있어요. 네트워크를 확인하고 다시 시도해 주세요.');

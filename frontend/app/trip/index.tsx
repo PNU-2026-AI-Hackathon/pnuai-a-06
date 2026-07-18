@@ -318,7 +318,7 @@ export default function TripCreateScreen() {
       const schedule = await createOrSyncDraftSchedule();
 
       if (pendingMissionId) {
-        await addMissionToSchedule(schedule.scheduleId, pendingMissionId);
+        await addMissionToSchedule(schedule.scheduleId, pendingMissionId, schedule.startDate ?? startDate);
         router.replace({ pathname: '/trip/active', params: { scheduleId: schedule.scheduleId } });
         return;
       }

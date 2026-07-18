@@ -10,7 +10,7 @@ import { MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
-import { getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, uploadMissionSessionPhoto, type MissionSession } from '@/lib/mission-session-api';
+import { connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
 const MISSION_CARD_SOURCE_WIDTH = 164;
@@ -69,6 +69,34 @@ function isDuplicateSubmissionError(error: unknown) {
   return message.includes('이미') || message.includes('already') || message.includes('duplicate') || message.includes('submitted') || message.includes('한 번');
 }
 
+function isWaitingJudgementStatus(status: MissionJudgementStatus | null | undefined) {
+  return status === 'PENDING' || status === 'PROCESSING' || status === 'REVIEW';
+}
+
+function isRetryableJudgementStatus(status: MissionJudgementStatus | null | undefined) {
+  return status === 'REJECTED' || status === 'ERROR';
+}
+
+function getJudgementWaitingMessage(status: MissionJudgementStatus | null | undefined) {
+  return status === 'PROCESSING' ? '사진을 확인하고 있어요.' : 'AI가 미션 사진을 확인하고 있어요.';
+}
+
+function getMyLatestSubmission(session: MissionSession, currentUserId: string | null, submittedSubmissionId: string | null) {
+  if (submittedSubmissionId) {
+    const submitted = session.submissions.find((submission) => submission.id === submittedSubmissionId);
+
+    if (submitted) {
+      return submitted;
+    }
+  }
+
+  if (!currentUserId) {
+    return null;
+  }
+
+  return [...session.submissions].reverse().find((submission) => submission.userId === currentUserId) ?? null;
+}
+
 export default function MissionCaptureScreen() {
   const params = useLocalSearchParams<{ scheduleId?: string | string[]; scheduleMissionId?: string | string[]; sessionId?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
@@ -87,6 +115,10 @@ export default function MissionCaptureScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
+  const [judgementSessionId, setJudgementSessionId] = useState<string | null>(null);
+  const [submittedSubmissionId, setSubmittedSubmissionId] = useState<string | null>(null);
+  const [judgeReason, setJudgeReason] = useState<string | null>(null);
+  const [judgeStatus, setJudgeStatus] = useState<MissionJudgementStatus | null>(null);
   const [session, setSession] = useState<MissionSession | null>(null);
   const [mission, setMission] = useState<TripScheduleMission | null>(null);
   const [isMissionLoading, setIsMissionLoading] = useState(false);
@@ -105,6 +137,8 @@ export default function MissionCaptureScreen() {
   const uploadRemainingMs = getRemainingMs(session?.photoUploadEndsAt ?? session?.shootingEndsAt, now);
   const isShootingExpired = shootingRemainingMs !== null && shootingRemainingMs <= 0;
   const isUploadExpired = uploadRemainingMs !== null && uploadRemainingMs <= 0;
+  const isWaitingForJudgement = isWaitingJudgementStatus(judgeStatus);
+  const needsRetakeAfterJudgement = isRetryableJudgementStatus(judgeStatus);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -187,6 +221,85 @@ export default function MissionCaptureScreen() {
       isActive = false;
     };
   }, [scheduleId, scheduleMissionId]);
+
+  useEffect(() => {
+    if (!judgementSessionId) {
+      return;
+    }
+
+    let isActive = true;
+    const currentUserId = getAuthItem('user_id');
+
+    const applyJudgementSession = (nextSession: MissionSession) => {
+      if (!isActive) {
+        return;
+      }
+
+      setSession(nextSession);
+      const mySubmission = getMyLatestSubmission(nextSession, currentUserId, submittedSubmissionId);
+
+      if (!mySubmission) {
+        return;
+      }
+
+      const nextJudgeStatus = mySubmission.judgeStatus ?? null;
+      setJudgeStatus(nextJudgeStatus);
+      setJudgeReason(mySubmission.judgeReason ?? null);
+
+      if (isWaitingJudgementStatus(nextJudgeStatus)) {
+        setUploadMessage(getJudgementWaitingMessage(nextJudgeStatus));
+        return;
+      }
+
+      setJudgementSessionId(null);
+
+      if (nextJudgeStatus === 'PASSED') {
+        setIsMissionComplete(true);
+        setUploadMessage('AI 확인이 완료됐어요.');
+        setReturnCountdown(3);
+        return;
+      }
+
+      if (nextJudgeStatus === 'REJECTED') {
+        setIsMissionComplete(false);
+        setUploadMessage('다시 촬영해주세요');
+        return;
+      }
+
+      if (nextJudgeStatus === 'ERROR') {
+        setIsMissionComplete(false);
+        setUploadMessage(mySubmission.judgeReason || '사진 판독에 실패했어요. 다시 촬영해주세요.');
+        return;
+      }
+
+      setIsMissionComplete(true);
+      setUploadMessage('사진을 업로드했어요.');
+      setReturnCountdown(3);
+    };
+
+    const socket = connectMissionSessionSocket(judgementSessionId, {
+      onError: () => {
+        void getMissionSession(judgementSessionId).then(applyJudgementSession).catch(() => undefined);
+      },
+      onMessage: ({ session: nextSession, type }) => {
+        if (nextSession && (type === 'judgement_updated' || nextSession.id === judgementSessionId)) {
+          applyJudgementSession(nextSession);
+        }
+      },
+    });
+
+    const refreshTimer = setInterval(() => {
+      void getMissionSession(judgementSessionId).then(applyJudgementSession).catch(() => undefined);
+    }, 3000);
+
+    void getMissionSession(judgementSessionId).then(applyJudgementSession).catch(() => undefined);
+
+    return () => {
+      isActive = false;
+      clearInterval(refreshTimer);
+      socket.close();
+    };
+  }, [judgementSessionId, submittedSubmissionId]);
 
   useEffect(() => {
     if (returnCountdown === null) {
@@ -272,6 +385,9 @@ export default function MissionCaptureScreen() {
       if (photo?.uri) {
         setCapturedPhotoUri(photo.uri);
         setIsMissionComplete(false);
+        setJudgeReason(null);
+        setJudgeStatus(null);
+        setSubmittedSubmissionId(null);
       }
     } finally {
       setIsCapturing(false);
@@ -283,6 +399,10 @@ export default function MissionCaptureScreen() {
     setIsMissionComplete(false);
     setUploadMessage('');
     setReturnCountdown(null);
+    setJudgementSessionId(null);
+    setJudgeReason(null);
+    setJudgeStatus(null);
+    setSubmittedSubmissionId(null);
   };
 
   const ensureCurrentUserCanSubmit = async (uploadSessionId: string) => {
@@ -293,9 +413,9 @@ export default function MissionCaptureScreen() {
     }
 
     const currentSession = await getMissionSession(uploadSessionId);
-    const hasSubmitted = currentSession.submissions.some((submission) => submission.userId === currentUserId);
+    const activeSubmission = [...currentSession.submissions].reverse().find((submission) => submission.userId === currentUserId && !isRetryableJudgementStatus(submission.judgeStatus));
 
-    if (hasSubmitted) {
+    if (activeSubmission) {
       throw new Error('이미 수행한 미션이에요. 한 미션은 한 번만 제출할 수 있어요.');
     }
   };
@@ -335,6 +455,10 @@ export default function MissionCaptureScreen() {
       setIsUploading(true);
       setUploadMessage('세션을 확인하는 중이에요.');
       setReturnCountdown(null);
+      setJudgementSessionId(null);
+      setJudgeReason(null);
+      setJudgeStatus(null);
+      setSubmittedSubmissionId(null);
       const uploadSessionId = await resolveUploadSessionId();
       const uploadSession = await getMissionSession(uploadSessionId);
       setSession(uploadSession);
@@ -345,8 +469,34 @@ export default function MissionCaptureScreen() {
       setUploadMessage('제출 가능 여부를 확인하는 중이에요.');
       await ensureCurrentUserCanSubmit(uploadSessionId);
       setUploadMessage('사진을 업로드하는 중이에요.');
-      await runWithNetworkRetry(() => uploadMissionSessionPhoto(uploadSessionId, capturedPhotoUri), 1);
+      const uploadedSubmission: MissionSubmission = await runWithNetworkRetry(() => uploadMissionSessionPhoto(uploadSessionId, capturedPhotoUri), 1);
+      const nextJudgeStatus = uploadedSubmission.judgeStatus ?? null;
+      setSubmittedSubmissionId(uploadedSubmission.id);
+      setJudgeStatus(nextJudgeStatus);
+      setJudgeReason(uploadedSubmission.judgeReason ?? null);
 
+      if (nextJudgeStatus === 'PASSED') {
+        setIsMissionComplete(true);
+        setUploadMessage('AI 확인이 완료됐어요.');
+        setReturnCountdown(3);
+        return;
+      }
+
+      if (nextJudgeStatus === 'REJECTED') {
+        setUploadMessage('다시 촬영해주세요');
+        return;
+      }
+
+      if (nextJudgeStatus === 'ERROR') {
+        setUploadMessage(uploadedSubmission.judgeReason || '사진 판독에 실패했어요. 다시 촬영해주세요.');
+        return;
+      }
+
+      if (isWaitingJudgementStatus(nextJudgeStatus)) {
+        setUploadMessage(getJudgementWaitingMessage(nextJudgeStatus));
+        setJudgementSessionId(uploadSessionId);
+        return;
+      }
 
       setIsMissionComplete(true);
       setUploadMessage('사진을 업로드했어요.');
@@ -392,7 +542,9 @@ export default function MissionCaptureScreen() {
         <View style={styles.reviewHeader}>
           {uploadRemainingMs !== null ? <Text style={[styles.timeAttackText, isUploadExpired && styles.timeAttackDanger]}>업로드 제한 {formatRemainingTime(uploadRemainingMs)}</Text> : null}
           {isMissionComplete ? <Text style={styles.completeTitle}>미션 완료!</Text> : null}
-          {uploadMessage ? <Text style={styles.uploadMessage}>{uploadMessage}</Text> : null}
+          {isWaitingForJudgement ? <ActivityIndicator color="#409CB7" style={styles.judgementLoader} /> : null}
+          {uploadMessage ? <Text style={[styles.uploadMessage, needsRetakeAfterJudgement && styles.retakePromptMessage]}>{uploadMessage}</Text> : null}
+          {judgeReason && !uploadMessage ? <Text style={styles.uploadMessage}>{judgeReason}</Text> : null}
           {returnCountdown !== null ? <Text style={styles.countdownText}>{returnCountdown}초 후 여행 화면으로 돌아가요</Text> : null}
         </View>
 
@@ -401,10 +553,10 @@ export default function MissionCaptureScreen() {
         </View>
 
         <View style={styles.reviewActions}>
-          <ScalePressable accessibilityLabel="다시 찍기" disabled={isMissionComplete || isUploading} onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
+          <ScalePressable accessibilityLabel="다시 찍기" disabled={isMissionComplete || isUploading || isWaitingForJudgement} onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton, (isMissionComplete || isUploading || isWaitingForJudgement) && styles.disabledControl]}>
             <Text style={[styles.reviewButtonText, styles.retakeButtonText]}>다시 찍기</Text>
           </ScalePressable>
-          <ScalePressable accessibilityLabel="완료하기" disabled={isMissionComplete || isUploading || isUploadExpired} onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton, (isMissionComplete || isUploading || isUploadExpired) && styles.disabledControl]}>
+          <ScalePressable accessibilityLabel="완료하기" disabled={isMissionComplete || isUploading || isUploadExpired || isWaitingForJudgement || needsRetakeAfterJudgement} onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton, (isMissionComplete || isUploading || isUploadExpired || isWaitingForJudgement || needsRetakeAfterJudgement) && styles.disabledControl]}>
             {isUploading ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.reviewButtonText, styles.completeButtonText]}>{sessionId ? '업로드하기' : '완료하기'}</Text>}
           </ScalePressable>
         </View>
@@ -513,6 +665,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 6,
     textAlign: 'center',
+  },
+  retakePromptMessage: {
+    color: '#2D3C43',
+    fontSize: 20,
+    fontWeight: '900',
+    marginTop: 10,
+  },
+  judgementLoader: {
+    marginTop: 6,
   },
   timeAttackText: {
     color: '#D86C59',

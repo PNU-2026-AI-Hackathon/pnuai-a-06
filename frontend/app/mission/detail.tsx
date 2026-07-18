@@ -7,7 +7,7 @@ import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, getCachedMissions, type MissionItem } from '@/lib/mission-api';
 import { getLatestMissionSession, isMissionSessionNotFoundError, type MissionSession } from '@/lib/mission-session-api';
-import { addMissionToSchedule, getCachedTripSchedules, getTripSchedule, listTripSchedules, removeMissionFromSchedule, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
+import { addMissionToSchedule, getCachedTripSchedules, getTripSchedule, listTripSchedules, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
 type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
 
@@ -89,6 +89,49 @@ function formatScheduleDate(schedule: TripSchedule) {
   return schedule.startDate ?? schedule.endDate ?? '날짜 미정';
 }
 
+function parseDateValue(value: string | null | undefined) {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function formatDateValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+
+  return nextDate;
+}
+
+function getScheduleDateOptions(schedule: TripSchedule) {
+  const startDate = parseDateValue(schedule.startDate);
+  const endDate = parseDateValue(schedule.endDate ?? schedule.startDate);
+
+  if (!startDate || !endDate || startDate.getTime() > endDate.getTime()) {
+    return [];
+  }
+
+  const dates: string[] = [];
+  let cursor = startDate;
+
+  while (cursor.getTime() <= endDate.getTime()) {
+    dates.push(formatDateValue(cursor));
+    cursor = addDays(cursor, 1);
+  }
+
+  return dates;
+}
 export default function MissionDetailScreen() {
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
   const params = useLocalSearchParams<{ district?: string; districtCode?: string; missionCode?: string; scheduleId?: string; theme?: string }>();
@@ -102,11 +145,11 @@ export default function MissionDetailScreen() {
   const [targetSchedule, setTargetSchedule] = useState<TripSchedule | null>(null);
   const [targetSessions, setTargetSessions] = useState<Record<string, MissionSession>>({});
   const [selectedMission, setSelectedMission] = useState<MissionItem | null>(null);
+  const [selectedScheduleForDate, setSelectedScheduleForDate] = useState<TripSchedule | null>(null);
   const [isLoading, setIsLoading] = useState(() => getCachedMissions().length === 0);
   const [isSchedulePickerVisible, setIsSchedulePickerVisible] = useState(false);
   const [isAddingMission, setIsAddingMission] = useState(false);
   const [isLoadingTargetSessions, setIsLoadingTargetSessions] = useState(false);
-  const [busyMissionId, setBusyMissionId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const sortedMissions = useMemo(
@@ -243,6 +286,7 @@ export default function MissionDetailScreen() {
 
     setIsSchedulePickerVisible(false);
     setSelectedMission(null);
+    setSelectedScheduleForDate(null);
   };
 
   const handleCreateScheduleForMission = (mission: MissionItem) => {
@@ -285,53 +329,31 @@ export default function MissionDetailScreen() {
     return nextSchedule;
   };
 
-  const handleDirectMissionToggle = async (mission: MissionItem) => {
-    if (!targetScheduleId || busyMissionId) {
+  const handleDirectMissionAdd = (mission: MissionItem) => {
+    if (!targetScheduleId) {
       return;
     }
 
     const addedMission = getAddedScheduleMission(mission);
-    const { isCompleted, isInProgress } = getAddedMissionState(mission);
 
-    if (addedMission && (isCompleted || isInProgress)) {
-      setActionMessage(isCompleted ? '완료된 미션은 뺄 수 없습니다.' : '진행 중인 미션은 뺄 수 없습니다.');
+    if (addedMission) {
+      setActionMessage('이미 담긴 미션이에요. 날짜 변경이나 삭제는 일정 화면에서 할 수 있어요.');
       return;
     }
 
-    if (addedMission && !targetSchedule?.permissions.canRemoveMission) {
-      setActionMessage('미션 삭제 권한이 없습니다.');
-      return;
-    }
-
-    if (!addedMission && !targetSchedule?.permissions.canAddMission) {
+    if (!targetSchedule?.permissions.canAddMission) {
       setActionMessage('미션 추가 권한이 없습니다.');
       return;
     }
 
-    try {
-      setBusyMissionId(mission.id);
-      setActionMessage('');
-
-      if (addedMission) {
-        await removeMissionFromSchedule(targetScheduleId, addedMission.scheduleMissionId);
-        await refreshTargetSchedule();
-        setActionMessage(`${mission.title} 미션을 뺐어요.`);
-        return;
-      }
-
-      await addMissionToSchedule(targetScheduleId, mission.id);
-      await refreshTargetSchedule();
-      setActionMessage(`${mission.title} 미션을 담았어요.`);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : '미션 요청에 실패했어요.');
-    } finally {
-      setBusyMissionId(null);
-    }
+    setActionMessage('');
+    setSelectedMission(mission);
+    setSelectedScheduleForDate(targetSchedule);
+    setIsSchedulePickerVisible(true);
   };
-
   const handleAddPress = async (mission: MissionItem) => {
     if (targetScheduleId) {
-      await handleDirectMissionToggle(mission);
+      handleDirectMissionAdd(mission);
       return;
     }
 
@@ -375,7 +397,17 @@ export default function MissionDetailScreen() {
     }
   };
 
-  const handleSelectSchedule = async (schedule: TripSchedule) => {
+  const scheduleHasSelectedMission = (schedule: TripSchedule) => {
+    if (!selectedMission) {
+      return false;
+    }
+
+    return schedule.missions.some((mission) => (
+      mission.missionId === String(selectedMission.id) || Boolean(selectedMission.code && mission.missionCode === selectedMission.code)
+    ));
+  };
+
+  const handleSelectSchedule = (schedule: TripSchedule) => {
     if (!schedule.permissions.canAddMission) {
       setActionMessage('미션 추가 권한이 없습니다.');
       return;
@@ -385,20 +417,36 @@ export default function MissionDetailScreen() {
       return;
     }
 
+    if (scheduleHasSelectedMission(schedule)) {
+      setActionMessage('이미 담긴 미션이에요. 날짜 변경이나 삭제는 일정 화면에서 할 수 있어요.');
+      return;
+    }
+
+    setSelectedScheduleForDate(schedule);
+  };
+
+  const handleSelectPlannedDate = async (plannedDate: string) => {
+    if (!selectedMission || !selectedScheduleForDate || isAddingMission) {
+      return;
+    }
+
     try {
       setIsAddingMission(true);
       setActionMessage('');
-      await addMissionToSchedule(schedule.scheduleId, selectedMission.id);
+      await addMissionToSchedule(selectedScheduleForDate.scheduleId, selectedMission.id, plannedDate);
+      if (targetScheduleId && selectedScheduleForDate.scheduleId === targetScheduleId) {
+        await refreshTargetSchedule();
+      }
       setIsSchedulePickerVisible(false);
       setSelectedMission(null);
-      setActionMessage(`${schedule.roomName}에 미션을 담았어요.`);
+      setSelectedScheduleForDate(null);
+      setActionMessage(`${selectedScheduleForDate.roomName} ${plannedDate}에 미션을 담았어요.`);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : '미션을 일정에 담지 못했어요.');
     } finally {
       setIsAddingMission(false);
     }
   };
-
   return (
     <View style={styles.container}>
       <ScrollView
@@ -455,11 +503,10 @@ export default function MissionDetailScreen() {
             <View style={styles.missionList}>
               {sortedMissions.map((mission) => {
                 const { addedMission, isCompleted, isInProgress } = targetScheduleId ? getAddedMissionState(mission) : { addedMission: null, isCompleted: false, isInProgress: false };
-                const isMissionBusy = busyMissionId === mission.id || (isAddingMission && selectedMission?.id === mission.id);
+                const isMissionBusy = isAddingMission && selectedMission?.id === mission.id;
                 const isScheduleLoading = Boolean(targetScheduleId && !targetSchedule);
                 const isCheckingSession = Boolean(addedMission && isLoadingTargetSessions);
-                const isRemoveDisabled = Boolean(addedMission && (!targetSchedule?.permissions.canRemoveMission || isCompleted || isInProgress));
-                const missionButtonLabel = isCheckingSession ? '확인 중' : isCompleted ? '완료' : isInProgress ? '진행 중' : addedMission ? '빼기' : '담기';
+                const missionButtonLabel = isCheckingSession ? '확인 중' : isCompleted ? '완료' : isInProgress ? '진행 중' : addedMission ? '담김' : '담기';
 
                 return (
                 <View key={mission.id} style={styles.missionCard}>
@@ -471,10 +518,10 @@ export default function MissionDetailScreen() {
                     <ScalePressable
                       accessibilityRole="button"
                       accessibilityLabel={`${mission.title} ${missionButtonLabel}`}
-                      disabled={isMissionBusy || isScheduleLoading || isRemoveDisabled}
+                      disabled={isMissionBusy || isScheduleLoading || Boolean(addedMission)}
                       onPress={() => handleAddPress(mission)}
                       pressedScale={0.94}
-                      style={[addedMission ? styles.removeMissionButton : styles.addMissionButton, (isMissionBusy || isScheduleLoading || isRemoveDisabled) && styles.disabledButton]}>
+                      style={[addedMission ? styles.addedMissionButton : styles.addMissionButton, (isMissionBusy || isScheduleLoading || addedMission) && styles.disabledButton]}>
                       {isMissionBusy ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.addMissionButtonText}>{missionButtonLabel}</Text>}
                     </ScalePressable>
                   </View>
@@ -495,23 +542,55 @@ export default function MissionDetailScreen() {
       <Modal animationType="fade" transparent visible={isSchedulePickerVisible} onRequestClose={closeSchedulePicker}>
         <Pressable accessibilityLabel="일정 선택 닫기" onPress={closeSchedulePicker} style={styles.modalBackdrop}>
           <Pressable style={styles.schedulePanel}>
-            <Text style={styles.schedulePanelTitle}>담을 일정을 선택해 주세요</Text>
-            <View style={styles.scheduleList}>
-              {schedules.map((schedule) => (
-                <ScalePressable
-                  accessibilityRole="button"
-                  key={schedule.scheduleId}
-                  onPress={() => handleSelectSchedule(schedule)}
-                  pressedScale={0.97}
-                  style={styles.scheduleItem}>
-                  <View style={styles.scheduleTextGroup}>
-                    <Text style={styles.scheduleName}>{schedule.roomName}</Text>
-                    <Text style={styles.scheduleDate}>{formatScheduleDate(schedule)}</Text>
-                  </View>
-                  <Text style={styles.scheduleMissionCount}>{schedule.missions.length}개</Text>
+            <Text style={styles.schedulePanelTitle}>{selectedScheduleForDate ? '담을 날짜를 선택해 주세요' : '담을 일정을 선택해 주세요'}</Text>
+            {selectedScheduleForDate ? (
+              <>
+                <View style={styles.selectedScheduleBox}>
+                  <Text style={styles.scheduleName}>{selectedScheduleForDate.roomName}</Text>
+                  <Text style={styles.scheduleDate}>{formatScheduleDate(selectedScheduleForDate)}</Text>
+                </View>
+                <View style={styles.dateGrid}>
+                  {getScheduleDateOptions(selectedScheduleForDate).length === 0 ? (
+                    <Text style={styles.dateEmptyText}>선택할 수 있는 날짜가 없어요.</Text>
+                  ) : getScheduleDateOptions(selectedScheduleForDate).map((date) => (
+                    <ScalePressable
+                      accessibilityRole="button"
+                      disabled={isAddingMission}
+                      key={date}
+                      onPress={() => handleSelectPlannedDate(date)}
+                      pressedScale={0.96}
+                      style={[styles.dateOption, isAddingMission && styles.disabledButton]}>
+                      <Text style={styles.dateOptionText}>{date}</Text>
+                    </ScalePressable>
+                  ))}
+                </View>
+                <ScalePressable disabled={isAddingMission} onPress={() => setSelectedScheduleForDate(null)} pressedScale={0.96} style={styles.backToScheduleButton}>
+                  <Text style={styles.backToScheduleText}>일정 다시 선택</Text>
                 </ScalePressable>
-              ))}
-            </View>
+              </>
+            ) : (
+              <View style={styles.scheduleList}>
+                {schedules.map((schedule) => {
+                  const isAlreadyAdded = scheduleHasSelectedMission(schedule);
+
+                  return (
+                    <ScalePressable
+                      accessibilityRole="button"
+                      disabled={isAlreadyAdded || isAddingMission}
+                      key={schedule.scheduleId}
+                      onPress={() => handleSelectSchedule(schedule)}
+                      pressedScale={0.97}
+                      style={[styles.scheduleItem, isAlreadyAdded && styles.disabledScheduleItem]}>
+                      <View style={styles.scheduleTextGroup}>
+                        <Text style={styles.scheduleName}>{schedule.roomName}</Text>
+                        <Text style={styles.scheduleDate}>{formatScheduleDate(schedule)}</Text>
+                      </View>
+                      <Text style={styles.scheduleMissionCount}>{isAlreadyAdded ? '담김' : `${schedule.missions.length}개`}</Text>
+                    </ScalePressable>
+                  );
+                })}
+              </View>
+            )}
             {isAddingMission ? <ActivityIndicator color="#409CB7" style={styles.panelLoader} /> : null}
           </Pressable>
         </Pressable>
@@ -639,9 +718,9 @@ const styles = StyleSheet.create({
     minWidth: 62,
     paddingHorizontal: 16,
   },
-  removeMissionButton: {
+  addedMissionButton: {
     alignItems: 'center',
-    backgroundColor: '#D06958',
+    backgroundColor: '#8A9194',
     borderRadius: 999,
     justifyContent: 'center',
     minHeight: 38,
@@ -701,6 +780,47 @@ const styles = StyleSheet.create({
   scheduleList: {
     gap: 10,
   },
+  selectedScheduleBox: {
+    backgroundColor: '#F4F7F8',
+    borderRadius: 14,
+    marginBottom: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  dateGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  dateOption: {
+    alignItems: 'center',
+    backgroundColor: '#EAF5F9',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 14,
+  },
+  dateOptionText: {
+    color: '#409CB7',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  dateEmptyText: {
+    color: '#8A9194',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  backToScheduleButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  backToScheduleText: {
+    color: '#626E75',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   scheduleItem: {
     alignItems: 'center',
     backgroundColor: '#F4F7F8',
@@ -710,6 +830,9 @@ const styles = StyleSheet.create({
     minHeight: 70,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  disabledScheduleItem: {
+    opacity: 0.55,
   },
   scheduleTextGroup: {
     flex: 1,

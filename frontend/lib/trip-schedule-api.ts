@@ -14,6 +14,8 @@ type UpdateScheduleInput = ScheduleInput & {
   scheduleId: string;
 };
 
+type JsonBodyValue = JsonBodyValue[] | number | string | null;
+
 type ApiMission = {
   code?: string;
   description?: string;
@@ -35,6 +37,7 @@ type ApiScheduleMission = {
   id?: string | number;
   mission?: ApiMission;
   mission_id?: string | number;
+  planned_date?: string | null;
   status?: string;
   updated_at?: string;
 };
@@ -121,6 +124,7 @@ export type TripScheduleMission = {
   missionId: string;
   photoUrl?: string | null;
   placeLabel?: string | null;
+  plannedDate?: string | null;
   rewardItemIcon?: string | null;
   scheduleMissionId: string;
   status?: string;
@@ -218,7 +222,7 @@ function getAccessToken() {
   return token;
 }
 
-async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: Record<string, string | number>) {
+async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: Record<string, JsonBodyValue>) {
   const token = getAccessToken();
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -230,7 +234,7 @@ async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' 
     method,
   });
 
-  const fallbackMessage = method === 'GET' ? '여행 일정을 불러오지 못했습니다.' : method === 'DELETE' ? '여행 일정 삭제에 실패했습니다.' : method === 'PATCH' ? '여행 일정 수정에 실패했습니다.' : '여행 일정 생성에 실패했습니다.';
+  const fallbackMessage = method === 'GET' ? '여행 일정을 불러오지 못했습니다.' : method === 'DELETE' ? '여행 일정 삭제에 실패했습니다.' : method === 'PUT' ? '여행 일정 순서 저장에 실패했습니다.' : method === 'PATCH' ? '여행 일정 수정에 실패했습니다.' : '여행 일정 생성에 실패했습니다.';
 
   return readJson<T>(res, fallbackMessage);
 }
@@ -263,6 +267,7 @@ function normalizeScheduleMission(data: ApiScheduleMission): TripScheduleMission
     missionId: String(missionId),
     photoUrl: normalizePhotoUrl(data.mission?.target_photo_url),
     placeLabel: data.mission?.place_label,
+    plannedDate: data.planned_date ?? null,
     rewardItemIcon: data.mission?.reward_item_icon ?? null,
     scheduleMissionId: String(scheduleMissionId),
     status: data.status,
@@ -408,22 +413,7 @@ function normalizeSchedule(data: ApiSchedule, fallbackRoomName: string): TripSch
 function normalizeScheduleList(data: ApiScheduleList) {
   const schedules = Array.isArray(data) ? data : data.schedules ?? data.items ?? data.results ?? data.data ?? [];
 
-  return sortTripSchedules(schedules.map((item) => normalizeSchedule(item, '이름 없는 여행')));
-}
-
-function getScheduleSortValue(schedule: TripSchedule) {
-  const createdTime = schedule.createdAt ? new Date(schedule.createdAt).getTime() : Number.NaN;
-
-  if (Number.isFinite(createdTime)) {
-    return createdTime;
-  }
-
-  const numericId = Number(schedule.scheduleId);
-  return Number.isFinite(numericId) ? numericId : 0;
-}
-
-function sortTripSchedules(schedules: TripSchedule[]) {
-  return [...schedules].sort((a, b) => getScheduleSortValue(b) - getScheduleSortValue(a));
+  return schedules.map((item) => normalizeSchedule(item, '이름 없는 여행'));
 }
 
 export function getCachedTripSchedules() {
@@ -435,18 +425,27 @@ export function getCachedTripSchedules() {
 
   try {
     const parsed = JSON.parse(raw) as TripSchedule[];
-    return Array.isArray(parsed) ? sortTripSchedules(parsed.filter((item) => item.scheduleId && item.roomName).map((item) => ({ ...item, missions: item.missions ?? [], participants: item.participants ?? [], permissions: item.permissions ?? DEFAULT_MEMBER_PERMISSIONS }))) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => item.scheduleId && item.roomName).map((item) => ({ ...item, missions: item.missions ?? [], participants: item.participants ?? [], permissions: item.permissions ?? DEFAULT_MEMBER_PERMISSIONS })) : [];
   } catch {
     return [];
   }
 }
 
 function saveScheduleCache(schedules: TripSchedule[]) {
-  setAuthItem(SCHEDULE_CACHE_KEY, JSON.stringify(sortTripSchedules(schedules)));
+  setAuthItem(SCHEDULE_CACHE_KEY, JSON.stringify(schedules));
 }
 
 export function cacheTripSchedule(schedule: TripSchedule) {
-  const nextSchedules = sortTripSchedules([schedule, ...getCachedTripSchedules().filter((item) => item.scheduleId !== schedule.scheduleId)]);
+  const cachedSchedules = getCachedTripSchedules();
+  const existingIndex = cachedSchedules.findIndex((item) => item.scheduleId === schedule.scheduleId);
+  const nextSchedules = [...cachedSchedules];
+
+  if (existingIndex >= 0) {
+    nextSchedules[existingIndex] = schedule;
+  } else {
+    nextSchedules.unshift(schedule);
+  }
+
   saveScheduleCache(nextSchedules);
 }
 
@@ -460,6 +459,25 @@ export async function listTripSchedules() {
   saveScheduleCache(schedules);
 
   return schedules;
+}
+
+export async function updateTripScheduleOrder(scheduleIds: string[]) {
+  const data = await requestAuthenticatedJson<ApiScheduleList>('/schedules/order', 'PUT', {
+    schedule_ids: scheduleIds.map((scheduleId) => {
+      const numericScheduleId = Number(scheduleId);
+      return Number.isFinite(numericScheduleId) ? numericScheduleId : scheduleId;
+    }),
+  });
+  const schedules = normalizeScheduleList(data);
+  const orderIndexById = new Map(scheduleIds.map((scheduleId, index) => [scheduleId, index]));
+  const orderedSchedules = [...schedules].sort((a, b) => {
+    const aIndex = orderIndexById.get(a.scheduleId) ?? Number.MAX_SAFE_INTEGER;
+    const bIndex = orderIndexById.get(b.scheduleId) ?? Number.MAX_SAFE_INTEGER;
+    return aIndex - bIndex;
+  });
+  saveScheduleCache(orderedSchedules);
+
+  return orderedSchedules;
 }
 
 export async function getTripSchedule(scheduleId: string) {
@@ -508,11 +526,17 @@ export async function updateDraftSchedule(input: UpdateScheduleInput) {
   return schedule;
 }
 
-export async function addMissionToSchedule(scheduleId: string, missionId: string) {
+export async function addMissionToSchedule(scheduleId: string, missionId: string, plannedDate?: string | null) {
   const numericMissionId = Number(missionId);
-  const data = await requestAuthenticatedJson<ApiScheduleMission>(`/schedules/${encodeURIComponent(scheduleId)}/missions`, 'POST', {
+  const body: Record<string, string | number> = {
     mission_id: Number.isFinite(numericMissionId) ? numericMissionId : missionId,
-  });
+  };
+
+  if (plannedDate) {
+    body.planned_date = plannedDate;
+  }
+
+  const data = await requestAuthenticatedJson<ApiScheduleMission>(`/schedules/${encodeURIComponent(scheduleId)}/missions`, 'POST', body);
 
   const scheduleMission = normalizeScheduleMission(data);
 
@@ -532,6 +556,37 @@ export async function addMissionToSchedule(scheduleId: string, missionId: string
   return scheduleMission;
 }
 
+export async function updateScheduleMissionDate(scheduleId: string, scheduleMissionId: string, plannedDate: string | null) {
+  const body: Record<string, string | number> = {};
+
+  if (plannedDate) {
+    body.planned_date = plannedDate;
+  }
+
+  const data = await requestAuthenticatedJson<ApiScheduleMission>(
+    `/schedules/${encodeURIComponent(scheduleId)}/missions/${encodeURIComponent(scheduleMissionId)}`,
+    'PATCH',
+    body
+  );
+  const scheduleMission = normalizeScheduleMission(data);
+
+  try {
+    await getTripSchedule(scheduleId);
+  } catch {
+    const cachedSchedule = getCachedTripSchedules().find((schedule) => schedule.scheduleId === scheduleId);
+
+    if (cachedSchedule) {
+      cacheTripSchedule({
+        ...cachedSchedule,
+        missions: cachedSchedule.missions.map((mission) => (
+          mission.scheduleMissionId === scheduleMission.scheduleMissionId ? scheduleMission : mission
+        )),
+      });
+    }
+  }
+
+  return scheduleMission;
+}
 export async function removeMissionFromSchedule(scheduleId: string, scheduleMissionId: string) {
   await requestAuthenticatedJson<Record<string, never>>(`/schedules/${encodeURIComponent(scheduleId)}/missions/${encodeURIComponent(scheduleMissionId)}`, 'DELETE');
 

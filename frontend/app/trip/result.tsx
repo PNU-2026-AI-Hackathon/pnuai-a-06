@@ -2,12 +2,12 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { completeMissionSession, getMissionSession, type MissionSession } from '@/lib/mission-session-api';
+import { completeMissionSession, getMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -25,6 +25,7 @@ export default function MissionResultScreen() {
   const [session, setSession] = useState<MissionSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const passedSubmissions = useMemo(() => getPassedMissionSubmissions(session), [session]);
 
   const refreshSession = useCallback(async () => {
     if (!sessionId) {
@@ -99,10 +100,10 @@ export default function MissionResultScreen() {
         <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSafeInset + 96, paddingHorizontal: horizontalPadding }]} showsVerticalScrollIndicator={false}>
           <View style={styles.summaryCard}>
             <Text style={styles.summaryTitle}>상태: {session?.status ?? '-'}</Text>
-            <Text style={styles.summaryText}>사진 {session?.submissions.length ?? 0}장 · 댓글 {session?.submissions.reduce((count, submission) => count + submission.comments.length, 0) ?? 0}개</Text>
+            <Text style={styles.summaryText}>사진 {passedSubmissions.length}장 · 댓글 {passedSubmissions.reduce((count, submission) => count + submission.comments.length, 0)}개</Text>
           </View>
 
-          {session?.submissions.length ? session.submissions.map((submission, submissionIndex) => (
+          {passedSubmissions.length ? passedSubmissions.map((submission, submissionIndex) => (
             <View key={submission.id} style={styles.resultCard}>
               <Text style={styles.photoTitle}>사진 {submissionIndex + 1}</Text>
               <Image source={{ uri: submission.imageUrl }} style={styles.photo} contentFit="cover" />

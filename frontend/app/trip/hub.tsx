@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, Animated, PanResponder, Pressable, ScrollView
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
-import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
+import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, updateTripScheduleOrder, type TripSchedule } from '@/lib/trip-schedule-api';
 
 const birdIcon = require('../../assets/svg/active/3d_bird.svg');
 const crownIcon = require('../../assets/svg/active/crown.svg');
@@ -158,10 +158,21 @@ export default function TripHubScreen() {
   const { bottomActionInset, horizontalPadding, topInset } = useResponsiveLayout();
   const [schedules, setSchedules] = useState<TripSchedule[]>(() => getCachedTripSchedules());
   const [isLoading, setIsLoading] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
   const [activeDrag, setActiveDrag] = useState<{ dragY: number; scheduleId: string } | null>(null);
   const [message, setMessage] = useState('');
+  const schedulesRef = useRef(schedules);
+  const isSavingOrderRef = useRef(isSavingOrder);
+
+  useEffect(() => {
+    schedulesRef.current = schedules;
+  }, [schedules]);
+
+  useEffect(() => {
+    isSavingOrderRef.current = isSavingOrder;
+  }, [isSavingOrder]);
 
   const refreshSchedules = useCallback(() => {
     let isActive = true;
@@ -249,16 +260,39 @@ export default function TripHubScreen() {
     return roundedOffset === 0 && Math.abs(dragY) > 28 ? Math.sign(dragY) : roundedOffset;
   };
 
-  const handleDragEnd = (scheduleId: string, dragY: number) => {
+  const handleDragEnd = async (scheduleId: string, dragY: number) => {
     const offset = getDragIndexOffset(dragY);
     setActiveDrag(null);
 
-    if (offset === 0) {
+    if (offset === 0 || isSavingOrderRef.current) {
       return;
     }
 
-    setSchedules((currentSchedules) => moveScheduleItem(currentSchedules, scheduleId, offset));
-    setMessage('변경한 순서는 이 화면에서만 적용돼요. 서버 저장 API가 생기면 영구 저장할 수 있어요.');
+    const previousSchedules = schedulesRef.current;
+    const nextSchedules = moveScheduleItem(previousSchedules, scheduleId, offset);
+
+    if (nextSchedules === previousSchedules) {
+      return;
+    }
+
+    schedulesRef.current = nextSchedules;
+    setSchedules(nextSchedules);
+    isSavingOrderRef.current = true;
+    setIsSavingOrder(true);
+    setMessage('');
+
+    try {
+      const savedSchedules = await updateTripScheduleOrder(nextSchedules.map((schedule) => schedule.scheduleId));
+      schedulesRef.current = savedSchedules;
+      setSchedules(savedSchedules);
+    } catch (error) {
+      schedulesRef.current = previousSchedules;
+      setSchedules(previousSchedules);
+      setMessage(error instanceof Error ? error.message : '여행 목록 순서 저장에 실패했어요.');
+    } finally {
+      isSavingOrderRef.current = false;
+      setIsSavingOrder(false);
+    }
   };
 
   const handleDragMove = (scheduleId: string, dragY: number) => {
@@ -315,7 +349,7 @@ export default function TripHubScreen() {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>여행 목록</Text>
           <View style={styles.sectionActions}>
-            {isLoading ? <ActivityIndicator color="#6EA4BF" /> : null}
+            {isLoading || isSavingOrder ? <ActivityIndicator color="#6EA4BF" /> : null}
             <Pressable accessibilityLabel={isEditing ? '여행 목록 편집 완료' : '여행 목록 편집'} onPress={() => { setActiveDrag(null); setIsEditing((value) => !value); }} style={styles.moreButton}>
               <Text style={[styles.moreIcon, isEditing && styles.doneText]}>{isEditing ? '완료' : '•••'}</Text>
             </Pressable>
@@ -626,14 +660,3 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
 });
-
-
-
-
-
-
-
-
-
-
-

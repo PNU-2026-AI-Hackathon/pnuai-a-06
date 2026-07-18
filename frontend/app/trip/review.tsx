@@ -11,6 +11,7 @@ import { getAuthItem } from '@/lib/auth-storage';
 import {
   connectMissionSessionSocket,
   getMissionSession,
+  getPassedMissionSubmissions,
   MissionSessionApiError,
   postMissionSessionComment,
   readyMissionSession,
@@ -144,24 +145,24 @@ export default function MissionReviewScreen() {
     return members.length > 0 && members.every((member) => Boolean(member.readyAt));
   }, [session?.members]);
 
+  const passedSubmissions = useMemo(() => getPassedMissionSubmissions(session), [session]);
   const requiredCommentsPerPhoto = Math.max(1, session?.members.length ?? 0);
   const currentSubmissionIndex = useMemo(() => {
-    const submissions = session?.submissions ?? [];
-    const nextIndex = submissions.findIndex((submission) => submission.comments.length < requiredCommentsPerPhoto);
+    const nextIndex = passedSubmissions.findIndex((submission) => submission.comments.length < requiredCommentsPerPhoto);
 
-    return nextIndex >= 0 ? nextIndex : Math.max(0, submissions.length - 1);
-  }, [requiredCommentsPerPhoto, session?.submissions]);
+    return nextIndex >= 0 ? nextIndex : Math.max(0, passedSubmissions.length - 1);
+  }, [passedSubmissions, requiredCommentsPerPhoto]);
 
-  const currentSubmission = session?.submissions[currentSubmissionIndex] ?? null;
+  const currentSubmission = passedSubmissions[currentSubmissionIndex] ?? null;
   const commentRemainingMs = getRemainingMs(session?.commentEndsAt, now);
   const isCommentExpired = commentRemainingMs !== null && commentRemainingMs <= 0;
   const hasCommentedCurrentPhoto = Boolean(currentUserId && currentSubmission?.comments.some((comment) => comment.userId === currentUserId));
   const currentPhotoCommentCount = currentSubmission?.comments.length ?? 0;
   const isCurrentPhotoComplete = Boolean(currentSubmission && currentPhotoCommentCount >= requiredCommentsPerPhoto);
   const isWaitingForOthers = hasCommentedCurrentPhoto && !isCurrentPhotoComplete;
-  const commentProgress = session?.submissions.reduce((count, submission) => count + submission.comments.length, 0) ?? 0;
-  const requiredCommentCount = (session?.submissions.length ?? 0) * requiredCommentsPerPhoto;
-  const isAllCommentsComplete = Boolean(session && session.submissions.length > 0 && session.members.length > 0 && requiredCommentCount > 0 && commentProgress >= requiredCommentCount);
+  const commentProgress = passedSubmissions.reduce((count, submission) => count + submission.comments.length, 0);
+  const requiredCommentCount = passedSubmissions.length * requiredCommentsPerPhoto;
+  const isAllCommentsComplete = Boolean(session && passedSubmissions.length > 0 && session.members.length > 0 && requiredCommentCount > 0 && commentProgress >= requiredCommentCount);
 
   useEffect(() => {
     if (!isAllCommentsComplete) {
@@ -289,7 +290,7 @@ export default function MissionReviewScreen() {
 
           {currentSubmission ? (
             <View style={styles.photoCard}>
-              <Text style={styles.photoCounter}>{currentSubmissionIndex + 1}/{session?.submissions.length ?? 0}</Text>
+              <Text style={styles.photoCounter}>{currentSubmissionIndex + 1}/{passedSubmissions.length}</Text>
               <Image source={{ uri: currentSubmission.imageUrl }} style={styles.photo} contentFit="cover" />
               <Text style={styles.anonymousLabel}>{isCurrentPhotoComplete ? '모든 댓글 완료 · 다음 사진으로 이동 중' : '촬영자 비공개'}</Text>
             </View>

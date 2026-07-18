@@ -4,8 +4,8 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 
 import { ScalePressable } from '@/components/scale-pressable';
@@ -18,6 +18,7 @@ import {
   getActiveMissionSession,
   getLatestMissionSession,
   getMissionSession,
+  getPassedMissionSubmissions,
   isMissionSessionNotFoundError,
   joinMissionSession,
   readyMissionSession,
@@ -25,7 +26,7 @@ import {
   startMissionSession,
   type MissionSession,
 } from '@/lib/mission-session-api';
-import { getTripSchedule, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
+import { getTripSchedule, removeMissionFromSchedule, updateScheduleMissionDate, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 
 function getParamValue(value: string | string[] | undefined) {
@@ -92,7 +93,8 @@ function isAlreadyJoinedSessionError(error: unknown) {
 function hasAllComments(session: MissionSession) {
   const requiredCommentsPerPhoto = session.members.length;
 
-  return requiredCommentsPerPhoto > 0 && session.submissions.length > 0 && session.submissions.every((submission) => submission.comments.length >= requiredCommentsPerPhoto);
+  const passedSubmissions = getPassedMissionSubmissions(session);
+  return requiredCommentsPerPhoto > 0 && passedSubmissions.length > 0 && passedSubmissions.every((submission) => submission.comments.length >= requiredCommentsPerPhoto);
 }
 
 function isFinishedSession(session: MissionSession | undefined) {
@@ -100,7 +102,7 @@ function isFinishedSession(session: MissionSession | undefined) {
 }
 
 function isReviewableSession(session: MissionSession) {
-  return session.status === 'REVEALED' && session.submissions.length > 0 && !isFinishedSession(session);
+  return session.status === 'REVEALED' && getPassedMissionSubmissions(session).length > 0 && !isFinishedSession(session);
 }
 
 function isStartedMissionSession(session: MissionSession) {
@@ -127,6 +129,53 @@ function getParticipantText(schedule: TripSchedule | null) {
   return names && names.length > 0 ? names.join(' · ') : '동행자 정보 없음';
 }
 
+function parseDateValue(value: string | null | undefined) {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function formatDateValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+
+  return nextDate;
+}
+
+function getScheduleDateOptions(schedule: TripSchedule | null) {
+  const startDate = parseDateValue(schedule?.startDate);
+  const endDate = parseDateValue(schedule?.endDate ?? schedule?.startDate);
+
+  if (!startDate || !endDate || startDate.getTime() > endDate.getTime()) {
+    return [];
+  }
+
+  const dates: string[] = [];
+  let cursor = startDate;
+
+  while (cursor.getTime() <= endDate.getTime()) {
+    dates.push(formatDateValue(cursor));
+    cursor = addDays(cursor, 1);
+  }
+
+  return dates;
+}
+
+function getMissionDateLabel(date: string) {
+  return date === 'UNPLANNED' ? '날짜 미정' : date;
+}
 export default function ActiveTripScreen() {
   const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
@@ -149,12 +198,33 @@ export default function ActiveTripScreen() {
   const [reviewAlertSession, setReviewAlertSession] = useState<MissionSession | null>(null);
   const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
   const [inviteData, setInviteData] = useState<TripInvite | null>(null);
-  const missions = schedule?.missions ?? [];
+  const [dateEditorMissionId, setDateEditorMissionId] = useState<string | null>(null);
+  const [busyScheduleMissionId, setBusyScheduleMissionId] = useState<string | null>(null);
+  const [missionListMessage, setMissionListMessage] = useState('');
+  const missions = useMemo(() => schedule?.missions ?? [], [schedule]);
   const activeMissions = missions.filter((mission) => !isCompletedScheduleMission(mission) && !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
+  const scheduleDateOptions = useMemo(() => getScheduleDateOptions(schedule), [schedule]);
+  const missionDateGroups = useMemo(() => {
+    const groups = scheduleDateOptions.map((date) => ({
+      date,
+      missions: missions.filter((mission) => mission.plannedDate === date),
+    }));
+    const unplannedMissions = missions.filter((mission) => !mission.plannedDate || !scheduleDateOptions.includes(mission.plannedDate));
+
+    if (unplannedMissions.length > 0) {
+      groups.push({ date: 'UNPLANNED', missions: unplannedMissions });
+    }
+
+    return groups;
+  }, [missions, scheduleDateOptions]);
   const canAddMission = schedule?.permissions.canAddMission ?? false;
+  const activeBlockingSession = Object.values(missionSessions).find((nextSession) => !isFinishedSession(nextSession)) ?? null;
   const hasStartedMissionSession = Object.values(missionSessions).some(isStartedMissionSession);
   const canInviteCompanion = (schedule?.permissions.canInviteCompanion ?? false) && !hasStartedMissionSession;
   const inviteUrl = getInviteUrl(inviteData);
+  const isMissionBlockedForPlay = useCallback((mission: TripScheduleMission) => {
+    return Boolean(activeBlockingSession?.scheduleMissionId && activeBlockingSession.scheduleMissionId !== mission.scheduleMissionId);
+  }, [activeBlockingSession]);
 
   const rememberFeedSession = useCallback((nextSession: MissionSession, fallbackScheduleMissionId?: string) => {
     const scheduleMissionId = nextSession.scheduleMissionId || fallbackScheduleMissionId;
@@ -169,7 +239,8 @@ export default function ActiveTripScreen() {
       }));
     }
 
-    const shouldShowInFeed = nextSession.submissions.length > 0 && scheduleMissionId;
+    const canShowPassedPhotos = nextSession.status === 'REVEALED' || nextSession.status === 'VOTING' || nextSession.status === 'COMPLETED';
+    const shouldShowInFeed = canShowPassedPhotos && getPassedMissionSubmissions(nextSession).length > 0 && scheduleMissionId;
 
     if (!shouldShowInFeed) {
       return;
@@ -366,6 +437,94 @@ export default function ActiveTripScreen() {
     setInviteMessage('초대 링크를 복사했어요.');
   };
 
+
+  const reloadCurrentSchedule = async () => {
+    if (!scheduleId) {
+      return null;
+    }
+
+    const nextSchedule = await getTripSchedule(scheduleId);
+    setSchedule(nextSchedule);
+
+    return nextSchedule;
+  };
+
+  const isMissionLockedForEdit = (mission: TripScheduleMission) => {
+    return isCompletedScheduleMission(mission) || Boolean(missionSessions[mission.scheduleMissionId]) || isFinishedSession(revealedSessions[mission.scheduleMissionId]);
+  };
+
+  const handleChangeMissionDate = async (mission: TripScheduleMission, plannedDate: string) => {
+    if (!schedule?.scheduleId || busyScheduleMissionId || plannedDate === mission.plannedDate) {
+      return;
+    }
+
+    if (isMissionLockedForEdit(mission)) {
+      setMissionListMessage('진행 중이거나 완료된 미션은 날짜를 바꿀 수 없어요.');
+      return;
+    }
+
+    try {
+      setBusyScheduleMissionId(mission.scheduleMissionId);
+      setMissionListMessage('');
+      await updateScheduleMissionDate(schedule.scheduleId, mission.scheduleMissionId, plannedDate);
+      await reloadCurrentSchedule();
+      setDateEditorMissionId(null);
+      setMissionListMessage(`${mission.title} 미션 날짜를 ${plannedDate}로 바꿨어요.`);
+    } catch (error) {
+      setMissionListMessage(error instanceof Error ? error.message : '미션 날짜를 바꾸지 못했어요.');
+    } finally {
+      setBusyScheduleMissionId(null);
+    }
+  };
+
+  const removeScheduledMission = async (mission: TripScheduleMission) => {
+    if (!schedule?.scheduleId || busyScheduleMissionId) {
+      return;
+    }
+
+    if (!schedule.permissions.canRemoveMission) {
+      setMissionListMessage('미션 삭제 권한이 없습니다.');
+      return;
+    }
+
+    if (isMissionLockedForEdit(mission)) {
+      setMissionListMessage('진행 중이거나 완료된 미션은 삭제할 수 없어요.');
+      return;
+    }
+
+    try {
+      setBusyScheduleMissionId(mission.scheduleMissionId);
+      setMissionListMessage('');
+      await removeMissionFromSchedule(schedule.scheduleId, mission.scheduleMissionId);
+      await reloadCurrentSchedule();
+      setDateEditorMissionId(null);
+      setMissionSessions((currentSessions) => {
+        const nextSessions = { ...currentSessions };
+        delete nextSessions[mission.scheduleMissionId];
+        return nextSessions;
+      });
+      setRevealedSessions((currentSessions) => {
+        const nextSessions = { ...currentSessions };
+        delete nextSessions[mission.scheduleMissionId];
+        if (scheduleId) {
+          saveCachedRevealedSessions(scheduleId, nextSessions);
+        }
+        return nextSessions;
+      });
+      setMissionListMessage(`${mission.title} 미션을 삭제했어요.`);
+    } catch (error) {
+      setMissionListMessage(error instanceof Error ? error.message : '미션을 삭제하지 못했어요.');
+    } finally {
+      setBusyScheduleMissionId(null);
+    }
+  };
+
+  const handleRemoveScheduledMission = (mission: TripScheduleMission) => {
+    Alert.alert('미션 삭제', `${mission.title} 미션을 일정에서 삭제할까요?`, [
+      { text: '취소', style: 'cancel' },
+      { text: '삭제', style: 'destructive', onPress: () => void removeScheduledMission(mission) },
+    ]);
+  };
   const openMissionDetail = () => {
     if (!schedule?.scheduleId) {
       setMessage('일정 정보가 없습니다.');
@@ -380,6 +539,11 @@ export default function ActiveTripScreen() {
 
   const openMissionSession = async (mission: TripScheduleMission) => {
     if (!schedule?.scheduleId || isSessionBusy) {
+      return;
+    }
+
+    if (isMissionBlockedForPlay(mission)) {
+      setSessionMessage('진행 중인 미션을 먼저 완료해주세요.');
       return;
     }
 
@@ -482,7 +646,7 @@ export default function ActiveTripScreen() {
     });
   };
   const getMissionPhotos = (mission: TripScheduleMission) => {
-    return revealedSessions[mission.scheduleMissionId]?.submissions.map((submission) => submission.imageUrl) ?? [];
+    return getPassedMissionSubmissions(revealedSessions[mission.scheduleMissionId]).map((submission) => submission.imageUrl);
   };
 
   const openFeedSession = (targetSession: MissionSession | undefined) => {
@@ -547,11 +711,14 @@ export default function ActiveTripScreen() {
           {canAddMission ? (
             <ScalePressable accessibilityRole="button" accessibilityLabel="미션 상세 리스트 열기" disabled={!schedule} onPress={openMissionDetail} pressedScale={0.96} style={styles.inviteTile}>
               <Image source={activeCameraIcon} style={styles.inviteTileIcon} contentFit="contain" />
-              <Text style={styles.inviteTileText}>미션하기</Text>
+              <Text style={styles.inviteTileText}>미션추가</Text>
             </ScalePressable>
           ) : null}
-          {activeMissions.map((mission) => (
-            <ScalePressable key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={styles.photoTile}>
+          {activeMissions.map((mission) => {
+            const isPlayBlocked = isMissionBlockedForPlay(mission);
+
+            return (
+            <ScalePressable disabled={isPlayBlocked} key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={[styles.photoTile, isPlayBlocked && styles.blockedMissionTile]}>
               <Svg height="100%" pointerEvents="none" style={styles.photoTileGradient} viewBox="0 0 82 96" width="100%">
                 <Defs>
                   <LinearGradient id="missionTileBorderGradient" x1="1" x2="0" y1="0" y2="1">
@@ -565,7 +732,8 @@ export default function ActiveTripScreen() {
                 {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.photoTileImage} contentFit="cover" /> : <View style={styles.photoTilePlaceholder} />}
               </View>
             </ScalePressable>
-          ))}
+            );
+          })}
         </ScrollView>
         {inviteMessage && !inviteSheetVisible ? <Text style={styles.inlineMessage}>{inviteMessage}</Text> : null}
 
@@ -620,7 +788,7 @@ export default function ActiveTripScreen() {
         <View style={[styles.reviewAlert, { bottom: bottomSafeInset + 106, left: horizontalPadding, right: horizontalPadding }]}>
           <View style={styles.reviewAlertCopy}>
             <Text style={styles.reviewAlertTitle}>댓글을 남길 시간이 왔어요</Text>
-            <Text style={styles.reviewAlertText}>{reviewAlertSession.missionTitle} · 사진 {reviewAlertSession.submissions.length}장</Text>
+            <Text style={styles.reviewAlertText}>{reviewAlertSession.missionTitle} · 사진 {getPassedMissionSubmissions(reviewAlertSession).length}장</Text>
           </View>
           <ScalePressable onPress={() => openReview(reviewAlertSession)} pressedScale={0.94} style={styles.reviewAlertButton}>
             <Text style={styles.reviewAlertButtonText}>열기</Text>
@@ -634,28 +802,73 @@ export default function ActiveTripScreen() {
       <Modal animationType="fade" transparent visible={missionListVisible} onRequestClose={() => setMissionListVisible(false)}>
         <Pressable accessibilityLabel="담긴 미션 닫기" onPress={() => setMissionListVisible(false)} style={styles.modalBackdrop}>
           <Pressable style={styles.missionPanel}>
-            <Text style={styles.panelTitle}>담긴 미션</Text>
+            <Text style={styles.panelTitle}>날짜별 담긴 미션</Text>
+            {missionListMessage ? <Text style={styles.missionListMessage}>{missionListMessage}</Text> : null}
             <ScrollView contentContainerStyle={styles.panelMissionList} showsVerticalScrollIndicator={false}>
-              {activeMissions.length === 0 ? (
+              {missions.length === 0 ? (
                 <View style={styles.panelEmptyBox}>
-                  <Text style={styles.emptyTitle}>진행할 미션이 없어요</Text>
-                  <Text style={styles.emptyText}>완료된 미션은 피드에서 계속 볼 수 있어요.</Text>
+                  <Text style={styles.emptyTitle}>담긴 미션이 없어요</Text>
+                  <Text style={styles.emptyText}>미션 상세 리스트에서 원하는 미션을 담아보세요.</Text>
                 </View>
-              ) : activeMissions.map((mission) => (
-                <ScalePressable accessibilityRole="button" key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.98} style={styles.panelMissionItem}>
-                  {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.panelMissionPhoto} contentFit="cover" /> : <View style={styles.panelMissionPhotoPlaceholder} />}
-                  <View style={styles.panelMissionCopy}>
-                    <Text numberOfLines={1} style={styles.panelMissionTitle}>{mission.title}</Text>
-                    <Text numberOfLines={2} style={styles.panelMissionDescription}>{mission.description}</Text>
-                    <Text style={styles.panelMissionStatus}>{mission.status ?? 'ADDED'}</Text>
-                  </View>
-                </ScalePressable>
+              ) : missionDateGroups.map((group) => (
+                <View key={group.date} style={styles.missionDateGroup}>
+                  <Text style={styles.missionDateTitle}>{getMissionDateLabel(group.date)}</Text>
+                  {group.missions.length === 0 ? (
+                    <View style={styles.emptyDateBox}>
+                      <Text style={styles.emptyDateText}>담긴 미션 없음</Text>
+                    </View>
+                  ) : group.missions.map((mission) => {
+                    const isBusy = busyScheduleMissionId === mission.scheduleMissionId;
+                    const isLocked = isMissionLockedForEdit(mission);
+                    const isPlayBlocked = isMissionBlockedForPlay(mission);
+                    const canEditMission = !isLocked && !isBusy;
+
+                    return (
+                      <View key={mission.scheduleMissionId} style={styles.panelMissionItem}>
+                        <ScalePressable accessibilityRole="button" disabled={isBusy || isPlayBlocked} onPress={() => openMissionSession(mission)} pressedScale={0.98} style={[styles.panelMissionOpenArea, isPlayBlocked && styles.blockedMissionOpenArea]}>
+                          {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.panelMissionPhoto} contentFit="cover" /> : <View style={styles.panelMissionPhotoPlaceholder} />}
+                          <View style={styles.panelMissionCopy}>
+                            <Text numberOfLines={1} style={styles.panelMissionTitle}>{mission.title}</Text>
+                            <Text numberOfLines={2} style={styles.panelMissionDescription}>{mission.description}</Text>
+                            <Text style={styles.panelMissionStatus}>{mission.status ?? 'ADDED'}</Text>
+                          </View>
+                        </ScalePressable>
+                        <View style={styles.panelMissionActions}>
+                          <ScalePressable accessibilityLabel="미션 날짜 변경" disabled={!canEditMission} onPress={() => setDateEditorMissionId((currentId) => currentId === mission.scheduleMissionId ? null : mission.scheduleMissionId)} pressedScale={0.9} style={[styles.iconActionButton, !canEditMission && styles.disabledButton]}>
+                            {isBusy ? <ActivityIndicator color="#626E75" /> : <Ionicons color="#626E75" name="calendar-outline" size={18} />}
+                          </ScalePressable>
+                          <ScalePressable accessibilityLabel="미션 삭제" disabled={!canEditMission || !schedule?.permissions.canRemoveMission} onPress={() => handleRemoveScheduledMission(mission)} pressedScale={0.9} style={[styles.iconActionButton, (!canEditMission || !schedule?.permissions.canRemoveMission) && styles.disabledButton]}>
+                            <Ionicons color="#D06958" name="trash-outline" size={18} />
+                          </ScalePressable>
+                        </View>
+                        {dateEditorMissionId === mission.scheduleMissionId ? (
+                          <View style={styles.dateEditorGrid}>
+                            {scheduleDateOptions.map((date) => {
+                              const isSelectedDate = mission.plannedDate === date;
+
+                              return (
+                                <ScalePressable
+                                  accessibilityRole="button"
+                                  disabled={isSelectedDate || isBusy}
+                                  key={date}
+                                  onPress={() => handleChangeMissionDate(mission, date)}
+                                  pressedScale={0.96}
+                                  style={[styles.dateEditorOption, isSelectedDate && styles.selectedDateEditorOption, isBusy && styles.disabledButton]}>
+                                  <Text style={[styles.dateEditorText, isSelectedDate && styles.selectedDateEditorText]}>{date}</Text>
+                                </ScalePressable>
+                              );
+                            })}
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
               ))}
             </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
-
       <Modal animationType="slide" transparent visible={sessionPanelVisible} onRequestClose={() => setSessionPanelVisible(false)}>
         <Pressable accessibilityLabel="미션 세션 닫기" onPress={() => setSessionPanelVisible(false)} style={styles.modalBackdrop}>
           <Pressable style={styles.sessionPanel}>
@@ -675,7 +888,7 @@ export default function ActiveTripScreen() {
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => readyMissionSession(requireSessionId()), '준비 완료 처리했어요.')} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>ready</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => startMissionSession(requireSessionId()), '촬영 시작 처리했어요.')} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>start</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={openCapture} pressedScale={0.95} style={[styles.sessionActionButton, styles.captureActionButton]}><Text style={[styles.sessionActionText, styles.captureActionText]}>촬영</Text></ScalePressable>
-              <ScalePressable disabled={!session?.id || isSessionBusy || !session?.submissions.length} onPress={() => openReview(session)} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>댓글</Text></ScalePressable>
+              <ScalePressable disabled={!session?.id || isSessionBusy || session.status !== 'REVEALED' || getPassedMissionSubmissions(session).length === 0} onPress={() => openReview(session)} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>댓글</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => revealMissionSession(requireSessionId()), '사진을 공개했어요.', { refreshAfter: true })} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>reveal</Text></ScalePressable>
               <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => completeMissionSession(requireSessionId()), '미션을 완료했어요.', { refreshAfter: true })} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>complete</Text></ScalePressable>
             </View>
@@ -811,6 +1024,9 @@ const styles = StyleSheet.create({
     overflow: 'visible',
     transform: [{ rotate: '4deg' }],
     width: 82,
+  },
+  blockedMissionTile: {
+    opacity: 0.35,
   },
   photoTileGradient: {
     ...StyleSheet.absoluteFillObject,
@@ -1027,6 +1243,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 16,
   },
+  missionListMessage: {
+    color: '#409CB7',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginBottom: 12,
+  },
   panelMissionList: {
     gap: 12,
   },
@@ -1034,12 +1257,76 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 26,
   },
+  missionDateGroup: {
+    gap: 8,
+  },
+  missionDateTitle: {
+    color: '#53626A',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  emptyDateBox: {
+    backgroundColor: '#F4F7F8',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  emptyDateText: {
+    color: '#9AA3A8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   panelMissionItem: {
     backgroundColor: '#F4F7F8',
     borderRadius: 16,
+    gap: 10,
+    padding: 12,
+  },
+  panelMissionOpenArea: {
     flexDirection: 'row',
     gap: 12,
-    padding: 12,
+  },
+  blockedMissionOpenArea: {
+    opacity: 0.45,
+  },
+  panelMissionActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'flex-end',
+  },
+  iconActionButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  dateEditorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  dateEditorOption: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 38,
+    paddingHorizontal: 12,
+  },
+  selectedDateEditorOption: {
+    backgroundColor: '#409CB7',
+  },
+  dateEditorText: {
+    color: '#53626A',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  selectedDateEditorText: {
+    color: '#FFFFFF',
   },
   panelMissionPhoto: {
     backgroundColor: '#E3E9EC',
