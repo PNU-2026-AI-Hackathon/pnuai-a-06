@@ -13,6 +13,12 @@ import { getAuthItem } from '@/lib/auth-storage';
 import { connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
+const cameraBackIcon = require('../../assets/svg/camera/back.svg');
+const cameraFlashOffIcon = require('../../assets/svg/camera/flash_off.svg');
+const cameraFlashOnIcon = require('../../assets/svg/camera/flash_on.svg');
+const cameraSwitchIcon = require('../../assets/svg/camera/autorenew.svg');
+const cameraTimerIcon = require('../../assets/svg/camera/time_stamp.svg');
+
 const MISSION_CARD_SOURCE_WIDTH = 164;
 const MISSION_CARD_SOURCE_HEIGHT = 209;
 const MISSION_CARD_WIDTH = 350;
@@ -578,18 +584,23 @@ export default function MissionCaptureScreen() {
       />
 
       <View pointerEvents="box-none" style={[styles.topControls, { paddingTop: topSafeInset + 24 }]}>
-        {shootingRemainingMs !== null ? (
-          <View style={[styles.timeAttackBadge, isShootingExpired && styles.timeAttackBadgeDanger]}>
-            <Ionicons color="#ffffff" name="timer-outline" size={17} />
-            <Text style={styles.timeAttackBadgeText}>{formatRemainingTime(shootingRemainingMs)}</Text>
-          </View>
-        ) : null}
         <ScalePressable accessibilityLabel="닫기" onPress={() => router.back()} pressedScale={0.86} style={styles.iconButton}>
-          <Ionicons color="#ffffff" name="close" size={30} />
+          <Image contentFit="contain" source={cameraBackIcon} style={styles.closeIcon} />
         </ScalePressable>
         <ScalePressable accessibilityLabel="플래시" onPress={toggleFlash} pressedScale={0.86} style={styles.iconButton}>
-          <Ionicons color="#ffffff" name={flash === 'off' ? 'flash-off' : 'flash'} size={25} />
+          <Image contentFit="contain" source={flash === 'off' ? cameraFlashOffIcon : cameraFlashOnIcon} style={styles.flashIcon} />
         </ScalePressable>
+        <View style={styles.timerControl}>
+          <Image contentFit="contain" source={cameraTimerIcon} style={styles.timerIcon} />
+          {shootingRemainingMs !== null ? <Text style={[styles.cameraTimerText, isShootingExpired && styles.cameraTimerDanger]}>{formatRemainingTime(shootingRemainingMs)}</Text> : null}
+        </View>
+      </View>
+
+      <View pointerEvents="none" style={styles.cameraGuide}>
+        <View style={[styles.guideCorner, styles.guideTopLeft]} />
+        <View style={[styles.guideCorner, styles.guideTopRight]} />
+        <View style={[styles.guideCorner, styles.guideBottomLeft]} />
+        <View style={[styles.guideCorner, styles.guideBottomRight]} />
       </View>
 
       <View pointerEvents="box-none" style={styles.bottomOverlay}>
@@ -630,7 +641,7 @@ export default function MissionCaptureScreen() {
           </ScalePressable>
 
           <ScalePressable accessibilityLabel="카메라 전환" onPress={toggleFacing} pressedScale={0.86} style={styles.switchButton}>
-            <Ionicons color="#ffffff" name="sync" size={27} />
+            <Image contentFit="contain" source={cameraSwitchIcon} style={styles.switchIcon} />
           </ScalePressable>
         </View>
       </View>
@@ -752,6 +763,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   topControls: {
+    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
     left: 0,
@@ -759,12 +771,83 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0,
     top: 0,
+    zIndex: 4,
   },
   iconButton: {
     alignItems: 'center',
     height: 40,
     justifyContent: 'center',
     width: 40,
+  },
+  closeIcon: { 
+    height: 17, 
+    width: 17,
+  },
+  flashIcon: { 
+    height: 22,
+    width: 22,
+  },
+  timerControl: { 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    minHeight: 40, 
+    minWidth: 40,
+  },
+  timerIcon: { 
+    height: 23, 
+    width: 23,
+  },
+  cameraTimerText: { 
+    color: '#ffffff', 
+    fontSize: 11, 
+    fontWeight: '800', 
+    position: 'absolute', 
+    top: 34,
+  },
+  cameraTimerDanger: { 
+    color: '#FF7466',
+  },
+  cameraGuide: { 
+    bottom: '24%', 
+    left: 20, 
+    position: 'absolute', 
+    right: 20, 
+    top: '22%', 
+    zIndex: 1,
+  },
+  guideCorner: { 
+    borderColor: '#ffffff', 
+    height: 90, 
+    position: 'absolute', 
+    width: 90,
+  },
+  guideTopLeft: { 
+    borderLeftWidth: 4, 
+    borderTopLeftRadius: 44, 
+    borderTopWidth: 4, 
+    left: 0, 
+    top: 0,
+  },
+  guideTopRight: { 
+    borderRightWidth: 4, 
+    borderTopRightRadius: 44, 
+    borderTopWidth: 4, 
+    right: 0, 
+    top: 0,
+  },
+  guideBottomLeft: { 
+    borderBottomLeftRadius: 44, 
+    borderBottomWidth: 4, 
+    borderLeftWidth: 4, 
+    bottom: 0, 
+    left: 0,
+  },
+  guideBottomRight: { 
+    borderBottomRightRadius: 44, 
+    borderBottomWidth: 4, 
+    borderRightWidth: 4,
+    bottom: 0, 
+    right: 0,
   },
   bottomOverlay: {
     bottom: 0,
@@ -823,12 +906,15 @@ const styles = StyleSheet.create({
   },
   switchButton: {
     alignItems: 'center',
+    backgroundColor: 'rgba(227, 240, 246, 0.42)',
+    borderRadius: 999,
     height: 50,
     justifyContent: 'center',
     position: 'absolute',
     right: 31,
     width: 50,
   },
+  switchIcon: { height: 27, width: 27 },
   stateScreen: {
     alignItems: 'center',
     backgroundColor: '#0c1115',
