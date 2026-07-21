@@ -267,14 +267,17 @@ export default function MissionCaptureScreen() {
       }
 
       if (nextJudgeStatus === 'REJECTED') {
-        setIsMissionComplete(false);
-        setUploadMessage('다시 촬영해주세요');
+        // TEMP: AI 실패 여부와 관계없이 업로드 이후 플로우를 테스트한다.
+        setIsMissionComplete(true);
+        setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        setReturnCountdown(3);
         return;
       }
 
       if (nextJudgeStatus === 'ERROR') {
-        setIsMissionComplete(false);
-        setUploadMessage(mySubmission.judgeReason || '사진 판독에 실패했어요. 다시 촬영해주세요.');
+        setIsMissionComplete(true);
+        setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        setReturnCountdown(3);
         return;
       }
 
@@ -489,12 +492,17 @@ export default function MissionCaptureScreen() {
       }
 
       if (nextJudgeStatus === 'REJECTED') {
-        setUploadMessage('다시 촬영해주세요');
+        // TEMP: AI 실패 여부와 관계없이 업로드 이후 플로우를 테스트한다.
+        setIsMissionComplete(true);
+        setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        setReturnCountdown(3);
         return;
       }
 
       if (nextJudgeStatus === 'ERROR') {
-        setUploadMessage(uploadedSubmission.judgeReason || '사진 판독에 실패했어요. 다시 촬영해주세요.');
+        setIsMissionComplete(true);
+        setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        setReturnCountdown(3);
         return;
       }
 

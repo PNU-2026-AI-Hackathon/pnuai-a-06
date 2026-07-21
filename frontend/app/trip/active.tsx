@@ -4,7 +4,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 
@@ -14,6 +14,7 @@ import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 import { shareKakaoInvite } from '@/lib/kakao-share';
 import {
   completeMissionSession,
+  connectMissionSessionSocket,
   createMissionSession,
   getActiveMissionSession,
   getLatestMissionSession,
@@ -101,8 +102,14 @@ function isFinishedSession(session: MissionSession | undefined) {
   return Boolean(session && (session.status === 'VOTING' || session.status === 'COMPLETED' || hasAllComments(session)));
 }
 
-function isReviewableSession(session: MissionSession) {
-  return session.status === 'REVEALED' && getPassedMissionSubmissions(session).length > 0 && !isFinishedSession(session);
+function isReviewableSession(session: MissionSession, requiredMemberCount: number) {
+  return hasAllMemberSubmissions(session, requiredMemberCount) && !isFinishedSession(session);
+}
+
+function hasAllMemberSubmissions(session: MissionSession, requiredMemberCount: number) {
+  const submittedUserIds = new Set(session.submissions.map((submission) => submission.userId).filter(Boolean));
+
+  return requiredMemberCount > 0 && submittedUserIds.size >= requiredMemberCount;
 }
 
 function isStartedMissionSession(session: MissionSession) {
@@ -180,6 +187,7 @@ export default function ActiveTripScreen() {
   const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
   const initialSessionId = getParamValue(params.sessionId);
+  const currentUserId = getAuthItem('user_id');
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [schedule, setSchedule] = useState<TripSchedule | null>(null);
   const [selectedMission, setSelectedMission] = useState<TripScheduleMission | null>(null);
@@ -201,6 +209,7 @@ export default function ActiveTripScreen() {
   const [dateEditorMissionId, setDateEditorMissionId] = useState<string | null>(null);
   const [busyScheduleMissionId, setBusyScheduleMissionId] = useState<string | null>(null);
   const [missionListMessage, setMissionListMessage] = useState('');
+  const revealingSessionIds = useRef(new Set<string>());
   const missions = useMemo(() => schedule?.missions ?? [], [schedule]);
   const activeMissions = missions.filter((mission) => !isCompletedScheduleMission(mission) && !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
   const scheduleDateOptions = useMemo(() => getScheduleDateOptions(schedule), [schedule]);
@@ -218,6 +227,7 @@ export default function ActiveTripScreen() {
     return groups;
   }, [missions, scheduleDateOptions]);
   const canAddMission = schedule?.permissions.canAddMission ?? false;
+  const requiredScheduleMemberCount = schedule?.participants.length ?? 0;
   const activeBlockingSession = Object.values(missionSessions).find((nextSession) => !isFinishedSession(nextSession)) ?? null;
   const hasStartedMissionSession = Object.values(missionSessions).some(isStartedMissionSession);
   const canInviteCompanion = (schedule?.permissions.canInviteCompanion ?? false) && !hasStartedMissionSession;
@@ -239,8 +249,7 @@ export default function ActiveTripScreen() {
       }));
     }
 
-    const canShowPassedPhotos = nextSession.status === 'REVEALED' || nextSession.status === 'VOTING' || nextSession.status === 'COMPLETED';
-    const shouldShowInFeed = canShowPassedPhotos && getPassedMissionSubmissions(nextSession).length > 0 && scheduleMissionId;
+    const shouldShowInFeed = getPassedMissionSubmissions(nextSession).length > 0 && scheduleMissionId;
 
     if (!shouldShowInFeed) {
       return;
@@ -260,7 +269,7 @@ export default function ActiveTripScreen() {
         saveCachedRevealedSessions(scheduleId, nextSessions);
       }
 
-      if (isReviewableSession(normalizedSession)) {
+      if (isReviewableSession(normalizedSession, requiredScheduleMemberCount)) {
         setReviewAlertSession(normalizedSession);
       } else if (isFinishedSession(normalizedSession)) {
         setReviewAlertSession((currentAlert) => (currentAlert?.id === normalizedSession.id ? null : currentAlert));
@@ -268,7 +277,53 @@ export default function ActiveTripScreen() {
 
       return nextSessions;
     });
-  }, [scheduleId]);
+  }, [requiredScheduleMemberCount, scheduleId]);
+
+  useEffect(() => {
+    if (!activeBlockingSession?.id) {
+      return;
+    }
+
+    const activeSessionId = activeBlockingSession.id;
+    const socket = connectMissionSessionSocket(activeSessionId, {
+      onError: () => {
+        void getMissionSession(activeSessionId).then((nextSession) => rememberFeedSession(nextSession)).catch(() => undefined);
+      },
+      onMessage: ({ session: nextSession }) => {
+        if (nextSession) {
+          setSession((currentSession) => currentSession?.id === nextSession.id ? nextSession : currentSession);
+          rememberFeedSession(nextSession);
+        }
+      },
+    });
+
+    const refreshTimer = setInterval(() => {
+      void getMissionSession(activeSessionId).then((nextSession) => rememberFeedSession(nextSession)).catch(() => undefined);
+    }, 1000);
+
+    return () => {
+      clearInterval(refreshTimer);
+      socket.close();
+    };
+  }, [activeBlockingSession?.id, rememberFeedSession]);
+
+  useEffect(() => {
+    const completedUploadSession = Object.values(missionSessions).find((nextSession) =>
+      hasAllMemberSubmissions(nextSession, requiredScheduleMemberCount)
+      && nextSession.status !== 'REVEALED'
+      && nextSession.status !== 'VOTING'
+      && nextSession.status !== 'COMPLETED'
+    );
+
+    if (!completedUploadSession || revealingSessionIds.current.has(completedUploadSession.id)) {
+      return;
+    }
+
+    revealingSessionIds.current.add(completedUploadSession.id);
+    void revealMissionSession(completedUploadSession.id)
+      .then((nextSession) => rememberFeedSession(nextSession, completedUploadSession.scheduleMissionId))
+      .catch(() => getMissionSession(completedUploadSession.id).then((nextSession) => rememberFeedSession(nextSession, completedUploadSession.scheduleMissionId)).catch(() => undefined));
+  }, [missionSessions, rememberFeedSession, requiredScheduleMemberCount]);
 
   const refreshSession = useCallback(async (sessionId: string) => {
     const nextSession = await getMissionSession(sessionId);
@@ -636,6 +691,12 @@ export default function ActiveTripScreen() {
       return;
     }
 
+    if (targetSession.status !== 'REVEALED' && targetSession.status !== 'VOTING' && targetSession.status !== 'COMPLETED') {
+      void revealMissionSession(targetSession.id)
+        .then((nextSession) => rememberFeedSession(nextSession, targetSession.scheduleMissionId))
+        .catch(() => getMissionSession(targetSession.id).then((nextSession) => rememberFeedSession(nextSession, targetSession.scheduleMissionId)).catch(() => undefined));
+    }
+
     setReviewAlertSession(null);
     router.push({
       pathname: '/trip/review',
@@ -646,7 +707,11 @@ export default function ActiveTripScreen() {
     });
   };
   const getMissionPhotos = (mission: TripScheduleMission) => {
-    return getPassedMissionSubmissions(revealedSessions[mission.scheduleMissionId]).map((submission) => submission.imageUrl);
+    return getPassedMissionSubmissions(revealedSessions[mission.scheduleMissionId]).map((submission) => ({
+      id: submission.id,
+      imageUrl: submission.imageUrl,
+      isOwn: Boolean(currentUserId && submission.userId === currentUserId),
+    }));
   };
 
   const openFeedSession = (targetSession: MissionSession | undefined) => {
@@ -654,7 +719,22 @@ export default function ActiveTripScreen() {
       return;
     }
 
-    if (isFinishedSession(targetSession)) {
+    if (targetSession.status !== 'REVEALED' && targetSession.status !== 'VOTING' && targetSession.status !== 'COMPLETED') {
+      return;
+    }
+
+    if (targetSession.status === 'VOTING') {
+      router.push({
+        pathname: '/trip/vote',
+        params: {
+          ...(scheduleId ? { scheduleId } : {}),
+          sessionId: targetSession.id,
+        },
+      });
+      return;
+    }
+
+    if (targetSession.status === 'COMPLETED') {
       router.push({
         pathname: '/trip/result',
         params: {
@@ -773,8 +853,8 @@ export default function ActiveTripScreen() {
                   <Text style={styles.feedTitle}>{mission.title}</Text>
                   <Text style={styles.feedLocation}>{getMissionLocation(mission)}</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedPhotoRow}>
-                    {photos.map((photoUrl, index) => (
-                      <Image key={`${mission.scheduleMissionId}-${index}`} source={{ uri: photoUrl }} style={styles.feedPhoto} contentFit="cover" />
+                    {photos.map((photo) => (
+                      <Image blurRadius={photo.isOwn ? 0 : 18} key={`${mission.scheduleMissionId}-${photo.id}`} source={{ uri: photo.imageUrl }} style={styles.feedPhoto} contentFit="cover" />
                     ))}
                   </ScrollView>
                 </View>

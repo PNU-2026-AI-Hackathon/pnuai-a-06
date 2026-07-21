@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -26,15 +26,6 @@ function getUserLabel(index: number) {
   return `익명 ${index + 1}`;
 }
 
-function formatRemainingTime(ms: number) {
-  const safeMs = Math.max(0, ms);
-  const totalSeconds = Math.ceil(safeMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
-
 function getRemainingMs(deadline: string | null | undefined, now: number) {
   if (!deadline) {
     return null;
@@ -54,10 +45,20 @@ export default function MissionReviewScreen() {
   const [commentText, setCommentText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isReviewReadyFallback, setIsReviewReadyFallback] = useState(false);
   const [message, setMessage] = useState('');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [now, setNow] = useState(() => Date.now());
-  const hasNavigatedToResult = useRef(false);
+  const hasNavigatedForward = useRef(false);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', (event) => setKeyboardHeight(event.endCoordinates.height));
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -81,9 +82,6 @@ export default function MissionReviewScreen() {
     try {
       const nextSession = await getMissionSession(sessionId);
       setSession(nextSession);
-      if (nextSession.status !== 'REVEALED') {
-        setIsReviewReadyFallback(false);
-      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '세션을 불러오지 못했어요.');
     } finally {
@@ -98,13 +96,28 @@ export default function MissionReviewScreen() {
   );
 
   const navigateToResult = useCallback(() => {
-    if (!sessionId || hasNavigatedToResult.current) {
+    if (!sessionId || hasNavigatedForward.current) {
       return;
     }
 
-    hasNavigatedToResult.current = true;
+    hasNavigatedForward.current = true;
     router.replace({
       pathname: '/trip/result',
+      params: {
+        ...(scheduleId ? { scheduleId } : {}),
+        sessionId,
+      },
+    });
+  }, [scheduleId, sessionId]);
+
+  const navigateToVote = useCallback(() => {
+    if (!sessionId || hasNavigatedForward.current) {
+      return;
+    }
+
+    hasNavigatedForward.current = true;
+    router.replace({
+      pathname: '/trip/vote',
       params: {
         ...(scheduleId ? { scheduleId } : {}),
         sessionId,
@@ -123,9 +136,13 @@ export default function MissionReviewScreen() {
           setSession(nextSession);
         }
 
-        if (type === 'voting_started' || nextSession?.status === 'VOTING' || nextSession?.status === 'COMPLETED') {
+        if (nextSession?.status === 'COMPLETED') {
           setTimeout(() => {
             navigateToResult();
+          }, 700);
+        } else if (type === 'voting_started' || nextSession?.status === 'VOTING') {
+          setTimeout(() => {
+            navigateToVote();
           }, 700);
         }
       },
@@ -134,7 +151,7 @@ export default function MissionReviewScreen() {
     return () => {
       socket.close();
     };
-  }, [navigateToResult, sessionId]);
+  }, [navigateToResult, navigateToVote, sessionId]);
 
   const myMember = useMemo(() => {
     return session?.members.find((member) => member.userId === currentUserId) ?? null;
@@ -157,9 +174,6 @@ export default function MissionReviewScreen() {
   const commentRemainingMs = getRemainingMs(session?.commentEndsAt, now);
   const isCommentExpired = commentRemainingMs !== null && commentRemainingMs <= 0;
   const hasCommentedCurrentPhoto = Boolean(currentUserId && currentSubmission?.comments.some((comment) => comment.userId === currentUserId));
-  const currentPhotoCommentCount = currentSubmission?.comments.length ?? 0;
-  const isCurrentPhotoComplete = Boolean(currentSubmission && currentPhotoCommentCount >= requiredCommentsPerPhoto);
-  const isWaitingForOthers = hasCommentedCurrentPhoto && !isCurrentPhotoComplete;
   const commentProgress = passedSubmissions.reduce((count, submission) => count + submission.comments.length, 0);
   const requiredCommentCount = passedSubmissions.length * requiredCommentsPerPhoto;
   const isAllCommentsComplete = Boolean(session && passedSubmissions.length > 0 && session.members.length > 0 && requiredCommentCount > 0 && commentProgress >= requiredCommentCount);
@@ -170,13 +184,13 @@ export default function MissionReviewScreen() {
     }
 
     const timer = setTimeout(() => {
-      navigateToResult();
+      navigateToVote();
     }, 700);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [isAllCommentsComplete, navigateToResult]);
+  }, [isAllCommentsComplete, navigateToVote]);
 
   const handleReady = async () => {
     if (!sessionId || isSubmitting) {
@@ -186,12 +200,13 @@ export default function MissionReviewScreen() {
     try {
       setIsSubmitting(true);
       setMessage('');
+      const currentSession = await getMissionSession(sessionId);
+      setSession(currentSession);
       const nextSession = await readyMissionSession(sessionId);
       setSession(nextSession);
     } catch (error) {
       if (error instanceof MissionSessionApiError && [400, 409, 422].includes(error.status)) {
-        setIsReviewReadyFallback(true);
-        setMessage('댓글 단계로 이동했어요. 서버 상태는 계속 다시 확인합니다.');
+        setMessage('READY 상태를 확인하고 있어요. 잠시 후 다시 눌러주세요.');
         await refreshSession();
         return;
       }
@@ -227,8 +242,8 @@ export default function MissionReviewScreen() {
     }
   };
 
-  const goResult = () => {
-    navigateToResult();
+  const goNext = () => {
+    navigateToVote();
   };
 
   const goBackToTrip = () => {
@@ -240,18 +255,18 @@ export default function MissionReviewScreen() {
     router.back();
   };
 
-  const showReadyScreen = !isReviewReadyFallback && !allMembersReady && session?.status === 'REVEALED';
+  const showReadyScreen = Boolean(session && !allMembersReady && session.status !== 'VOTING' && session.status !== 'COMPLETED');
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-      <View style={[styles.header, { paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 18 }]}>
+      <View style={[styles.header, { paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 26 }]}>
         <ScalePressable accessibilityLabel="돌아가기" onPress={goBackToTrip} pressedScale={0.86} style={styles.backButton}>
-          <Ionicons color="#121820" name="chevron-back" size={28} />
+          <Ionicons color="#121820" name="chevron-back" size={25} />
         </ScalePressable>
-        <View style={styles.headerCopy}>
-          <Text style={styles.title}>댓글 준비</Text>
-          <Text style={styles.subtitle}>{session?.missionTitle ?? '미션'} · {session?.status ?? '-'}</Text>
-        </View>
+        <Text numberOfLines={1} style={styles.title}>{session?.missionTitle ?? '미션'}</Text>
+        <ScalePressable accessibilityLabel="댓글 완료" onPress={goNext} pressedScale={0.9} style={styles.doneButton}>
+          <Ionicons color="#CBD0D3" name="checkmark" size={27} />
+        </ScalePressable>
       </View>
 
       {isLoading && !session ? (
@@ -281,18 +296,15 @@ export default function MissionReviewScreen() {
           </View>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSafeInset + 28, paddingHorizontal: horizontalPadding }]} keyboardShouldPersistTaps="handled">
-          <View style={[styles.progressBox, isCommentExpired && styles.progressDangerBox]}>
-            <Text style={styles.progressTitle}>댓글 진행</Text>
-            {commentRemainingMs !== null ? <Text style={[styles.timerText, isCommentExpired && styles.timerDangerText]}>댓글 제한 {formatRemainingTime(commentRemainingMs)}</Text> : null}
-            <Text style={styles.progressText}>전체 {commentProgress}/{requiredCommentCount} · 현재 사진 {currentPhotoCommentCount}/{requiredCommentsPerPhoto}</Text>
+        <View style={styles.reviewStage}>
+          <View style={styles.pageDots}>
+            {passedSubmissions.map((submission, index) => <View key={submission.id} style={[styles.pageDot, index === currentSubmissionIndex && styles.pageDotActive]} />)}
           </View>
+          <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: horizontalPadding }]} keyboardShouldPersistTaps="handled">
 
           {currentSubmission ? (
-            <View style={styles.photoCard}>
-              <Text style={styles.photoCounter}>{currentSubmissionIndex + 1}/{passedSubmissions.length}</Text>
+            <View style={[styles.photoCard, keyboardHeight > 0 && styles.keyboardPhotoCard]}>
               <Image source={{ uri: currentSubmission.imageUrl }} style={styles.photo} contentFit="cover" />
-              <Text style={styles.anonymousLabel}>{isCurrentPhotoComplete ? '모든 댓글 완료 · 다음 사진으로 이동 중' : '촬영자 비공개'}</Text>
             </View>
           ) : (
             <View style={styles.centerState}>
@@ -301,34 +313,32 @@ export default function MissionReviewScreen() {
           )}
 
           <View style={styles.commentPanel}>
-            <Text style={styles.sectionTitle}>익명 댓글</Text>
-            {isWaitingForOthers ? <Text style={styles.waitingText}>내 댓글은 등록됐어요. 다른 참여자의 댓글을 기다리는 중이에요.</Text> : null}
             {currentSubmission?.comments.length ? currentSubmission.comments.map((comment, index) => (
               <View key={`${comment.id}-${index}`} style={styles.commentBubble}>
-                <Text style={styles.commentAuthor}>{getUserLabel(index)}</Text>
-                <Text style={styles.commentText}>{comment.content}</Text>
+                <View style={styles.avatar}><Ionicons color="#FFFFFF" name="person" size={20} /></View>
+                <View style={styles.commentCopy}>
+                  <Text style={styles.commentAuthor}>{getUserLabel(index)}</Text>
+                  <Text style={styles.commentText}>{comment.content}</Text>
+                </View>
               </View>
-            )) : <Text style={styles.emptyText}>아직 댓글이 없어요.</Text>}
+            )) : <View style={styles.emptyComments}><Text style={styles.emptyTitle}>아직 댓글이 없어요</Text><Text style={styles.emptyText}>익명으로 한마디 남겨보세요.</Text></View>}
           </View>
-
-          <View style={styles.inputPanel}>
+          </ScrollView>
+          <View style={[styles.inputPanel, { paddingBottom: Math.max(14, bottomSafeInset + 8), transform: [{ translateY: keyboardHeight > 0 ? -(keyboardHeight) : -8 }] }]}>
             <TextInput
               editable={!hasCommentedCurrentPhoto && !isSubmitting && !isCommentExpired && Boolean(currentSubmission)}
-              multiline
               onChangeText={setCommentText}
-              placeholder={isCommentExpired ? '댓글 제한 시간이 종료됐어요.' : hasCommentedCurrentPhoto ? '다른 참여자의 댓글을 기다리는 중이에요.' : '익명 댓글을 남겨보세요.'}
+              onSubmitEditing={handleSubmitComment}
+              placeholder={isCommentExpired ? '댓글 시간이 종료됐어요.' : hasCommentedCurrentPhoto ? '다른 댓글을 기다리는 중이에요.' : '댓글을 남겨주세요...'}
               placeholderTextColor="#9AA3A8"
               style={styles.input}
               value={commentText}
             />
-            <ScalePressable disabled={!commentText.trim() || hasCommentedCurrentPhoto || isSubmitting || isCommentExpired || !currentSubmission} onPress={handleSubmitComment} pressedScale={0.96} style={[styles.primaryButton, (!commentText.trim() || hasCommentedCurrentPhoto || isSubmitting || isCommentExpired || !currentSubmission) && styles.disabledButton]}>
-              {isSubmitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryButtonText}>댓글 등록</Text>}
-            </ScalePressable>
-            <ScalePressable onPress={goResult} pressedScale={0.96} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>결과 화면으로 확인</Text>
+            <ScalePressable accessibilityLabel="댓글 보내기" disabled={!commentText.trim() || hasCommentedCurrentPhoto || isSubmitting || isCommentExpired || !currentSubmission} onPress={handleSubmitComment} pressedScale={0.9} style={[styles.sendButton, (!commentText.trim() || hasCommentedCurrentPhoto || isSubmitting || isCommentExpired || !currentSubmission) && styles.sendButtonDisabled]}>
+              {isSubmitting ? <ActivityIndicator color="#ffffff" size="small" /> : <Ionicons color="#ffffff" name="paper-plane" size={20} />}
             </ScalePressable>
           </View>
-        </ScrollView>
+        </View>
       )}
 
       {message ? <Text style={[styles.message, { bottom: bottomSafeInset + 12 }]}>{message}</Text> : null}
@@ -338,13 +348,13 @@ export default function MissionReviewScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#F4F7FA',
+    backgroundColor: '#FFFFFF',
     flex: 1,
   },
   header: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
+    justifyContent: 'space-between',
     paddingBottom: 12,
   },
   backButton: {
@@ -353,18 +363,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 42,
   },
-  headerCopy: {
-    flex: 1,
-  },
   title: {
-    color: '#111820',
-    fontSize: 24,
-    fontWeight: '800',
+    color: '#111111',
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
-  subtitle: {
-    color: '#7D868C',
-    fontSize: 14,
-    marginTop: 4,
+  doneButton: {
+    alignItems: 'center',
+    height: 42,
+    justifyContent: 'center',
+    width: 42
   },
   centerState: {
     alignItems: 'center',
@@ -422,8 +432,28 @@ const styles = StyleSheet.create({
     color: '#409CB7',
   },
   content: {
-    gap: 16,
-    paddingTop: 10,
+    flexGrow: 1,
+    paddingBottom: 14,
+  },
+  reviewStage: {
+    flex: 1
+  },
+  pageDots: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    height: 27,
+    justifyContent: 'center',
+    paddingTop: 4
+  },
+  pageDot: {
+    backgroundColor: '#D0D3D5',
+    borderRadius: 999,
+    height: 8,
+    width: 8
+  },
+  pageDotActive: {
+    backgroundColor: '#A9D4E3'
   },
   progressBox: {
     backgroundColor: '#EAF5F8',
@@ -453,22 +483,17 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   photoCard: {
+    overflow: 'hidden',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    padding: 16,
   },
-  photoCounter: {
-    alignSelf: 'flex-start',
-    color: '#409CB7',
-    fontSize: 14,
-    fontWeight: '800',
-    marginBottom: 10,
+  keyboardPhotoCard: {
+    alignSelf: 'center',
+    width: '78%',
   },
   photo: {
-    aspectRatio: 1,
-    borderRadius: 16,
-    width: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: 20,
+    width: '90%',
   },
   anonymousLabel: {
     color: '#7D868C',
@@ -476,10 +501,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   commentPanel: {
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    gap: 10,
-    padding: 16,
+    gap: 9,
+    paddingTop: 10,
   },
   sectionTitle: {
     color: '#111820',
@@ -487,48 +510,86 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   commentBubble: {
+    alignItems: 'center',
     alignSelf: 'flex-start',
-    backgroundColor: '#F0F4F6',
-    borderRadius: 14,
-    maxWidth: '92%',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    backgroundColor: '#F6F9FB',
+    borderRadius: 20,
+    flexDirection: 'row',
+    maxWidth: '96%',
+    minHeight: 58,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  avatar: {
+    alignItems: 'center',
+    backgroundColor: '#D7DADD',
+    borderRadius: 999,
+    height: 35,
+    justifyContent: 'center',
+    marginRight: 12,
+    overflow: 'hidden',
+    width: 35
+  },
+  commentCopy: {
+    flexShrink: 1,
+    paddingRight: 5
   },
   commentAuthor: {
-    color: '#409CB7',
+    color: '#30363A',
     fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 4,
+    fontWeight: '600',
+    marginBottom: 2,
   },
   commentText: {
-    color: '#111820',
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  waitingText: {
-    color: '#5C737D',
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 20,
+    color: '#8A9194',
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 18,
   },
   emptyText: {
-    color: '#8A9399',
-    fontSize: 14,
+    color: '#8A9194',
+    fontSize: 12,
+  },
+  emptyComments: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center', minHeight: 140
+  },
+  emptyTitle: {
+    color: '#10161F', fontSize: 14,
+    fontWeight: '600', marginBottom: 8
   },
   inputPanel: {
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    gap: 12,
-    padding: 16,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    paddingBottom: 14,
+    paddingHorizontal: 30,
+    paddingTop: 8,
   },
   input: {
-    backgroundColor: '#F4F7FA',
-    borderRadius: 12,
+    backgroundColor: '#F5F7F8',
+    borderRadius: 999,
     color: '#111820',
-    fontSize: 15,
-    minHeight: 92,
-    padding: 12,
-    textAlignVertical: 'top',
+    flex: 1,
+    fontSize: 14,
+    height: 58,
+    paddingLeft: 22,
+    paddingRight: 58,
+  },
+  sendButton: {
+    alignItems: 'center',
+    backgroundColor: '#ADD8E7',
+    borderRadius: 999,
+    height: 38,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 42,
+    top: 18,
+    width: 38,
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#E1EAEE',
   },
   primaryButton: {
     alignItems: 'center',

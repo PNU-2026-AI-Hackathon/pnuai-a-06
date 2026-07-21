@@ -1,20 +1,15 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { completeMissionSession, getMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
+import { getMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
-}
-
-function getCommentLabel(index: number) {
-  return `익명 댓글 ${index + 1}`;
 }
 
 export default function MissionResultScreen() {
@@ -26,6 +21,15 @@ export default function MissionResultScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
   const passedSubmissions = useMemo(() => getPassedMissionSubmissions(session), [session]);
+  const winnerSubmission = useMemo(() => {
+    if (!passedSubmissions.length) {
+      return null;
+    }
+
+    const savedWinner = session?.winnerUserId ? passedSubmissions.find((submission) => submission.userId === session.winnerUserId) : null;
+
+    return savedWinner ?? [...passedSubmissions].sort((left, right) => right.likeCount - left.likeCount)[0];
+  }, [passedSubmissions, session?.winnerUserId]);
 
   const refreshSession = useCallback(async () => {
     if (!sessionId) {
@@ -38,18 +42,11 @@ export default function MissionResultScreen() {
 
     try {
       const nextSession = await getMissionSession(sessionId);
-
-      if (nextSession.status === 'VOTING') {
-        try {
-          const completedSession = await completeMissionSession(sessionId);
-          setSession(completedSession);
-          return;
-        } catch {
-          // Some users may not be allowed to complete the session. The saved result can still be shown.
-        }
-      }
-
       setSession(nextSession);
+
+      if (getPassedMissionSubmissions(nextSession).length === 0) {
+        setMessage('표시할 사진이 없어요.');
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '결과를 불러오지 못했어요.');
     } finally {
@@ -63,6 +60,15 @@ export default function MissionResultScreen() {
     }, [refreshSession])
   );
 
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timer = setTimeout(() => setMessage(''), 2600);
+    return () => clearTimeout(timer);
+  }, [message]);
+
   const goTrip = () => {
     if (scheduleId) {
       router.replace({ pathname: '/trip/active', params: { scheduleId } });
@@ -74,97 +80,51 @@ export default function MissionResultScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 18 }]}>
-        <ScalePressable accessibilityLabel="돌아가기" onPress={goTrip} pressedScale={0.86} style={styles.backButton}>
-          <Ionicons color="#121820" name="chevron-back" size={28} />
-        </ScalePressable>
-        <View style={styles.headerCopy}>
-          <Text style={styles.title}>미션 결과</Text>
-          <Text style={styles.subtitle}>{session?.missionTitle ?? '서버에 저장된 사진과 댓글 확인'}</Text>
-        </View>
-        <ScalePressable accessibilityLabel="새로고침" onPress={refreshSession} pressedScale={0.9} style={styles.refreshButton}>
-          <Ionicons color="#409CB7" name="refresh" size={22} />
-        </ScalePressable>
-      </View>
-
       {isLoading && !session ? (
         <View style={styles.centerState}>
           <ActivityIndicator color="#409CB7" />
-          <Text style={styles.stateText}>서버 결과를 불러오는 중이에요.</Text>
         </View>
-      ) : message ? (
-        <View style={styles.centerState}>
-          <Text style={styles.stateText}>{message}</Text>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSafeInset + 96, paddingHorizontal: horizontalPadding }]} showsVerticalScrollIndicator={false}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>상태: {session?.status ?? '-'}</Text>
-            <Text style={styles.summaryText}>사진 {passedSubmissions.length}장 · 댓글 {passedSubmissions.reduce((count, submission) => count + submission.comments.length, 0)}개</Text>
+      ) : winnerSubmission ? (
+        <View style={[styles.resultContent, { paddingBottom: bottomSafeInset + 20, paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 90 }]}>
+          <View style={styles.resultHeading}>
+            <Text style={styles.title}>친구들이{`\n`}가장 많이 선택한 사진</Text>
+            <Text style={styles.subtitle}>{winnerSubmission.nickname ? `${winnerSubmission.nickname}님이 담았어요` : '친구가 담은 사진이에요'}</Text>
           </View>
 
-          {passedSubmissions.length ? passedSubmissions.map((submission, submissionIndex) => (
-            <View key={submission.id} style={styles.resultCard}>
-              <Text style={styles.photoTitle}>사진 {submissionIndex + 1}</Text>
-              <Image source={{ uri: submission.imageUrl }} style={styles.photo} contentFit="cover" />
-              <View style={styles.commentList}>
-                <Text style={styles.commentListTitle}>익명 댓글</Text>
-                {submission.comments.length ? submission.comments.map((comment, index) => (
-                  <View key={`${comment.id}-${index}`} style={styles.commentRow}>
-                    <Text style={styles.commentAuthor}>{getCommentLabel(index)}</Text>
-                    <Text style={styles.commentText}>{comment.content}</Text>
-                  </View>
-                )) : <Text style={styles.emptyText}>댓글이 아직 없어요.</Text>}
-              </View>
-            </View>
-          )) : (
-            <View style={styles.centerState}>
-              <Text style={styles.stateText}>표시할 사진이 없어요.</Text>
-            </View>
-          )}
-        </ScrollView>
+          <Image source={{ uri: winnerSubmission.imageUrl }} style={styles.photo} contentFit="cover" />
+
+          <View style={styles.footer}>
+            <Text style={styles.savedText}>이 사진이 매거진에 담겨요</Text>
+            <ScalePressable onPress={goTrip} pressedScale={0.97} style={styles.tripButton}>
+              <Text style={styles.tripButtonText}>피드로 돌아가기</Text>
+            </ScalePressable>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.emptyContent} />
       )}
+      {message ? <Text style={[styles.toast, { bottom: bottomSafeInset + 24 }]}>{message}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#F4F7FA',
-    flex: 1,
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    paddingBottom: 12,
-  },
-  backButton: {
-    alignItems: 'center',
-    height: 42,
-    justifyContent: 'center',
-    width: 42,
-  },
-  headerCopy: {
+    backgroundColor: '#FFFFFF',
     flex: 1,
   },
   title: {
-    color: '#111820',
+    color: '#252B30',
     fontSize: 24,
-    fontWeight: '800',
+    fontWeight: '600',
+    lineHeight: 30,
+    textAlign: 'center',
   },
   subtitle: {
-    color: '#7D868C',
-    fontSize: 14,
-    marginTop: 4,
-  },
-  refreshButton: {
-    alignItems: 'center',
-    backgroundColor: '#E7F3F6',
-    borderRadius: 21,
-    height: 42,
-    justifyContent: 'center',
-    width: 42,
+    color: '#8A9194',
+    fontSize: 12,
+    marginTop: 7,
+    textAlign: 'center',
   },
   centerState: {
     alignItems: 'center',
@@ -173,73 +133,58 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  stateText: {
-    color: '#7D868C',
-    fontSize: 15,
+  emptyContent: {
+    flex: 1
+  },
+  toast: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(24, 31, 35, 0.9)',
+    borderRadius: 999,
+    color: '#FFFFFF',
+    fontSize: 13,
+    left: 24,
+    overflow: 'hidden',
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    position: 'absolute',
+    right: 24,
     textAlign: 'center',
   },
-  content: {
-    gap: 16,
-    paddingTop: 8,
+  resultContent: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'flex-start'
   },
-  summaryCard: {
-    backgroundColor: '#EAF5F8',
-    borderRadius: 16,
-    padding: 16,
-  },
-  summaryTitle: {
-    color: '#111820',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  summaryText: {
-    color: '#5C737D',
-    fontSize: 14,
-    marginTop: 5,
-  },
-  resultCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    gap: 14,
-    padding: 16,
-  },
-  photoTitle: {
-    color: '#111820',
-    fontSize: 18,
-    fontWeight: '800',
+  resultHeading: {
+    alignItems: 'center'
   },
   photo: {
-    aspectRatio: 1,
-    borderRadius: 16,
-    width: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: 20,
+    marginTop: 32,
+    width: '78%',
   },
-  commentList: {
-    gap: 10,
+  footer: {
+    alignItems: 'center',
+    marginTop: 'auto',
+    width: '100%'
   },
-  commentListTitle: {
-    color: '#111820',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  commentRow: {
-    backgroundColor: '#F0F4F6',
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  commentAuthor: {
-    color: '#409CB7',
+  savedText: {
+    color: '#8A9194',
     fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 4,
+    marginBottom: 17
   },
-  commentText: {
-    color: '#111820',
-    fontSize: 15,
-    lineHeight: 21,
+  tripButton: {
+    alignItems: 'center',
+    backgroundColor: '#E1E9EC',
+    borderRadius: 999,
+    height: 63,
+    justifyContent: 'center',
+    width: '100%'
   },
-  emptyText: {
-    color: '#8A9399',
-    fontSize: 14,
+  tripButtonText: {
+    color: '#5D686C',
+    fontSize: 16,
+    fontWeight: '500'
   },
 });

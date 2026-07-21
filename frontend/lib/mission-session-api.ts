@@ -67,6 +67,7 @@ type ApiMissionSession = {
   started_at?: string | null;
   status?: MissionSessionStatus;
   submissions?: ApiMissionSubmission[];
+  winner_user_id?: number | string | null;
 };
 
 export type MissionSessionStatus = 'WAITING' | 'READY' | 'SHOOTING' | 'UPLOADING' | 'VOTING' | 'REVEALED' | 'COMPLETED';
@@ -111,6 +112,7 @@ export type MissionSession = {
   startedAt?: string | null;
   status: MissionSessionStatus;
   submissions: MissionSubmission[];
+  winnerUserId?: string | null;
 };
 
 export class MissionSessionApiError extends Error {
@@ -265,7 +267,11 @@ function normalizeSubmission(submission: ApiMissionSubmission): MissionSubmissio
 }
 
 export function getPassedMissionSubmissions(session: MissionSession | null | undefined) {
-  return session?.submissions.filter((submission) => submission.judgeStatus === 'PASSED') ?? [];
+  // TEMP: AI 판정 실패 사진도 댓글/결과 플로우를 테스트할 수 있도록 노출한다.
+  // AI 판정 연동 테스트가 끝나면 false로 되돌린다.
+  const allowFailedJudgementsForTesting = true;
+
+  return session?.submissions.filter((submission) => submission.judgeStatus === 'PASSED' || (allowFailedJudgementsForTesting && (submission.judgeStatus === 'REJECTED' || submission.judgeStatus === 'ERROR'))) ?? [];
 }
 
 function normalizeSession(data: ApiMissionSession): MissionSession {
@@ -295,6 +301,7 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
     startedAt: data.started_at,
     status: data.status ?? 'WAITING',
     submissions: (data.submissions ?? []).map(normalizeSubmission).filter((submission) => submission.photoUrl),
+    winnerUserId: data.winner_user_id === null || data.winner_user_id === undefined ? null : String(data.winner_user_id),
   };
 }
 
@@ -395,8 +402,8 @@ export async function postMissionSessionComment(sessionId: string, submissionId:
 }
 
 export async function likeMissionSessionSubmission(sessionId: string, submissionId: string) {
-  const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(submissionId)}/like`, 'POST');
-  return normalizeSession(data);
+  const data = await requestJson<ApiMissionSubmission>(`/mission-sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(submissionId)}/like`, 'POST');
+  return normalizeSubmission(data);
 }
 
 export async function uploadMissionSessionPhoto(sessionId: string, photoUri: string) {
