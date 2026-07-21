@@ -143,7 +143,7 @@ export default function MissionReviewScreen() {
         } else if (type === 'voting_started' || nextSession?.status === 'VOTING') {
           setTimeout(() => {
             navigateToVote();
-          }, 700);
+          }, 3000);
         }
       },
     });
@@ -185,7 +185,7 @@ export default function MissionReviewScreen() {
 
     const timer = setTimeout(() => {
       navigateToVote();
-    }, 700);
+    }, 3000);
 
     return () => {
       clearTimeout(timer);
@@ -211,7 +211,7 @@ export default function MissionReviewScreen() {
         return;
       }
 
-      setMessage(error instanceof Error ? error.message : '레디 처리에 실패했어요.');
+      setMessage(error instanceof Error ? error.message : '준비 처리에 실패했어요.');
     } finally {
       setIsSubmitting(false);
     }
@@ -278,20 +278,17 @@ export default function MissionReviewScreen() {
         <View style={[styles.readyWrap, { paddingBottom: bottomSafeInset + 28, paddingHorizontal: horizontalPadding }]}>
           <View style={styles.readyCard}>
             <Text style={styles.readyTitle}>댓글 달 준비가 됐나요?</Text>
-            <Text style={styles.readyText}>참여자 전원이 레디를 누르면 익명 사진 댓글 화면으로 넘어가요.</Text>
+            <Text style={styles.readyText}>참여자 전원이 준비를 누르면 익명 사진 댓글 화면으로 넘어가요.</Text>
             <View style={styles.memberList}>
               {session?.members.map((member, index) => (
                 <View key={`${member.userId}-${index}`} style={styles.memberRow}>
-                  <Text style={styles.memberName}>{getUserLabel(index)}</Text>
+                  <Text style={styles.memberName}>{member.nickname?.trim() || getUserLabel(index)}</Text>
                   <Text style={[styles.memberStatus, member.readyAt && styles.memberReady]}>{member.readyAt ? 'READY' : 'WAITING'}</Text>
                 </View>
               ))}
             </View>
             <ScalePressable disabled={Boolean(myMember?.readyAt) || isSubmitting} onPress={handleReady} pressedScale={0.96} style={[styles.primaryButton, (myMember?.readyAt || isSubmitting) && styles.disabledButton]}>
-              {isSubmitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryButtonText}>{myMember?.readyAt ? '레디 완료' : '레디'}</Text>}
-            </ScalePressable>
-            <ScalePressable onPress={refreshSession} pressedScale={0.96} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>서버 상태 새로고침</Text>
+              {isSubmitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryButtonText}>{myMember?.readyAt ? '준비 완료' : '준비'}</Text>}
             </ScalePressable>
           </View>
         </View>
@@ -602,19 +599,6 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#ffffff',
     fontSize: 16,
-    fontWeight: '800',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#EEF3F5',
-    borderRadius: 14,
-    justifyContent: 'center',
-    minHeight: 48,
-    paddingHorizontal: 16,
-  },
-  secondaryButtonText: {
-    color: '#526168',
-    fontSize: 15,
     fontWeight: '800',
   },
   disabledButton: {

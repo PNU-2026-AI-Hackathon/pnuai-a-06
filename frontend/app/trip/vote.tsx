@@ -163,20 +163,13 @@ export default function MissionVoteScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 18 }]}>
-        <ScalePressable accessibilityLabel="돌아가기" onPress={() => router.back()} pressedScale={0.86} style={styles.backButton}>
-          <Ionicons color="#121820" name="chevron-back" size={27} />
-        </ScalePressable>
-        <Text style={styles.headerTitle}>사진 투표</Text>
-        <View style={styles.headerSpacer} />
-      </View>
 
       {isLoading ? (
         <View style={styles.centerState}><ActivityIndicator color="#63B5CD" /></View>
       ) : (
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSafeInset + 118, paddingHorizontal: horizontalPadding }]} showsVerticalScrollIndicator={false}>
-          <Text style={styles.title}>가장 잘 나온 사진을 골라주세요</Text>
-          <Text style={styles.description}>사진을 하나 선택한 뒤 투표하기를 눌러주세요.</Text>
+        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSafeInset + 118, paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 90 }]} showsVerticalScrollIndicator={false}>
+          <Text style={styles.title}>당신의 선택은?</Text>
+          <Text style={styles.description}>이번 미션을 대표할 사진을 골라주세요.</Text>
           <View style={styles.photoGrid}>
             {submissions.map((submission) => {
               const isSelected = submission.id === selectedSubmissionId;
@@ -203,23 +196,90 @@ export default function MissionVoteScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#FFFFFF', flex: 1 },
-  header: { alignItems: 'center', flexDirection: 'row', paddingBottom: 12 },
-  backButton: { alignItems: 'center', height: 42, justifyContent: 'center', width: 42 },
-  headerTitle: { color: '#121820', flex: 1, fontSize: 18, fontWeight: '800', textAlign: 'center' },
-  headerSpacer: { width: 42 },
-  centerState: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  content: { paddingTop: 16 },
-  title: { color: '#111820', fontSize: 23, fontWeight: '800', textAlign: 'center' },
-  description: { color: '#8A9194', fontSize: 14, marginTop: 8, textAlign: 'center' },
-  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 26 },
-  photoCard: { borderColor: 'transparent', borderRadius: 20, borderWidth: 4, overflow: 'hidden', position: 'relative', width: '48%' },
-  selectedPhotoCard: { borderColor: '#63B5CD' },
-  photo: { aspectRatio: 3 / 4, width: '100%' },
-  selectedBadge: { alignItems: 'center', backgroundColor: '#63B5CD', borderRadius: 999, height: 32, justifyContent: 'center', position: 'absolute', right: 9, top: 9, width: 32 },
-  message: { color: '#D06958', fontSize: 13, marginTop: 18, textAlign: 'center' },
-  footer: { backgroundColor: '#FFFFFF', bottom: 0, left: 0, paddingTop: 10, position: 'absolute', right: 0 },
-  voteButton: { alignItems: 'center', backgroundColor: '#63B5CD', borderRadius: 18, height: 58, justifyContent: 'center' },
-  voteButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },
-  disabledButton: { opacity: 0.42 },
+  container: { 
+    backgroundColor: '#FFFFFF', 
+    flex: 1 
+  },
+  centerState: { 
+    alignItems: 'center', 
+    flex: 1, 
+    justifyContent: 'center' 
+  },
+  content: { 
+    paddingTop: 16 
+  },
+  title: { 
+    color: '#111820', 
+    fontSize: 24, 
+    fontWeight: '600', 
+    textAlign: 'center' 
+  },
+  description: { 
+    color: '#8A9194', 
+    fontSize: 12,
+    fontWeight: '500',  
+    marginTop: 8, 
+    textAlign: 'center' 
+  },
+  photoGrid: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: 12, 
+    marginTop: 52 
+  },
+  photoCard: { 
+    borderColor: 'transparent', 
+    borderRadius: 16, 
+    borderWidth: 4, 
+    overflow: 'hidden', 
+    position: 'relative',
+    width: '48%' 
+  },
+  selectedPhotoCard: { 
+    borderColor: '#63B5CD' 
+  },
+  photo: { 
+    aspectRatio: 3 / 4, 
+    width: '100%' 
+  },
+  selectedBadge: { 
+    alignItems: 'center', 
+    backgroundColor: '#63B5CD', 
+    borderRadius: 999, 
+    height: 32, 
+    justifyContent: 'center', 
+    position: 'absolute', 
+    right: 9, 
+    top: 9, 
+    width: 32 
+  },
+  message: { 
+    color: '#D06958', 
+    fontSize: 13, 
+    marginTop: 18, 
+    textAlign: 'center' 
+  },
+  footer: { 
+    backgroundColor: '#FFFFFF', 
+    bottom: 0, 
+    left: 0, 
+    paddingTop: 10, 
+    position: 'absolute', 
+    right: 0 
+  },
+  voteButton: { 
+    alignItems: 'center', 
+    backgroundColor: '#63B5CD', 
+    borderRadius: 100, 
+    height: 63, 
+    justifyContent: 'center' 
+  },
+  voteButtonText: { 
+    color: '#FFFFFF', 
+    fontSize: 16, 
+    fontWeight: '500' 
+  },
+  disabledButton: { 
+    opacity: 0.42 
+  },
 });

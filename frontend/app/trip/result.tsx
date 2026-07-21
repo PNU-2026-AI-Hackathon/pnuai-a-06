@@ -176,14 +176,14 @@ const styles = StyleSheet.create({
   },
   tripButton: {
     alignItems: 'center',
-    backgroundColor: '#E1E9EC',
+    backgroundColor: '#63B5CD',
     borderRadius: 999,
     height: 63,
     justifyContent: 'center',
     width: '100%'
   },
   tripButtonText: {
-    color: '#5D686C',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '500'
   },
