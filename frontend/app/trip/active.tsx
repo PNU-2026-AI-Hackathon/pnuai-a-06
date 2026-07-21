@@ -707,10 +707,13 @@ export default function ActiveTripScreen() {
     });
   };
   const getMissionPhotos = (mission: TripScheduleMission) => {
-    return getPassedMissionSubmissions(revealedSessions[mission.scheduleMissionId]).map((submission) => ({
+    const feedSession = revealedSessions[mission.scheduleMissionId];
+    const isMissionResultComplete = feedSession?.status === 'COMPLETED';
+
+    return getPassedMissionSubmissions(feedSession).map((submission) => ({
       id: submission.id,
       imageUrl: submission.imageUrl,
-      isOwn: Boolean(currentUserId && submission.userId === currentUserId),
+      isBlurred: !isMissionResultComplete && submission.userId !== currentUserId,
     }));
   };
 
@@ -854,7 +857,7 @@ export default function ActiveTripScreen() {
                   <Text style={styles.feedLocation}>{getMissionLocation(mission)}</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedPhotoRow}>
                     {photos.map((photo) => (
-                      <Image blurRadius={photo.isOwn ? 0 : 18} key={`${mission.scheduleMissionId}-${photo.id}`} source={{ uri: photo.imageUrl }} style={styles.feedPhoto} contentFit="cover" />
+                      <Image blurRadius={photo.isBlurred ? 18 : 0} key={`${mission.scheduleMissionId}-${photo.id}`} source={{ uri: photo.imageUrl }} style={styles.feedPhoto} contentFit="cover" />
                     ))}
                   </ScrollView>
                 </View>
