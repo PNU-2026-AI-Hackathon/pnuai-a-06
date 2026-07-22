@@ -10,7 +10,7 @@ import { MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
-import { connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
+import { completeMissionSession, connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, revealMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
 const cameraBackIcon = require('../../assets/svg/camera/back.svg');
@@ -111,6 +111,7 @@ export default function MissionCaptureScreen() {
   const cameraRef = useRef<CameraView | null>(null);
   const missionCardTranslateY = useRef(new Animated.Value(0)).current;
   const missionCardOffsetY = useRef(0);
+  const isFinishingSoloMission = useRef(false);
   const { bottomSafeInset, height, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>('back');
@@ -127,6 +128,7 @@ export default function MissionCaptureScreen() {
   const [judgeStatus, setJudgeStatus] = useState<MissionJudgementStatus | null>(null);
   const [session, setSession] = useState<MissionSession | null>(null);
   const [mission, setMission] = useState<TripScheduleMission | null>(null);
+  const [scheduleParticipantCount, setScheduleParticipantCount] = useState<number | null>(null);
   const [isMissionLoading, setIsMissionLoading] = useState(false);
   const [missionError, setMissionError] = useState('');
   const [now, setNow] = useState(() => Date.now());
@@ -207,6 +209,7 @@ export default function MissionCaptureScreen() {
 
         if (isActive) {
           setMission(nextMission);
+          setScheduleParticipantCount(nextSchedule.participants.length || 1);
           setMissionError(nextMission ? '' : '미션 정보를 찾지 못했어요.');
         }
       } catch (error) {
@@ -227,6 +230,61 @@ export default function MissionCaptureScreen() {
       isActive = false;
     };
   }, [scheduleId, scheduleMissionId]);
+
+  const finishPassedJudgement = useCallback(async (passedSessionId: string) => {
+    let participantCount = scheduleParticipantCount;
+
+    if (participantCount === null && scheduleId) {
+      try {
+        const latestSchedule = await getTripSchedule(scheduleId);
+        participantCount = latestSchedule.participants.length || 1;
+        setScheduleParticipantCount(participantCount);
+      } catch {
+        participantCount = null;
+      }
+    }
+
+    if (participantCount !== 1) {
+      setIsMissionComplete(true);
+      setUploadMessage('AI 확인이 완료됐어요.');
+      setReturnCountdown(3);
+      return;
+    }
+
+    if (isFinishingSoloMission.current) {
+      return;
+    }
+
+    isFinishingSoloMission.current = true;
+    setJudgementSessionId(null);
+    setIsMissionComplete(true);
+    setUploadMessage('미션 결과를 준비하고 있어요.');
+    setReturnCountdown(null);
+
+    try {
+      let completedSession = await getMissionSession(passedSessionId);
+
+      if (completedSession.status !== 'REVEALED' && completedSession.status !== 'COMPLETED') {
+        completedSession = await revealMissionSession(passedSessionId);
+      }
+
+      if (completedSession.status !== 'COMPLETED') {
+        completedSession = await completeMissionSession(passedSessionId);
+      }
+
+      router.replace({
+        pathname: '/trip/result',
+        params: {
+          ...(scheduleId ? { scheduleId } : {}),
+          sessionId: completedSession.id,
+        },
+      });
+    } catch (error) {
+      isFinishingSoloMission.current = false;
+      setIsMissionComplete(false);
+      setUploadMessage(error instanceof Error ? error.message : '미션 결과를 준비하지 못했어요.');
+    }
+  }, [scheduleId, scheduleParticipantCount]);
 
   useEffect(() => {
     if (!judgementSessionId) {
@@ -260,9 +318,7 @@ export default function MissionCaptureScreen() {
       setJudgementSessionId(null);
 
       if (nextJudgeStatus === 'PASSED') {
-        setIsMissionComplete(true);
-        setUploadMessage('AI 확인이 완료됐어요.');
-        setReturnCountdown(3);
+        void finishPassedJudgement(nextSession.id);
         return;
       }
 
@@ -315,7 +371,7 @@ export default function MissionCaptureScreen() {
       clearInterval(refreshTimer);
       socket.close();
     };
-  }, [judgementSessionId, submittedSubmissionId]);
+  }, [finishPassedJudgement, judgementSessionId, submittedSubmissionId]);
 
   useEffect(() => {
     if (returnCountdown === null) {
@@ -492,9 +548,7 @@ export default function MissionCaptureScreen() {
       setJudgeReason(uploadedSubmission.judgeReason ?? null);
 
       if (nextJudgeStatus === 'PASSED') {
-        setIsMissionComplete(true);
-        setUploadMessage('AI 확인이 완료됐어요.');
-        setReturnCountdown(3);
+        void finishPassedJudgement(uploadSessionId);
         return;
       }
 

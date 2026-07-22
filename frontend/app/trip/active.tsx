@@ -263,7 +263,7 @@ export default function ActiveTripScreen() {
         saveCachedRevealedSessions(scheduleId, nextSessions);
       }
 
-      if (isReviewableSession(normalizedSession, requiredScheduleMemberCount)) {
+      if (requiredScheduleMemberCount > 1 && isReviewableSession(normalizedSession, requiredScheduleMemberCount)) {
         setReviewAlertSession(normalizedSession);
       } else if (isFinishedSession(normalizedSession)) {
         setReviewAlertSession((currentAlert) => (currentAlert?.id === normalizedSession.id ? null : currentAlert));

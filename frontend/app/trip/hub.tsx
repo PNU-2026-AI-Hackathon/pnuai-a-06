@@ -634,22 +634,23 @@ const styles = StyleSheet.create({
   },
   emptyBox: {
     alignItems: 'center',
-    backgroundColor: '#D1E1EB',
+    backgroundColor: '#F6F9FB',
     borderRadius: 18,
     marginTop: 18,
     paddingHorizontal: 24,
-    paddingVertical: 38,
+    paddingVertical: 24,
   },
   emptyTitle: {
-    color: '#000000',
-    fontSize: 16,
+    color: '#10161F',
+    fontSize: 14,
     fontWeight: '600',
   },
   emptyDescription: {
     color: '#8A9194',
     fontSize: 12,
+    fontWeight: '500',
     lineHeight: 18,
-    marginTop: 4,
+    marginTop: 2,
     textAlign: 'center',
   },
   messageText: {
