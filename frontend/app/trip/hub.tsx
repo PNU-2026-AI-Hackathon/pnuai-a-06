@@ -20,6 +20,10 @@ function formatDateRange(schedule: TripSchedule) {
   }
 
   if (schedule.startDate && schedule.endDate) {
+    if (schedule.startDate === schedule.endDate) {
+      return schedule.startDate;
+    }
+
     return `${schedule.startDate} - ${schedule.endDate}`;
   }
 

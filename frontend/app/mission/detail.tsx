@@ -83,6 +83,10 @@ function getSortedMissions(
 
 function formatScheduleDate(schedule: TripSchedule) {
   if (schedule.startDate && schedule.endDate) {
+    if (schedule.startDate === schedule.endDate) {
+      return schedule.startDate;
+    }
+
     return `${schedule.startDate} - ${schedule.endDate}`;
   }
 
@@ -133,7 +137,7 @@ function getScheduleDateOptions(schedule: TripSchedule) {
   return dates;
 }
 export default function MissionDetailScreen() {
-  const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
+  const { bottomActionInset, bottomSafeInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
   const params = useLocalSearchParams<{ district?: string; districtCode?: string; missionCode?: string; scheduleId?: string; theme?: string }>();
   const focusedDistrict = getParamValue(params.district) ?? '금정구';
   const focusedDistrictCode = getParamValue(params.districtCode) || districtCodeByLabel[focusedDistrict] || '';
@@ -146,6 +150,7 @@ export default function MissionDetailScreen() {
   const [targetSessions, setTargetSessions] = useState<Record<string, MissionSession>>({});
   const [selectedMission, setSelectedMission] = useState<MissionItem | null>(null);
   const [selectedScheduleForDate, setSelectedScheduleForDate] = useState<TripSchedule | null>(null);
+  const [selectedPlannedDate, setSelectedPlannedDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(() => getCachedMissions().length === 0);
   const [isSchedulePickerVisible, setIsSchedulePickerVisible] = useState(false);
   const [isAddingMission, setIsAddingMission] = useState(false);
@@ -287,6 +292,7 @@ export default function MissionDetailScreen() {
     setIsSchedulePickerVisible(false);
     setSelectedMission(null);
     setSelectedScheduleForDate(null);
+    setSelectedPlannedDate(null);
   };
 
   const handleCreateScheduleForMission = (mission: MissionItem) => {
@@ -329,6 +335,30 @@ export default function MissionDetailScreen() {
     return nextSchedule;
   };
 
+  const addMissionForDate = async (mission: MissionItem, schedule: TripSchedule, plannedDate: string) => {
+    if (isAddingMission) {
+      return;
+    }
+
+    try {
+      setIsAddingMission(true);
+      setActionMessage('');
+      await addMissionToSchedule(schedule.scheduleId, mission.id, plannedDate);
+      if (targetScheduleId && schedule.scheduleId === targetScheduleId) {
+        await refreshTargetSchedule();
+      }
+      setIsSchedulePickerVisible(false);
+      setSelectedMission(null);
+      setSelectedScheduleForDate(null);
+      setSelectedPlannedDate(null);
+      setActionMessage(`${schedule.roomName} ${plannedDate}에 미션을 담았어요.`);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : '미션을 일정에 담지 못했어요.');
+    } finally {
+      setIsAddingMission(false);
+    }
+  };
+
   const handleDirectMissionAdd = (mission: MissionItem) => {
     if (!targetScheduleId) {
       return;
@@ -348,7 +378,15 @@ export default function MissionDetailScreen() {
 
     setActionMessage('');
     setSelectedMission(mission);
+    const dateOptions = getScheduleDateOptions(targetSchedule);
+
+    if (dateOptions.length === 1) {
+      void addMissionForDate(mission, targetSchedule, dateOptions[0]);
+      return;
+    }
+
     setSelectedScheduleForDate(targetSchedule);
+    setSelectedPlannedDate(null);
     setIsSchedulePickerVisible(true);
   };
   const handleAddPress = async (mission: MissionItem) => {
@@ -422,7 +460,15 @@ export default function MissionDetailScreen() {
       return;
     }
 
+    const dateOptions = getScheduleDateOptions(schedule);
+
+    if (dateOptions.length === 1) {
+      void addMissionForDate(selectedMission, schedule, dateOptions[0]);
+      return;
+    }
+
     setSelectedScheduleForDate(schedule);
+    setSelectedPlannedDate(null);
   };
 
   const handleSelectPlannedDate = async (plannedDate: string) => {
@@ -430,22 +476,7 @@ export default function MissionDetailScreen() {
       return;
     }
 
-    try {
-      setIsAddingMission(true);
-      setActionMessage('');
-      await addMissionToSchedule(selectedScheduleForDate.scheduleId, selectedMission.id, plannedDate);
-      if (targetScheduleId && selectedScheduleForDate.scheduleId === targetScheduleId) {
-        await refreshTargetSchedule();
-      }
-      setIsSchedulePickerVisible(false);
-      setSelectedMission(null);
-      setSelectedScheduleForDate(null);
-      setActionMessage(`${selectedScheduleForDate.roomName} ${plannedDate}에 미션을 담았어요.`);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : '미션을 일정에 담지 못했어요.');
-    } finally {
-      setIsAddingMission(false);
-    }
+    await addMissionForDate(selectedMission, selectedScheduleForDate, plannedDate);
   };
   return (
     <View style={styles.container}>
@@ -539,33 +570,56 @@ export default function MissionDetailScreen() {
         </View>
       </ScrollView>
 
-      <Modal animationType="fade" transparent visible={isSchedulePickerVisible} onRequestClose={closeSchedulePicker}>
-        <Pressable accessibilityLabel="일정 선택 닫기" onPress={closeSchedulePicker} style={styles.modalBackdrop}>
-          <Pressable style={styles.schedulePanel}>
-            <Text style={styles.schedulePanelTitle}>{selectedScheduleForDate ? '담을 날짜를 선택해 주세요' : '담을 일정을 선택해 주세요'}</Text>
+      <Modal animationType="slide" transparent visible={isSchedulePickerVisible} onRequestClose={closeSchedulePicker}>
+        <Pressable
+          accessibilityLabel="일정 선택 닫기"
+          onPress={closeSchedulePicker}
+          style={[
+            styles.modalBackdrop,
+            styles.dateModalBackdrop,
+          ]}>
+          <Pressable style={[styles.schedulePanel, styles.dateSchedulePanel, { paddingBottom: bottomSafeInset + 22 }]}>
+            <Text style={[styles.schedulePanelTitle, styles.dateSchedulePanelTitle]}>{selectedScheduleForDate ? '담을 날짜를 선택해 주세요' : '담을 일정을 선택해 주세요'}</Text>
             {selectedScheduleForDate ? (
               <>
                 <View style={styles.selectedScheduleBox}>
-                  <Text style={styles.scheduleName}>{selectedScheduleForDate.roomName}</Text>
-                  <Text style={styles.scheduleDate}>{formatScheduleDate(selectedScheduleForDate)}</Text>
+                  <Text style={[styles.scheduleName, styles.selectedScheduleName]}>{selectedScheduleForDate.roomName}</Text>
+                  <Text style={[styles.scheduleDate, styles.selectedScheduleDate]}>{formatScheduleDate(selectedScheduleForDate)}</Text>
                 </View>
-                <View style={styles.dateGrid}>
+                <ScrollView contentContainerStyle={styles.dateGrid} showsVerticalScrollIndicator={false} style={styles.dateGridScroll}>
                   {getScheduleDateOptions(selectedScheduleForDate).length === 0 ? (
                     <Text style={styles.dateEmptyText}>선택할 수 있는 날짜가 없어요.</Text>
-                  ) : getScheduleDateOptions(selectedScheduleForDate).map((date) => (
+                  ) : getScheduleDateOptions(selectedScheduleForDate).map((date, index) => {
+                    const isSelectedDate = selectedPlannedDate === date;
+
+                    return (
                     <ScalePressable
                       accessibilityRole="button"
                       disabled={isAddingMission}
                       key={date}
-                      onPress={() => handleSelectPlannedDate(date)}
+                      onPress={() => setSelectedPlannedDate(date)}
                       pressedScale={0.96}
-                      style={[styles.dateOption, isAddingMission && styles.disabledButton]}>
-                      <Text style={styles.dateOptionText}>{date}</Text>
+                      style={[styles.dateOption, isSelectedDate && styles.selectedDateOption, isAddingMission && styles.disabledButton]}>
+                      <Text style={[styles.dateOptionText, isSelectedDate && styles.selectedDateOptionText]}>{index + 1}</Text>
                     </ScalePressable>
-                  ))}
-                </View>
-                <ScalePressable disabled={isAddingMission} onPress={() => setSelectedScheduleForDate(null)} pressedScale={0.96} style={styles.backToScheduleButton}>
+                    );
+                  })}
+                </ScrollView>
+                {/* <ScalePressable disabled={isAddingMission} onPress={() => { setSelectedScheduleForDate(null); setSelectedPlannedDate(null); }} pressedScale={0.96} style={styles.backToScheduleButton}>
                   <Text style={styles.backToScheduleText}>일정 다시 선택</Text>
+                </ScalePressable> */}
+                <ScalePressable
+                  disabled={!selectedPlannedDate || isAddingMission}
+                  onPress={() => selectedPlannedDate && handleSelectPlannedDate(selectedPlannedDate)}
+                  pressedScale={0.97}
+                  style={[styles.confirmDateButton, (!selectedPlannedDate || isAddingMission) && styles.disabledButton]}>
+                  {isAddingMission ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.confirmDateButtonText}>
+                      {selectedPlannedDate ? `${getScheduleDateOptions(selectedScheduleForDate).indexOf(selectedPlannedDate) + 1}일차에 하기` : '일차를 선택해 주세요'}
+                    </Text>
+                  )}
                 </ScalePressable>
               </>
             ) : (
@@ -763,6 +817,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 32,
   },
+  dateModalBackdrop: {
+    paddingBottom: 0,
+    paddingHorizontal: 0,
+  },
   schedulePanel: {
     backgroundColor: '#ffffff',
     borderRadius: 22,
@@ -771,55 +829,104 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
     width: '100%',
   },
+  dateSchedulePanel: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '82%',
+    paddingBottom: 22,
+    paddingHorizontal: 30,
+    paddingTop: 30,
+  },
   schedulePanelTitle: {
     color: '#10161F',
     fontSize: 17,
     fontWeight: '700',
     marginBottom: 16,
   },
+  dateSchedulePanelTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 24,
+  },
   scheduleList: {
     gap: 10,
   },
   selectedScheduleBox: {
-    backgroundColor: '#F4F7F8',
-    borderRadius: 14,
-    marginBottom: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    backgroundColor: '#F6F8FA',
+    borderRadius: 18,
+    marginBottom: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 22,
+  },
+  selectedScheduleName: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  selectedScheduleDate: {
+    fontSize: 12,
+    fontWeight: '400',
+    marginTop: 4,
   },
   dateGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
+  },
+  dateGridScroll: {
+    maxHeight: 210,
   },
   dateOption: {
     alignItems: 'center',
-    backgroundColor: '#EAF5F9',
+    backgroundColor: '#F5F5F5',
     borderRadius: 999,
+    height: 47,
     justifyContent: 'center',
-    minHeight: 42,
-    paddingHorizontal: 14,
+    width: 47,
+  },
+  selectedDateOption: {
+    backgroundColor: '#C9E4EE',
   },
   dateOptionText: {
-    color: '#409CB7',
-    fontSize: 13,
-    fontWeight: '700',
+    color: '#8A9194',
+    fontSize: 17,
+    fontWeight: '500',
+  },
+  selectedDateOptionText: {
+    color: '#10161F',
+    fontWeight: '500',
   },
   dateEmptyText: {
     color: '#8A9194',
-    fontSize: 13,
+    fontSize: 14,
+    fontWeight: '500',
     lineHeight: 18,
   },
   backToScheduleButton: {
     alignItems: 'center',
     alignSelf: 'flex-start',
-    marginTop: 16,
+    marginTop: 14,
     paddingVertical: 8,
   },
   backToScheduleText: {
     color: '#626E75',
     fontSize: 13,
     fontWeight: '700',
+  },
+  confirmDateButton: {
+    alignItems: 'center',
+    backgroundColor: '#409CB7',
+    borderRadius: 999,
+    height: 50,
+    justifyContent: 'center',
+    marginTop:17,
+    width: '100%',
+  },
+  confirmDateButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '500',
   },
   scheduleItem: {
     alignItems: 'center',
