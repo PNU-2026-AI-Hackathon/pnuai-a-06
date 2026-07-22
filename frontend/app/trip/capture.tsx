@@ -126,6 +126,7 @@ export default function MissionCaptureScreen() {
   const [submittedSubmissionId, setSubmittedSubmissionId] = useState<string | null>(null);
   const [judgeReason, setJudgeReason] = useState<string | null>(null);
   const [judgeStatus, setJudgeStatus] = useState<MissionJudgementStatus | null>(null);
+  const [judgementDotCount, setJudgementDotCount] = useState(1);
   const [session, setSession] = useState<MissionSession | null>(null);
   const [mission, setMission] = useState<TripScheduleMission | null>(null);
   const [scheduleParticipantCount, setScheduleParticipantCount] = useState<number | null>(null);
@@ -147,6 +148,19 @@ export default function MissionCaptureScreen() {
   const isUploadExpired = uploadRemainingMs !== null && uploadRemainingMs <= 0;
   const isWaitingForJudgement = isWaitingJudgementStatus(judgeStatus);
   const needsRetakeAfterJudgement = isRetryableJudgementStatus(judgeStatus);
+
+  useEffect(() => {
+    if (!isWaitingForJudgement) {
+      setJudgementDotCount(1);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setJudgementDotCount((currentCount) => currentCount >= 3 ? 1 : currentCount + 1);
+    }, 450);
+
+    return () => clearInterval(timer);
+  }, [isWaitingForJudgement]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -644,19 +658,26 @@ export default function MissionCaptureScreen() {
     }
 
     return (
-      <View style={[styles.reviewContainer, { paddingBottom: bottomSafeInset + 25, paddingTop: topSafeInset + 70 }]}>
+      <View style={[styles.reviewContainer, { paddingBottom: bottomSafeInset + 25, paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 90 }]}>
         <StatusBar style="dark" />
         <View style={styles.reviewHeader}>
-          {uploadRemainingMs !== null ? <Text style={[styles.timeAttackText, isUploadExpired && styles.timeAttackDanger]}>업로드 제한 {formatRemainingTime(uploadRemainingMs)}</Text> : null}
-          {isMissionComplete ? <Text style={styles.completeTitle}>미션 완료!</Text> : null}
-          {isWaitingForJudgement ? <ActivityIndicator color="#409CB7" style={styles.judgementLoader} /> : null}
-          {uploadMessage ? <Text style={[styles.uploadMessage, needsRetakeAfterJudgement && styles.retakePromptMessage]}>{uploadMessage}</Text> : null}
-          {judgeReason && !uploadMessage ? <Text style={styles.uploadMessage}>{judgeReason}</Text> : null}
-          {returnCountdown !== null ? <Text style={styles.countdownText}>{returnCountdown}초 후 여행 화면으로 돌아가요</Text> : null}
+          <Text style={styles.previewTitle}>{isMissionComplete ? '미션 완료!' : isWaitingForJudgement ? `사진을 확인하고 있어요${'.'.repeat(judgementDotCount)}` : '사진을 확인해 주세요'}</Text>
+          <Text numberOfLines={2} style={styles.previewDescription}>
+            {returnCountdown !== null
+              ? `${returnCountdown}초 후 여행 화면으로 돌아가요`
+              : uploadMessage || judgeReason || (uploadRemainingMs !== null
+                ? `업로드 제한 ${formatRemainingTime(uploadRemainingMs)}`
+                : '미션에 맞게 촬영했는지 확인해 보세요')}
+          </Text>
         </View>
 
         <View style={styles.previewWrap}>
           <Image source={{ uri: capturedPhotoUri }} style={styles.previewImage} contentFit="cover" />
+          {isWaitingForJudgement ? (
+            <View style={styles.previewJudgementOverlay}>
+              <ActivityIndicator color="#FFFFFF" size="large" style={styles.previewJudgementLoader} />
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.reviewActions}>
@@ -758,7 +779,6 @@ const styles = StyleSheet.create({
   reviewContainer: {
     backgroundColor: '#F4F7FA',
     flex: 1,
-    paddingHorizontal: 36,
   },
   failureContainer: {
     alignItems: 'center',
@@ -833,9 +853,24 @@ const styles = StyleSheet.create({
   },
   reviewHeader: {
     alignItems: 'center',
-    minHeight: 72,
+    height: 81,
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: 32,
+    position: 'relative',
+  },
+  previewTitle: {
+    color: '#252B30',
+    fontSize: 24,
+    fontWeight: '600',
+    lineHeight: 30,
+    textAlign: 'center',
+  },
+  previewDescription: {
+    color: '#8A9194',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 7,
+    textAlign: 'center',
   },
   completeTitle: {
     color: '#2D3C43',
@@ -894,22 +929,30 @@ const styles = StyleSheet.create({
   },
   previewWrap: {
     alignSelf: 'center',
+    aspectRatio: 3 / 4,
     backgroundColor: '#E5EEF3',
-    borderRadius: 18,
-    flex: 1,
-    maxHeight: 520,
-    minHeight: 300,
+    borderRadius: 20,
     overflow: 'hidden',
-    width: '100%',
+    position: 'relative',
+    width: '78%',
   },
   previewImage: {
     height: '100%',
     width: '100%',
   },
+  previewJudgementOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    backgroundColor: 'rgba(13, 23, 29, 0.22)',
+    justifyContent: 'center',
+  },
+  previewJudgementLoader: {
+    transform: [{ scale: 1.45 }],
+  },
   reviewActions: {
     flexDirection: 'row',
     gap: 18,
-    marginTop: 30,
+    marginTop: 'auto',
   },
   reviewButton: {
     alignItems: 'center',
