@@ -269,7 +269,8 @@ function normalizeSubmission(submission: ApiMissionSubmission): MissionSubmissio
 export function getPassedMissionSubmissions(session: MissionSession | null | undefined) {
   // TEMP: AI 판정 실패 사진도 댓글/결과 플로우를 테스트할 수 있도록 노출한다.
   // AI 판정 연동 테스트가 끝나면 false로 되돌린다.
-  const allowFailedJudgementsForTesting = true;
+  // const allowFailedJudgementsForTesting = true;
+  const allowFailedJudgementsForTesting = false;
 
   return session?.submissions.filter((submission) => submission.judgeStatus === 'PASSED' || (allowFailedJudgementsForTesting && (submission.judgeStatus === 'REJECTED' || submission.judgeStatus === 'ERROR'))) ?? [];
 }

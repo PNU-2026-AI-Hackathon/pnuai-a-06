@@ -111,7 +111,7 @@ export default function MissionCaptureScreen() {
   const cameraRef = useRef<CameraView | null>(null);
   const missionCardTranslateY = useRef(new Animated.Value(0)).current;
   const missionCardOffsetY = useRef(0);
-  const { bottomSafeInset, height, topSafeInset } = useResponsiveLayout();
+  const { bottomSafeInset, height, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>('back');
   const [flash, setFlash] = useState<FlashMode>('off');
@@ -268,22 +268,29 @@ export default function MissionCaptureScreen() {
 
       if (nextJudgeStatus === 'REJECTED') {
         // TEMP: AI 실패 여부와 관계없이 업로드 이후 플로우를 테스트한다.
-        setIsMissionComplete(true);
-        setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
-        setReturnCountdown(3);
+        // setIsMissionComplete(true);
+        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        // setReturnCountdown(3);
+        setIsMissionComplete(false);
+        setUploadMessage('AI 판정에 통과하지 못했어요. 다시 촬영해 주세요.');
+        setReturnCountdown(null);
         return;
       }
 
       if (nextJudgeStatus === 'ERROR') {
-        setIsMissionComplete(true);
-        setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
-        setReturnCountdown(3);
+        // TEMP: AI 오류 사진도 성공 처리하던 테스트 우회 코드.
+        // setIsMissionComplete(true);
+        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        // setReturnCountdown(3);
+        setIsMissionComplete(false);
+        setUploadMessage('AI 확인 중 문제가 발생했어요. 다시 촬영해 주세요.');
+        setReturnCountdown(null);
         return;
       }
 
-      setIsMissionComplete(true);
-      setUploadMessage('사진을 업로드했어요.');
-      setReturnCountdown(3);
+      setJudgeStatus('PENDING');
+      setUploadMessage(getJudgementWaitingMessage('PENDING'));
+      setJudgementSessionId(nextSession.id);
     };
 
     const socket = connectMissionSessionSocket(judgementSessionId, {
@@ -493,16 +500,23 @@ export default function MissionCaptureScreen() {
 
       if (nextJudgeStatus === 'REJECTED') {
         // TEMP: AI 실패 여부와 관계없이 업로드 이후 플로우를 테스트한다.
-        setIsMissionComplete(true);
-        setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
-        setReturnCountdown(3);
+        // setIsMissionComplete(true);
+        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        // setReturnCountdown(3);
+        setIsMissionComplete(false);
+        setUploadMessage('AI 판정에 통과하지 못했어요. 다시 촬영해 주세요.');
+        setReturnCountdown(null);
         return;
       }
 
       if (nextJudgeStatus === 'ERROR') {
-        setIsMissionComplete(true);
-        setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
-        setReturnCountdown(3);
+        // TEMP: AI 오류 사진도 성공 처리하던 테스트 우회 코드.
+        // setIsMissionComplete(true);
+        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        // setReturnCountdown(3);
+        setIsMissionComplete(false);
+        setUploadMessage('AI 확인 중 문제가 발생했어요. 다시 촬영해 주세요.');
+        setReturnCountdown(null);
         return;
       }
 
@@ -512,9 +526,9 @@ export default function MissionCaptureScreen() {
         return;
       }
 
-      setIsMissionComplete(true);
-      setUploadMessage('사진을 업로드했어요.');
-      setReturnCountdown(3);
+      setJudgeStatus('PENDING');
+      setUploadMessage(getJudgementWaitingMessage('PENDING'));
+      setJudgementSessionId(uploadSessionId);
     } catch (error) {
       setUploadMessage(isDuplicateSubmissionError(error) ? '이미 수행한 미션이에요. 한 미션은 한 번만 제출할 수 있어요.' : error instanceof Error ? error.message : '사진 업로드에 실패했어요.');
     } finally {
@@ -550,6 +564,31 @@ export default function MissionCaptureScreen() {
   }
 
   if (capturedPhotoUri) {
+    if (needsRetakeAfterJudgement) {
+      return (
+        <View style={[styles.failureContainer, { paddingBottom: bottomSafeInset + 20, paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 90 }]}>
+          <StatusBar style="dark" />
+          <View style={styles.failureHeader}>
+            <Text style={styles.failureTitle}>거의 다 왔어요</Text>
+            <Text style={styles.failureSubtitle}>미션에 맞게 다시 찍어보세요</Text>
+          </View>
+
+          <View style={styles.failurePhotoCard}>
+            <Image contentFit="cover" source={{ uri: capturedPhotoUri }} style={styles.failurePhoto} />
+            <View style={styles.failurePhotoOverlay} />
+            <View style={styles.failureMissionCopy}>
+              <Ionicons color="#FFFFFF" name="alert-circle-outline" size={24} />
+              <Text style={styles.failureMissionDescription}>{mission?.description ?? '미션 설명을 확인하고 다시 촬영해 주세요.'}</Text>
+            </View>
+          </View>
+
+          <ScalePressable accessibilityLabel="다시 찍기" onPress={handleRetake} pressedScale={0.97} style={styles.failureRetakeButton}>
+            <Text style={styles.failureRetakeButtonText}>다시 찍기</Text>
+          </ScalePressable>
+        </View>
+      );
+    }
+
     return (
       <View style={[styles.reviewContainer, { paddingBottom: bottomSafeInset + 25, paddingTop: topSafeInset + 70 }]}>
         <StatusBar style="dark" />
@@ -666,6 +705,77 @@ const styles = StyleSheet.create({
     backgroundColor: '#F4F7FA',
     flex: 1,
     paddingHorizontal: 36,
+  },
+  failureContainer: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    flex: 1,
+  },
+  failureHeader: {
+    alignItems: 'center',
+    height: 81,
+  },
+  failureTitle: {
+    color: '#252B30',
+    fontSize: 24,
+    fontWeight: '600',
+    lineHeight: 30,
+    textAlign: 'center',
+  },
+  failureSubtitle: {
+    color: '#8A9194',
+    fontSize: 12,
+    marginTop: 7,
+    textAlign: 'center',
+  },
+  failurePhotoCard: {
+    alignSelf: 'center',
+    aspectRatio: 3 / 4,
+    borderRadius: 20,
+    marginTop: 32,
+    overflow: 'hidden',
+    position: 'relative',
+    width: '78%',
+  },
+  failurePhoto: {
+    height: '100%',
+    width: '100%',
+  },
+  failurePhotoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10, 18, 24, 0.34)',
+  },
+  failureMissionCopy: {
+    alignItems: 'center',
+    left: 24,
+    position: 'absolute',
+    right: 24,
+    top: '41%',
+  },
+  failureMissionDescription: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 21,
+    marginTop: 3,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.45)',
+    textShadowOffset: { height: 1, width: 0 },
+    textShadowRadius: 4,
+  },
+  failureRetakeButton: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    backgroundColor: '#BAC0C3',
+    borderRadius: 999,
+    height: 63,
+    justifyContent: 'center',
+    marginTop: 'auto',
+  },
+  failureRetakeButtonText: {
+    color: '#5D686C',
+    fontSize: 18,
+    fontWeight: '500',
   },
   reviewHeader: {
     alignItems: 'center',
