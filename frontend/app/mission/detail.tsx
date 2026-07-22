@@ -506,7 +506,7 @@ export default function MissionDetailScreen() {
                 const isMissionBusy = isAddingMission && selectedMission?.id === mission.id;
                 const isScheduleLoading = Boolean(targetScheduleId && !targetSchedule);
                 const isCheckingSession = Boolean(addedMission && isLoadingTargetSessions);
-                const missionButtonLabel = isCheckingSession ? '확인 중' : isCompleted ? '완료' : isInProgress ? '진행 중' : addedMission ? '담김' : '담기';
+                const missionButtonLabel = isCheckingSession ? '확인 중' : isCompleted ? '완료' : isInProgress ? '진행 중' : addedMission ? '담음' : '담기';
 
                 return (
                 <View key={mission.id} style={styles.missionCard}>
