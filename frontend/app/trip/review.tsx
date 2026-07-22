@@ -276,9 +276,8 @@ export default function MissionReviewScreen() {
         </View>
       ) : showReadyScreen ? (
         <View style={[styles.readyWrap, { paddingBottom: bottomSafeInset + 28, paddingHorizontal: horizontalPadding }]}>
+          <Text style={styles.readyTitle}>사진 감상 시작!</Text>
           <View style={styles.readyCard}>
-            <Text style={styles.readyTitle}>댓글 달 준비가 됐나요?</Text>
-            <Text style={styles.readyText}>참여자 전원이 준비를 누르면 익명 사진 댓글 화면으로 넘어가요.</Text>
             <View style={styles.memberList}>
               {session?.members.map((member, index) => (
                 <View key={`${member.userId}-${index}`} style={styles.memberRow}>
@@ -290,6 +289,11 @@ export default function MissionReviewScreen() {
             <ScalePressable disabled={Boolean(myMember?.readyAt) || isSubmitting} onPress={handleReady} pressedScale={0.96} style={[styles.primaryButton, (myMember?.readyAt || isSubmitting) && styles.disabledButton]}>
               {isSubmitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryButtonText}>{myMember?.readyAt ? '준비 완료' : '준비'}</Text>}
             </ScalePressable>
+          </View>
+          <View style={[styles.readyGuide, { bottom: bottomSafeInset + 54 }]}>
+            <Text style={styles.readyGuideText}>작성자는 아직 비밀!</Text>
+            <Text style={styles.readyGuideText}>익명으로 댓글을 남겨보세요.</Text>
+            <Text style={styles.readyAutoText}>모두 댓글을 작성하면 3초 뒤 자동으로 넘어가요.</Text>
           </View>
         </View>
       ) : (
@@ -386,22 +390,22 @@ const styles = StyleSheet.create({
   readyWrap: {
     flex: 1,
     justifyContent: 'center',
+    position: 'relative',
+  },
+  readyTitle: {
+    color: '#2D3C43',
+    fontSize: 24,
+    fontWeight: '600',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    textAlign: 'center',
+    top: 20,
   },
   readyCard: {
     backgroundColor: '#ffffff',
     borderRadius: 18,
     padding: 22,
-  },
-  readyTitle: {
-    color: '#111820',
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  readyText: {
-    color: '#7D868C',
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 8,
   },
   memberList: {
     gap: 10,
@@ -427,6 +431,27 @@ const styles = StyleSheet.create({
   },
   memberReady: {
     color: '#409CB7',
+  },
+  readyGuide: {
+    alignItems: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+  },
+  readyGuideText: {
+    color: '#8A9194',
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  readyAutoText: {
+    color: '#409CB7',
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 21,
+    marginTop: 32,
+    textAlign: 'center',
   },
   content: {
     flexGrow: 1,

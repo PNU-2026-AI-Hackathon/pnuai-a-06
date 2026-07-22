@@ -7,8 +7,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
-import { completeMissionSession, getMissionSession, getPassedMissionSubmissions, likeMissionSessionSubmission, MissionSessionApiError, type MissionSession } from '@/lib/mission-session-api';
-import { getTripSchedule } from '@/lib/trip-schedule-api';
+import { getMissionSession, getPassedMissionSubmissions, likeMissionSessionSubmission, MissionSessionApiError, type MissionSession } from '@/lib/mission-session-api';
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -26,7 +25,6 @@ export default function MissionVoteScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasVoted, setHasVoted] = useState(false);
-  const [requiredVoterCount, setRequiredVoterCount] = useState(0);
   const [message, setMessage] = useState('');
   const hasNavigated = useRef(false);
   const submissions = useMemo(() => getPassedMissionSubmissions(session), [session]);
@@ -41,7 +39,6 @@ export default function MissionVoteScreen() {
     if (savedSubmissionId) {
       setSelectedSubmissionId(savedSubmissionId);
       setHasVoted(true);
-      setMessage('이미 투표했어요. 다른 참여자의 투표를 기다리고 있어요.');
     }
   }, [voteStorageKey]);
 
@@ -53,38 +50,21 @@ export default function MissionVoteScreen() {
     }
 
     getMissionSession(sessionId)
-      .then(async (nextSession) => {
+      .then((nextSession) => {
         setSession(nextSession);
-        let nextRequiredVoterCount = nextSession.members.length;
-
-        if (scheduleId) {
-          try {
-            const schedule = await getTripSchedule(scheduleId);
-            const scheduledPeopleCount = Number(schedule.peopleCount);
-            nextRequiredVoterCount = Math.max(
-              nextRequiredVoterCount,
-              schedule.participants.length,
-              Number.isFinite(scheduledPeopleCount) ? scheduledPeopleCount : 0
-            );
-          } catch {
-            // 세션 멤버 수를 투표 인원 fallback으로 사용한다.
-          }
-        }
-
-        setRequiredVoterCount(nextRequiredVoterCount);
       })
       .catch((error) => setMessage(error instanceof Error ? error.message : '투표 사진을 불러오지 못했어요.'))
       .finally(() => setIsLoading(false));
   }, [scheduleId, sessionId]);
 
-  const goResult = useCallback(() => {
+  const goWaiting = useCallback(() => {
     if (!sessionId || hasNavigated.current) {
       return;
     }
 
     hasNavigated.current = true;
     router.replace({
-      pathname: '/trip/result',
+      pathname: '/trip/vote-waiting',
       params: {
         ...(scheduleId ? { scheduleId } : {}),
         sessionId,
@@ -93,43 +73,11 @@ export default function MissionVoteScreen() {
   }, [scheduleId, sessionId]);
 
   useEffect(() => {
-    if (!sessionId || !hasVoted) {
+    if (!sessionId || !hasVoted || isLoading) {
       return;
     }
-
-    const refreshResult = async () => {
-      try {
-        const nextSession = await getMissionSession(sessionId);
-        setSession(nextSession);
-        const totalVoteCount = getPassedMissionSubmissions(nextSession).reduce((count, submission) => count + submission.likeCount, 0);
-
-        if (requiredVoterCount <= 0 || totalVoteCount < requiredVoterCount) {
-          setMessage(`다른 참여자의 투표를 기다리고 있어요. (${totalVoteCount}/${requiredVoterCount || '-'})`);
-          return;
-        }
-
-        if (nextSession.status === 'COMPLETED') {
-          goResult();
-          return;
-        }
-
-        try {
-          const completedSession = await completeMissionSession(sessionId);
-          setSession(completedSession);
-          goResult();
-        } catch {
-          setMessage('다른 참여자의 투표를 기다리고 있어요.');
-        }
-      } catch {
-        // 다음 주기에서 서버 상태를 다시 확인한다.
-      }
-    };
-
-    void refreshResult();
-    const timer = setInterval(refreshResult, 1500);
-
-    return () => clearInterval(timer);
-  }, [goResult, hasVoted, requiredVoterCount, sessionId]);
+    goWaiting();
+  }, [goWaiting, hasVoted, isLoading, sessionId]);
 
   const handleVote = async () => {
     if (!sessionId || !selectedSubmissionId || isSubmitting) {
@@ -144,14 +92,14 @@ export default function MissionVoteScreen() {
         setAuthItem(voteStorageKey, selectedSubmissionId);
       }
       setHasVoted(true);
-      setMessage('투표를 완료했어요. 다른 참여자의 투표를 기다리고 있어요.');
+      goWaiting();
     } catch (error) {
       if (error instanceof MissionSessionApiError && error.status === 409) {
         if (voteStorageKey) {
           setAuthItem(voteStorageKey, selectedSubmissionId);
         }
         setHasVoted(true);
-        setMessage('이미 투표했어요. 다른 참여자의 투표를 기다리고 있어요.');
+        goWaiting();
         return;
       }
 
