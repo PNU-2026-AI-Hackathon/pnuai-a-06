@@ -41,7 +41,7 @@ export default function VoteWaitingScreen() {
   }, [scheduleId, sessionId]);
 
   useEffect(() => {
-    if (!sessionId || requiredVoterCount <= 0) return;
+    if (!sessionId) return;
     const goResult = () => {
       if (hasNavigated.current) return;
       hasNavigated.current = true;
@@ -50,9 +50,24 @@ export default function VoteWaitingScreen() {
     const refresh = async () => {
       try {
         const session = await getMissionSession(sessionId);
+        let voterCount = Math.max(requiredVoterCount, session.members.length);
+
+        if (scheduleId && voterCount <= session.members.length) {
+          try {
+            const schedule = await getTripSchedule(scheduleId);
+            const peopleCount = Number(schedule.peopleCount);
+            voterCount = Math.max(voterCount, schedule.participants.length, Number.isFinite(peopleCount) ? peopleCount : 0);
+            if (voterCount !== requiredVoterCount) {
+              setRequiredVoterCount(voterCount);
+            }
+          } catch {
+            // 세션 멤버 수로 계속 투표 완료 여부를 확인한다.
+          }
+        }
+
         const votes = getPassedMissionSubmissions(session).reduce((sum, submission) => sum + submission.likeCount, 0);
         if (session.status === 'COMPLETED') return goResult();
-        if (votes < requiredVoterCount || isCompleting.current) return;
+        if (voterCount <= 0 || votes < voterCount || isCompleting.current) return;
         isCompleting.current = true;
         try { await completeMissionSession(sessionId); goResult(); }
         finally { isCompleting.current = false; }
