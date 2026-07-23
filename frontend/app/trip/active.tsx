@@ -99,18 +99,22 @@ function isFinishedSession(session: MissionSession | undefined) {
   return Boolean(session && (session.status === 'VOTING' || session.status === 'COMPLETED' || hasAllComments(session)));
 }
 
-function isReviewableSession(session: MissionSession, requiredMemberCount: number) {
-  return hasAllMemberSubmissions(session, requiredMemberCount) && !isFinishedSession(session);
-}
-
 function hasAllMemberSubmissions(session: MissionSession, requiredMemberCount: number) {
   const submittedUserIds = new Set(session.submissions.map((submission) => submission.userId).filter(Boolean));
 
   return requiredMemberCount > 0 && submittedUserIds.size >= requiredMemberCount;
 }
 
+function getFeedSubmissions(session: MissionSession | undefined) {
+  return session?.submissions.filter((submission) => submission.judgeStatus !== 'REJECTED') ?? [];
+}
+
 function isStartedMissionSession(session: MissionSession) {
   return Boolean(session.startedAt) || (session.status !== 'WAITING' && session.status !== 'READY');
+}
+
+function hasSubmittedMissionPhoto(session: MissionSession | undefined, userId: string | null) {
+  return Boolean(userId && session?.submissions.some((submission) => submission.userId === userId && Boolean(submission.photoUrl)));
 }
 
 function isCompletedScheduleMission(mission: TripScheduleMission) {
@@ -224,7 +228,6 @@ export default function ActiveTripScreen() {
   const [inviteMessage, setInviteMessage] = useState('');
   const [missionListVisible, setMissionListVisible] = useState(false);
   const [pendingMission, setPendingMission] = useState<TripScheduleMission | null>(null);
-  const [reviewAlertSession, setReviewAlertSession] = useState<MissionSession | null>(null);
   const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
   const [inviteData, setInviteData] = useState<TripInvite | null>(null);
   const [dateEditorMissionId, setDateEditorMissionId] = useState<string | null>(null);
@@ -254,6 +257,8 @@ export default function ActiveTripScreen() {
   const hasStartedMissionSession = Object.values(missionSessions).some(isStartedMissionSession);
   const canInviteCompanion = (schedule?.permissions.canInviteCompanion ?? false) && !hasStartedMissionSession;
   const inviteUrl = getInviteUrl(inviteData);
+  const pendingMissionSession = pendingMission ? missionSessions[pendingMission.scheduleMissionId] ?? revealedSessions[pendingMission.scheduleMissionId] : undefined;
+  const isPendingMissionCompleted = hasSubmittedMissionPhoto(pendingMissionSession, currentUserId);
   const isMissionBlockedForPlay = useCallback((mission: TripScheduleMission) => {
     return Boolean(activeBlockingSession?.scheduleMissionId && activeBlockingSession.scheduleMissionId !== mission.scheduleMissionId);
   }, [activeBlockingSession]);
@@ -271,9 +276,9 @@ export default function ActiveTripScreen() {
       }));
     }
 
-    const shouldShowInFeed = getPassedMissionSubmissions(nextSession).length > 0 && scheduleMissionId;
+    const shouldShowInFeed = scheduleMissionId && hasAllMemberSubmissions(nextSession, requiredScheduleMemberCount) && getFeedSubmissions(nextSession).length > 0;
 
-    if (!shouldShowInFeed) {
+    if (!shouldShowInFeed || !scheduleMissionId) {
       return;
     }
 
@@ -289,12 +294,6 @@ export default function ActiveTripScreen() {
 
       if (scheduleId) {
         saveCachedRevealedSessions(scheduleId, nextSessions);
-      }
-
-      if (requiredScheduleMemberCount > 1 && isReviewableSession(normalizedSession, requiredScheduleMemberCount)) {
-        setReviewAlertSession(normalizedSession);
-      } else if (isFinishedSession(normalizedSession)) {
-        setReviewAlertSession((currentAlert) => (currentAlert?.id === normalizedSession.id ? null : currentAlert));
       }
 
       return nextSessions;
@@ -362,7 +361,6 @@ export default function ActiveTripScreen() {
     }
 
     const cachedRevealedSessions = readCachedRevealedSessions(scheduleId);
-    setReviewAlertSession(null);
     setRevealedSessions(cachedRevealedSessions);
     setMissionSessions(cachedRevealedSessions);
 
@@ -624,7 +622,7 @@ export default function ActiveTripScreen() {
   };
 
   const startPendingMission = async () => {
-    if (!schedule?.scheduleId || !pendingMission || isSessionBusy) {
+    if (!schedule?.scheduleId || !pendingMission || isSessionBusy || isPendingMissionCompleted) {
       return;
     }
 
@@ -674,31 +672,11 @@ export default function ActiveTripScreen() {
     }
   };
 
-  const openReview = (targetSession: MissionSession | null) => {
-    if (!targetSession?.id) {
-      return;
-    }
-
-    if (targetSession.status !== 'REVEALED' && targetSession.status !== 'VOTING' && targetSession.status !== 'COMPLETED') {
-      void revealMissionSession(targetSession.id)
-        .then((nextSession) => rememberFeedSession(nextSession, targetSession.scheduleMissionId))
-        .catch(() => getMissionSession(targetSession.id).then((nextSession) => rememberFeedSession(nextSession, targetSession.scheduleMissionId)).catch(() => undefined));
-    }
-
-    setReviewAlertSession(null);
-    router.push({
-      pathname: '/trip/review',
-      params: {
-        ...(scheduleId ? { scheduleId } : {}),
-        sessionId: targetSession.id,
-      },
-    });
-  };
   const getMissionPhotos = (mission: TripScheduleMission) => {
     const feedSession = revealedSessions[mission.scheduleMissionId];
     const isMissionResultComplete = feedSession?.status === 'COMPLETED';
 
-    return getPassedMissionSubmissions(feedSession).map((submission) => ({
+    return getFeedSubmissions(feedSession).map((submission) => ({
       id: submission.id,
       imageUrl: submission.imageUrl,
       isBlurred: !isMissionResultComplete && submission.userId !== currentUserId,
@@ -707,10 +685,6 @@ export default function ActiveTripScreen() {
 
   const openFeedSession = (targetSession: MissionSession | undefined) => {
     if (!targetSession?.id) {
-      return;
-    }
-
-    if (targetSession.status !== 'REVEALED' && targetSession.status !== 'VOTING' && targetSession.status !== 'COMPLETED') {
       return;
     }
 
@@ -736,7 +710,13 @@ export default function ActiveTripScreen() {
       return;
     }
 
-    openReview(targetSession);
+    router.push({
+      pathname: '/trip/review',
+      params: {
+        ...(scheduleId ? { scheduleId } : {}),
+        sessionId: targetSession.id,
+      },
+    });
   };
 
   const completedMissionFeeds = missions
@@ -846,21 +826,6 @@ export default function ActiveTripScreen() {
           )}
         </View>
       </ScrollView>
-
-      {reviewAlertSession ? (
-        <View style={[styles.reviewAlert, { bottom: bottomSafeInset + 106, left: horizontalPadding, right: horizontalPadding }]}>
-          <View style={styles.reviewAlertCopy}>
-            <Text style={styles.reviewAlertTitle}>댓글을 남길 시간이 왔어요</Text>
-            <Text style={styles.reviewAlertText}>{reviewAlertSession.missionTitle} · 사진 {getPassedMissionSubmissions(reviewAlertSession).length}장</Text>
-          </View>
-          <ScalePressable onPress={() => openReview(reviewAlertSession)} pressedScale={0.94} style={styles.reviewAlertButton}>
-            <Text style={styles.reviewAlertButtonText}>열기</Text>
-          </ScalePressable>
-          <ScalePressable accessibilityLabel="댓글 알림 닫기" onPress={() => setReviewAlertSession(null)} pressedScale={0.86} style={styles.reviewAlertClose}>
-            <Ionicons color="#6A747A" name="close" size={18} />
-          </ScalePressable>
-        </View>
-      ) : null}
 
       <Modal animationType="fade" transparent visible={missionListVisible} onRequestClose={() => setMissionListVisible(false)}>
         <Pressable accessibilityLabel="담긴 미션 닫기" onPress={() => setMissionListVisible(false)} style={styles.modalBackdrop}>
@@ -973,11 +938,11 @@ export default function ActiveTripScreen() {
             <Text style={styles.missionStartQuestion}>이 미션을 시작할까요?</Text>
             <View style={styles.missionStartActions}>
               <ScalePressable
-                disabled={isSessionBusy}
+                disabled={isSessionBusy || isPendingMissionCompleted}
                 onPress={startPendingMission}
                 pressedScale={0.97}
-                style={styles.missionStartButton}>
-                {isSessionBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.missionStartButtonText}>시작하기</Text>}
+                style={[styles.missionStartButton, isPendingMissionCompleted && styles.missionCompletedButton]}>
+                {isSessionBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.missionStartButtonText}>{isPendingMissionCompleted ? '완료됨' : '시작하기'}</Text>}
               </ScalePressable>
             </View>
           </Pressable>
@@ -1243,56 +1208,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  reviewAlert: {
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#D7EAF0',
-    borderRadius: 18,
-    borderWidth: 1,
-    elevation: 8,
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 76,
-    padding: 12,
-    position: 'absolute',
-    shadowColor: '#000000',
-    shadowOffset: { height: 6, width: 0 },
-    shadowOpacity: 0.16,
-    shadowRadius: 14,
-    zIndex: 20,
-  },
-  reviewAlertCopy: {
-    flex: 1,
-  },
-  reviewAlertTitle: {
-    color: '#111820',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  reviewAlertText: {
-    color: '#6F7A80',
-    fontSize: 12,
-    marginTop: 3,
-  },
-  reviewAlertButton: {
-    alignItems: 'center',
-    backgroundColor: '#6EA8BE',
-    borderRadius: 12,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  reviewAlertButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  reviewAlertClose: {
-    alignItems: 'center',
-    height: 30,
-    justifyContent: 'center',
-    width: 30,
-  },
   modalBackdrop: {
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.28)',
@@ -1361,6 +1276,9 @@ const styles = StyleSheet.create({
     flex: 1.45,
     height: 54,
     justifyContent: 'center',
+  },
+  missionCompletedButton: {
+    backgroundColor: '#C3D2D7',
   },
   missionStartButtonText: {
     color: '#FFFFFF',
