@@ -17,8 +17,39 @@ export default function VoteWaitingScreen() {
   const sessionId = param(params.sessionId);
   const { topSafeInset } = useResponsiveLayout();
   const [requiredVoterCount, setRequiredVoterCount] = useState(0);
+  const [resultCountdown, setResultCountdown] = useState<number | null>(null);
   const hasNavigated = useRef(false);
   const isCompleting = useRef(false);
+  const hasStartedResultCountdown = useRef(false);
+
+  const startResultCountdown = () => {
+    if (hasNavigated.current || hasStartedResultCountdown.current) {
+      return;
+    }
+
+    hasStartedResultCountdown.current = true;
+    setResultCountdown(3);
+  };
+
+  useEffect(() => {
+    if (resultCountdown === null) {
+      return;
+    }
+
+    if (resultCountdown <= 0) {
+      if (!hasNavigated.current) {
+        hasNavigated.current = true;
+        router.replace({ pathname: '/trip/result', params: { ...(scheduleId ? { scheduleId } : {}), sessionId: sessionId ?? '' } });
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setResultCountdown((currentCountdown) => currentCountdown === null ? null : currentCountdown - 1);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [resultCountdown, scheduleId, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -42,11 +73,6 @@ export default function VoteWaitingScreen() {
 
   useEffect(() => {
     if (!sessionId) return;
-    const goResult = () => {
-      if (hasNavigated.current) return;
-      hasNavigated.current = true;
-      router.replace({ pathname: '/trip/result', params: { ...(scheduleId ? { scheduleId } : {}), sessionId } });
-    };
     const refresh = async () => {
       try {
         const session = await getMissionSession(sessionId);
@@ -66,11 +92,13 @@ export default function VoteWaitingScreen() {
         }
 
         const votes = getPassedMissionSubmissions(session).reduce((sum, submission) => sum + submission.likeCount, 0);
-        if (session.status === 'COMPLETED') return goResult();
+        if (session.status === 'COMPLETED') return startResultCountdown();
         if (voterCount <= 0 || votes < voterCount || isCompleting.current) return;
         isCompleting.current = true;
-        try { await completeMissionSession(sessionId); goResult(); }
-        finally { isCompleting.current = false; }
+        startResultCountdown();
+        void completeMissionSession(sessionId).catch(() => undefined).finally(() => {
+          isCompleting.current = false;
+        });
       } catch { /* 다음 주기에 다시 확인한다. */ }
     };
     void refresh();
@@ -86,8 +114,10 @@ export default function VoteWaitingScreen() {
       <Image contentFit="contain" source={blueEffect} style={styles.blueEffect} />
     </View>
     <View style={styles.copy}>
-      <Text style={styles.description}>친구들의 선택이 모였어요.</Text>
-      <Text style={styles.description}>가장 많은 선택을 받은 사진을 공개할게요.</Text>
+      {resultCountdown === null ? <>
+        <Text style={styles.description}>친구들의 선택이 모였어요.</Text>
+        <Text style={styles.description}>가장 많은 선택을 받은 사진을 공개할게요.</Text>
+      </> : <Text style={styles.description}>{resultCountdown}초 뒤 결과를 보여드릴게요.</Text>}
     </View>
   </View>;
 }

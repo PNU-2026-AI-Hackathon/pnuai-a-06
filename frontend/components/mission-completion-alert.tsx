@@ -22,8 +22,8 @@ function hasAllMemberSubmissions(session: MissionSession, memberCount: number) {
     return false;
   }
 
-  const submittedUserIds = new Set(session.submissions.map((submission) => submission.userId).filter(Boolean));
-  return submittedUserIds.size >= expectedMemberCount;
+  const passedUserIds = new Set(session.submissions.filter((submission) => submission.judgeStatus === 'PASSED').map((submission) => submission.userId).filter(Boolean));
+  return passedUserIds.size >= expectedMemberCount;
 }
 
 export function MissionCompletionAlert() {

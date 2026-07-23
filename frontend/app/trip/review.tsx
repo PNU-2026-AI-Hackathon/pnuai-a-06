@@ -363,7 +363,7 @@ export default function MissionReviewScreen() {
               <Image source={{ uri: currentSubmission.imageUrl }} style={styles.photo} contentFit="cover" />
               {transitionSubmissionId === currentSubmission.id && transitionCountdown !== null ? (
                 <View style={styles.photoTransitionOverlay}>
-                  <View style={styles.transitionCheck}><Ionicons color="#FFFFFF" name="checkmark" size={24} /></View>
+                  <View style={styles.transitionCheck}><Ionicons color="#FFFFFF" name="checkmark" size={18} /></View>
                   <Text style={styles.transitionTitle}>모두 댓글 작성을 완료했어요!</Text>
                   <Text style={styles.transitionDescription}>{transitionCountdown}초 뒤 다음 사진으로 넘어가요!</Text>
                 </View>
@@ -591,10 +591,10 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
     borderRadius: 999,
     borderWidth: 2,
-    height: 46,
+    height: 30,
     justifyContent: 'center',
     marginBottom: 12,
-    width: 46,
+    width: 30,
   },
   transitionTitle: {
     color: '#FFFFFF',

@@ -100,19 +100,19 @@ function isFinishedSession(session: MissionSession | undefined) {
   return Boolean(session && (session.status === 'VOTING' || session.status === 'COMPLETED' || hasAllComments(session)));
 }
 
-function hasAllMemberSubmissions(session: MissionSession, requiredMemberCount: number) {
-  const submittedUserIds = new Set(session.submissions.map((submission) => submission.userId).filter(Boolean));
+function hasAllPassedMemberSubmissions(session: MissionSession, requiredMemberCount: number) {
+  const passedUserIds = new Set(session.submissions.filter((submission) => submission.judgeStatus === 'PASSED').map((submission) => submission.userId).filter(Boolean));
   const expectedMemberCount = Math.max(session.members.length, requiredMemberCount);
 
-  return expectedMemberCount > 0 && submittedUserIds.size >= expectedMemberCount;
+  return expectedMemberCount > 0 && passedUserIds.size >= expectedMemberCount;
 }
 
 function getFeedSubmissions(session: MissionSession | undefined) {
-  return session?.submissions.filter((submission) => submission.judgeStatus !== 'REJECTED') ?? [];
+  return session?.submissions.filter((submission) => submission.judgeStatus === 'PASSED') ?? [];
 }
 
 function isFeedReadySession(session: MissionSession, requiredMemberCount: number) {
-  return hasAllMemberSubmissions(session, requiredMemberCount);
+  return hasAllPassedMemberSubmissions(session, requiredMemberCount);
 }
 
 function isStartedMissionSession(session: MissionSession) {
@@ -120,7 +120,10 @@ function isStartedMissionSession(session: MissionSession) {
 }
 
 function hasSubmittedMissionPhoto(session: MissionSession | undefined, userId: string | null) {
-  return Boolean(userId && session?.submissions.some((submission) => submission.userId === userId && Boolean(submission.photoUrl)));
+  return Boolean(userId && session?.submissions.some((submission) => submission.userId === userId
+    && Boolean(submission.photoUrl)
+    && submission.judgeStatus !== 'REJECTED'
+    && submission.judgeStatus !== 'ERROR'));
 }
 
 function isCompletedScheduleMission(mission: TripScheduleMission) {
@@ -344,7 +347,7 @@ export default function ActiveTripScreen() {
 
   useEffect(() => {
     const completedUploadSession = Object.values(missionSessions).find((nextSession) =>
-      hasAllMemberSubmissions(nextSession, requiredScheduleMemberCount)
+      hasAllPassedMemberSubmissions(nextSession, requiredScheduleMemberCount)
       && nextSession.status !== 'REVEALED'
       && nextSession.status !== 'VOTING'
       && nextSession.status !== 'COMPLETED'
@@ -541,6 +544,12 @@ export default function ActiveTripScreen() {
     return isCompletedScheduleMission(mission) || Boolean(missionSessions[mission.scheduleMissionId]) || isFinishedSession(revealedSessions[mission.scheduleMissionId]);
   };
 
+  const isTemporaryMission = (mission: TripScheduleMission) => {
+    const session = missionSessions[mission.scheduleMissionId];
+
+    return Boolean(session && !isCompletedScheduleMission(mission) && !isFinishedSession(session));
+  };
+
   const handleChangeMissionDate = async (mission: TripScheduleMission, plannedDate: string) => {
     if (!schedule?.scheduleId || busyScheduleMissionId || plannedDate === mission.plannedDate) {
       return;
@@ -575,7 +584,7 @@ export default function ActiveTripScreen() {
       return;
     }
 
-    if (isMissionLockedForEdit(mission)) {
+    if (isMissionLockedForEdit(mission) && !isTemporaryMission(mission)) {
       setMissionListMessage('진행 중이거나 완료된 미션은 삭제할 수 없어요.');
       return;
     }
@@ -877,8 +886,10 @@ export default function ActiveTripScreen() {
                   ) : group.missions.map((mission) => {
                     const isBusy = busyScheduleMissionId === mission.scheduleMissionId;
                     const isLocked = isMissionLockedForEdit(mission);
+                    const isTemporary = isTemporaryMission(mission);
                     const isPlayBlocked = isMissionBlockedForPlay(mission);
                     const canEditMission = !isLocked && !isBusy;
+                    const canDeleteMission = !isBusy && !isCompletedScheduleMission(mission) && (!isLocked || isTemporary);
 
                     return (
                       <View key={mission.scheduleMissionId} style={styles.panelMissionItem}>
@@ -894,7 +905,7 @@ export default function ActiveTripScreen() {
                           <ScalePressable accessibilityLabel="미션 날짜 변경" disabled={!canEditMission} onPress={() => setDateEditorMissionId((currentId) => currentId === mission.scheduleMissionId ? null : mission.scheduleMissionId)} pressedScale={0.9} style={[styles.iconActionButton, !canEditMission && styles.disabledButton]}>
                             {isBusy ? <ActivityIndicator color="#626E75" /> : <Ionicons color="#626E75" name="calendar-outline" size={18} />}
                           </ScalePressable>
-                          <ScalePressable accessibilityLabel="미션 삭제" disabled={!canEditMission || !schedule?.permissions.canRemoveMission} onPress={() => handleRemoveScheduledMission(mission)} pressedScale={0.9} style={[styles.iconActionButton, (!canEditMission || !schedule?.permissions.canRemoveMission) && styles.disabledButton]}>
+                          <ScalePressable accessibilityLabel="미션 삭제" disabled={!canDeleteMission || !schedule?.permissions.canRemoveMission} onPress={() => handleRemoveScheduledMission(mission)} pressedScale={0.9} style={[styles.iconActionButton, (!canDeleteMission || !schedule?.permissions.canRemoveMission) && styles.disabledButton]}>
                             <Ionicons color="#D06958" name="trash-outline" size={18} />
                           </ScalePressable>
                         </View>
