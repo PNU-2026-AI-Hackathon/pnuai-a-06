@@ -6,7 +6,7 @@ import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
+import { Rect, Svg } from 'react-native-svg';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -177,6 +177,33 @@ function getScheduleDateOptions(schedule: TripSchedule | null) {
   return dates;
 }
 
+function getCalendarDayNumber(date: Date) {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / (24 * 60 * 60 * 1000);
+}
+
+function getTripDayLabel(schedule: TripSchedule | null) {
+  const startDate = parseDateValue(schedule?.startDate);
+  const endDate = parseDateValue(schedule?.endDate ?? schedule?.startDate);
+
+  if (!startDate) {
+    return '여행 날짜 미정';
+  }
+
+  const today = new Date();
+  const todayDay = getCalendarDayNumber(today);
+  const startDay = getCalendarDayNumber(startDate);
+
+  if (todayDay < startDay) {
+    return `D-${startDay - todayDay}`;
+  }
+
+  if (endDate && todayDay > getCalendarDayNumber(endDate)) {
+    return '여행 종료';
+  }
+
+  return `오늘 · 여행 ${todayDay - startDay + 1}일차`;
+}
+
 function getMissionDateLabel(date: string) {
   return date === 'UNPLANNED' ? '날짜 미정' : date;
 }
@@ -207,6 +234,7 @@ export default function ActiveTripScreen() {
   const missions = useMemo(() => schedule?.missions ?? [], [schedule]);
   const activeMissions = missions.filter((mission) => !isCompletedScheduleMission(mission) && !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
   const scheduleDateOptions = useMemo(() => getScheduleDateOptions(schedule), [schedule]);
+  const tripDayLabel = useMemo(() => getTripDayLabel(schedule), [schedule]);
   const missionDateGroups = useMemo(() => {
     const groups = scheduleDateOptions.map((date) => ({
       date,
@@ -759,20 +787,17 @@ export default function ActiveTripScreen() {
           ) : null}
           {activeMissions.map((mission) => {
             const isPlayBlocked = isMissionBlockedForPlay(mission);
+            const isTodayMission = mission.plannedDate === formatDateValue(new Date());
 
             return (
-            <ScalePressable disabled={isPlayBlocked} key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={[styles.photoTile, isPlayBlocked && styles.blockedMissionTile]}>
+            <ScalePressable disabled={!isTodayMission || isPlayBlocked} key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={[styles.photoTile, isPlayBlocked && styles.blockedMissionTile]}>
               <Svg height="100%" pointerEvents="none" style={styles.photoTileGradient} viewBox="0 0 82 96" width="100%">
-                <Defs>
-                  <LinearGradient id="missionTileBorderGradient" x1="1" x2="0" y1="0" y2="1">
-                    <Stop offset="0" stopColor="#CCEBF5" />
-                    <Stop offset="1" stopColor="#5FC1E0" />
-                  </LinearGradient>
-                </Defs>
-                <Rect fill="url(#missionTileBorderGradient)" height="96" rx="28" width="82" x="0" y="0" />
+                <Rect fill={isTodayMission ? '#AFD8E5' : '#C3D2D7'} height="96" rx="28" width="82" x="0" y="0" />
               </Svg>
               <View style={styles.photoTileInner}>
-                {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.photoTileImage} contentFit="cover" /> : <View style={styles.photoTilePlaceholder} />}
+                <View style={[styles.missionTileContent, isTodayMission ? styles.todayMissionTileInner : styles.futureMissionTileInner]}>
+                  {isTodayMission && mission.emojiUrl ? <Image source={{ uri: mission.emojiUrl }} style={styles.missionTileIcon} contentFit="contain" /> : null}
+                </View>
               </View>
             </ScalePressable>
             );
@@ -781,7 +806,7 @@ export default function ActiveTripScreen() {
         {inviteMessage && !inviteSheetVisible ? <Text style={styles.inlineMessage}>{inviteMessage}</Text> : null}
 
         <View style={[styles.feedPanel, !hasSavedMissions && styles.emptyFeedPanel]}>
-          <Text style={styles.dayLabel}>오늘 · 여행 2일차</Text>
+          <Text style={styles.dayLabel}>{tripDayLabel}</Text>
           {isLoading ? (
             <View style={styles.stateBox}>
               <ActivityIndicator color="#409CB7" />
@@ -941,19 +966,12 @@ export default function ActiveTripScreen() {
           onPress={() => setPendingMission(null)}
           style={styles.missionStartOverlay}>
           <Pressable style={styles.missionStartDialog}>
-            <View style={styles.missionStartIcon}>
-              <Ionicons color="#6EA6BF" name="camera-outline" size={28} />
+            <View style={styles.missionStartCard}>
+              {pendingMission?.emojiUrl ? <Image source={{ uri: pendingMission.emojiUrl }} style={styles.missionStartCardIcon} contentFit="contain" /> : <Ionicons color="#6EA6BF" name="camera-outline" size={42} />}
             </View>
             <Text numberOfLines={2} style={styles.missionStartTitle}>{pendingMission?.title ?? '미션'}</Text>
             <Text style={styles.missionStartQuestion}>이 미션을 시작할까요?</Text>
             <View style={styles.missionStartActions}>
-              <ScalePressable
-                disabled={isSessionBusy}
-                onPress={() => setPendingMission(null)}
-                pressedScale={0.97}
-                style={styles.missionCancelButton}>
-                <Text style={styles.missionCancelText}>취소</Text>
-              </ScalePressable>
               <ScalePressable
                 disabled={isSessionBusy}
                 onPress={startPendingMission}
@@ -1069,12 +1087,29 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   photoTileInner: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FFFFFF',
     borderRadius: 20,
     height: 86,
     overflow: 'hidden',
-    padding: 2,
+    padding: 4,
     width: 72,
+  },
+  missionTileContent: {
+    alignItems: 'center',
+    borderRadius: 16,
+    flex: 1,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  todayMissionTileInner: {
+    backgroundColor: '#AFD8E5',
+  },
+  futureMissionTileInner: {
+    backgroundColor: '#C3D2D7',
+  },
+  missionTileIcon: {
+    height: 58,
+    width: 58,
   },
   photoTileImage: {
     borderRadius: 19,
@@ -1268,7 +1303,7 @@ const styles = StyleSheet.create({
   },
   missionStartOverlay: {
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 22, 31, 0.48)',
+    backgroundColor: 'rgba(16, 22, 31, 0.78)',
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: 28,
@@ -1287,50 +1322,41 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     width: '100%',
   },
-  missionStartIcon: {
+  missionStartCard: {
     alignItems: 'center',
-    backgroundColor: '#EAF4F8',
-    borderRadius: 999,
-    height: 58,
+    backgroundColor: '#AFD8E5',
+    borderRadius: 22,
+    height: 132,
     justifyContent: 'center',
     marginBottom: 18,
-    width: 58,
+    width: 112,
+  },
+  missionStartCardIcon: {
+    height: 90,
+    width: 90,
   },
   missionStartTitle: {
-    color: '#20292E',
-    fontSize: 21,
-    fontWeight: '700',
+    color: '#2D3C43',
+    fontSize: 17,
+    fontWeight: '600',
     lineHeight: 29,
     textAlign: 'center',
   },
   missionStartQuestion: {
-    color: '#7D878C',
-    fontSize: 14,
-    marginTop: 8,
+    color: '#8A9194',
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 4,
     textAlign: 'center',
   },
   missionStartActions: {
     flexDirection: 'row',
-    gap: 10,
     marginTop: 28,
     width: '100%',
   },
-  missionCancelButton: {
-    alignItems: 'center',
-    backgroundColor: '#EFF2F4',
-    borderRadius: 999,
-    flex: 1,
-    height: 54,
-    justifyContent: 'center',
-  },
-  missionCancelText: {
-    color: '#727C81',
-    fontSize: 15,
-    fontWeight: '600',
-  },
   missionStartButton: {
     alignItems: 'center',
-    backgroundColor: '#6EA6BF',
+    backgroundColor: '#63B5CD',
     borderRadius: 999,
     flex: 1.45,
     height: 54,

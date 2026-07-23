@@ -11,8 +11,53 @@ import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, updateTr
 
 const birdIcon = require('../../assets/svg/active/3d_bird.svg');
 const crownIcon = require('../../assets/svg/active/crown.svg');
+const galleryIcon = require('../../assets/svg/active/gallery.svg');
 const CARD_DRAG_STEP = 82;
 const CARD_SHIFT_DISTANCE = 100;
+
+function getDateKey(date: string | undefined) {
+  if (!date) {
+    return null;
+  }
+
+  const match = date.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (!match) {
+    return null;
+  }
+
+  return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+}
+
+function isClosedSchedule(schedule: TripSchedule) {
+  const lastDate = getDateKey(schedule.endDate ?? schedule.startDate);
+  if (!lastDate) {
+    return false;
+  }
+
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return lastDate < todayKey;
+}
+
+function isInProgressSchedule(schedule: TripSchedule) {
+  const startDate = getDateKey(schedule.startDate);
+  const endDate = getDateKey(schedule.endDate ?? schedule.startDate);
+  if (!startDate || !endDate) {
+    return false;
+  }
+
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return startDate <= todayKey && todayKey <= endDate;
+}
+
+function pinInProgressSchedules(items: TripSchedule[]) {
+  return [...items.filter(isInProgressSchedule), ...items.filter((item) => !isInProgressSchedule(item))];
+}
+
+function getPinnedScheduleCount(items: TripSchedule[]) {
+  return items.filter(isInProgressSchedule).length;
+}
 
 function formatDateRange(schedule: TripSchedule) {
   if (!schedule.startDate && !schedule.endDate) {
@@ -40,14 +85,14 @@ function isCreatorSchedule(schedule: TripSchedule) {
   return schedule.permissions.canDeleteSchedule;
 }
 
-function moveScheduleItem(items: TripSchedule[], scheduleId: string, offset: number) {
+function moveScheduleItem(items: TripSchedule[], scheduleId: string, offset: number, pinnedScheduleCount: number) {
   const fromIndex = items.findIndex((item) => item.scheduleId === scheduleId);
 
-  if (fromIndex < 0) {
+  if (fromIndex < pinnedScheduleCount) {
     return items;
   }
 
-  const toIndex = Math.max(0, Math.min(items.length - 1, fromIndex + offset));
+  const toIndex = Math.max(pinnedScheduleCount, Math.min(items.length - 1, fromIndex + offset));
 
   if (fromIndex === toIndex) {
     return items;
@@ -63,6 +108,7 @@ function moveScheduleItem(items: TripSchedule[], scheduleId: string, offset: num
 type ScheduleCardProps = {
   deletingScheduleId: string | null;
   isEditing: boolean;
+  isPinned: boolean;
   dragPreviewOffset: number;
   isDragging: boolean;
   onDelete: (schedule: TripSchedule) => void;
@@ -74,24 +120,27 @@ type ScheduleCardProps = {
   schedule: TripSchedule;
 };
 
-function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEditing, onDelete, onDragCancel, onDragEnd, onDragMove, onDragStart, onOpen, schedule }: ScheduleCardProps) {
+function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEditing, isPinned, onDelete, onDragCancel, onDragEnd, onDragMove, onDragStart, onOpen, schedule }: ScheduleCardProps) {
   const dragY = useRef(new Animated.Value(0)).current;
   const previewY = useRef(new Animated.Value(0)).current;
   const isDeleting = deletingScheduleId === schedule.scheduleId;
-  const canDelete = schedule.permissions.canDeleteSchedule;
+  const canDelete = schedule.permissions.canDeleteSchedule && !isClosedSchedule(schedule) && !isInProgressSchedule(schedule);
   const isCreator = isCreatorSchedule(schedule);
+  const isClosed = isClosedSchedule(schedule);
   const isEditingRef = useRef(isEditing);
+  const isPinnedRef = useRef(isPinned);
   isEditingRef.current = isEditing;
+  isPinnedRef.current = isPinned;
   useEffect(() => {
     previewY.setValue(dragPreviewOffset);
   }, [dragPreviewOffset, previewY]);
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => isEditingRef.current,
-      onStartShouldSetPanResponderCapture: () => isEditingRef.current,
-      onMoveShouldSetPanResponder: (_, gestureState) => isEditingRef.current && Math.abs(gestureState.dy) > 2 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
-      onMoveShouldSetPanResponderCapture: (_, gestureState) => isEditingRef.current && Math.abs(gestureState.dy) > 2 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+      onStartShouldSetPanResponder: () => isEditingRef.current && !isPinnedRef.current,
+      onStartShouldSetPanResponderCapture: () => isEditingRef.current && !isPinnedRef.current,
+      onMoveShouldSetPanResponder: (_, gestureState) => isEditingRef.current && !isPinnedRef.current && Math.abs(gestureState.dy) > 2 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => isEditingRef.current && !isPinnedRef.current && Math.abs(gestureState.dy) > 2 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
       onPanResponderGrant: () => {
         dragY.setValue(0);
         onDragStart(schedule.scheduleId);
@@ -133,12 +182,14 @@ function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEdi
               {isDeleting ? <ActivityIndicator color="#D06958" /> : <Text style={styles.deletePillText}>삭제</Text>}
             </Pressable>
           ) : null}
-          <View style={styles.dragHandleBox} {...panResponder.panHandlers}>
-            <Text style={styles.dragHandle}>≡</Text>
-          </View>
+          {isPinned ? <Text style={styles.pinnedLabel}>진행 중</Text> : (
+            <View style={styles.dragHandleBox} {...panResponder.panHandlers}>
+              <Text style={styles.dragHandle}>≡</Text>
+            </View>
+          )}
         </View>
       ) : (
-        <Text style={styles.chevron}>›</Text>
+        isClosed ? <Image accessibilityLabel="결과 보기" source={galleryIcon} style={styles.galleryIcon} contentFit="contain" /> : <Text style={styles.chevron}>›</Text>
       )}
     </>
   );
@@ -146,11 +197,11 @@ function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEdi
   return (
     <Animated.View style={[styles.scheduleCardWrap, isDragging && styles.draggingScheduleCardWrap, { transform: [{ translateY: Animated.add(dragY, previewY) }] }]}>
       {isEditing ? (
-        <View style={[styles.scheduleCard, isCreator && styles.creatorScheduleCard, styles.editingScheduleCard]}>
+        <View style={[styles.scheduleCard, isCreator && styles.creatorScheduleCard, isClosed && styles.closedScheduleCard, styles.editingScheduleCard]}>
           {cardContent}
         </View>
       ) : (
-        <ScalePressable accessibilityRole="button" onPress={() => onOpen(schedule)} pressedScale={0.985} style={[styles.scheduleCard, isCreator && styles.creatorScheduleCard]}>
+        <ScalePressable accessibilityRole="button" accessibilityLabel={isClosed ? `${schedule.roomName} 결과 보기` : `${schedule.roomName} 일정 열기`} onPress={() => onOpen(schedule)} pressedScale={0.985} style={[styles.scheduleCard, isCreator && styles.creatorScheduleCard, isClosed && styles.closedScheduleCard]}>
           {cardContent}
         </ScalePressable>
       )}
@@ -160,7 +211,7 @@ function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEdi
 
 export default function TripHubScreen() {
   const { bottomActionInset, horizontalPadding, topInset } = useResponsiveLayout();
-  const [schedules, setSchedules] = useState<TripSchedule[]>(() => getCachedTripSchedules());
+  const [schedules, setSchedules] = useState<TripSchedule[]>(() => pinInProgressSchedules(getCachedTripSchedules()));
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -183,7 +234,7 @@ export default function TripHubScreen() {
 
     const cachedSchedules = getCachedTripSchedules();
     if (cachedSchedules.length > 0) {
-      setSchedules(cachedSchedules);
+      setSchedules(pinInProgressSchedules(cachedSchedules));
     }
     setIsLoading(true);
     setMessage('');
@@ -194,7 +245,7 @@ export default function TripHubScreen() {
           return;
         }
 
-        setSchedules(nextSchedules);
+        setSchedules(pinInProgressSchedules(nextSchedules));
       })
       .catch((error) => {
         if (!isActive) {
@@ -202,7 +253,7 @@ export default function TripHubScreen() {
         }
 
         const cachedSchedules = getCachedTripSchedules();
-        setSchedules(cachedSchedules);
+        setSchedules(pinInProgressSchedules(cachedSchedules));
         setMessage(cachedSchedules.length === 0 ? (error instanceof Error ? error.message : '여행 일정을 불러오지 못했어요.') : '');
       })
       .finally(() => {
@@ -219,6 +270,14 @@ export default function TripHubScreen() {
   useFocusEffect(refreshSchedules);
 
   const openSchedule = (schedule: TripSchedule) => {
+    if (isClosedSchedule(schedule)) {
+      router.push({
+        pathname: '/trip/result',
+        params: { scheduleId: schedule.scheduleId },
+      });
+      return;
+    }
+
     router.push({
       pathname: '/trip/active',
       params: { scheduleId: schedule.scheduleId },
@@ -226,8 +285,8 @@ export default function TripHubScreen() {
   };
 
   const deleteSchedule = async (schedule: TripSchedule) => {
-    if (!schedule.permissions.canDeleteSchedule) {
-      setMessage('일정 삭제 권한이 없습니다.');
+    if (!schedule.permissions.canDeleteSchedule || isClosedSchedule(schedule) || isInProgressSchedule(schedule)) {
+      setMessage('진행 중이거나 종료된 일정은 삭제할 수 없습니다.');
       return;
     }
 
@@ -248,8 +307,8 @@ export default function TripHubScreen() {
   };
 
   const confirmDeleteSchedule = (schedule: TripSchedule) => {
-    if (!schedule.permissions.canDeleteSchedule) {
-      setMessage('일정 삭제 권한이 없습니다.');
+    if (!schedule.permissions.canDeleteSchedule || isClosedSchedule(schedule) || isInProgressSchedule(schedule)) {
+      setMessage('진행 중이거나 종료된 일정은 삭제할 수 없습니다.');
       return;
     }
 
@@ -273,7 +332,7 @@ export default function TripHubScreen() {
     }
 
     const previousSchedules = schedulesRef.current;
-    const nextSchedules = moveScheduleItem(previousSchedules, scheduleId, offset);
+    const nextSchedules = moveScheduleItem(previousSchedules, scheduleId, offset, getPinnedScheduleCount(previousSchedules));
 
     if (nextSchedules === previousSchedules) {
       return;
@@ -288,7 +347,7 @@ export default function TripHubScreen() {
     try {
       const savedSchedules = await updateTripScheduleOrder(nextSchedules.map((schedule) => schedule.scheduleId));
       schedulesRef.current = savedSchedules;
-      setSchedules(savedSchedules);
+      setSchedules(pinInProgressSchedules(savedSchedules));
     } catch (error) {
       schedulesRef.current = previousSchedules;
       setSchedules(previousSchedules);
@@ -313,7 +372,7 @@ export default function TripHubScreen() {
       return 0;
     }
 
-    const targetIndex = Math.max(0, Math.min(schedules.length - 1, activeIndex + getDragIndexOffset(activeDrag.dragY)));
+    const targetIndex = Math.max(getPinnedScheduleCount(schedules), Math.min(schedules.length - 1, activeIndex + getDragIndexOffset(activeDrag.dragY)));
 
     if (activeIndex < targetIndex && index > activeIndex && index <= targetIndex) {
       return -CARD_SHIFT_DISTANCE;
@@ -368,6 +427,7 @@ export default function TripHubScreen() {
                 dragPreviewOffset={getSchedulePreviewOffset(schedule.scheduleId, index)}
                 isDragging={activeDrag?.scheduleId === schedule.scheduleId}
                 isEditing={isEditing}
+                isPinned={isInProgressSchedule(schedule)}
                 key={schedule.scheduleId}
                 onDelete={confirmDeleteSchedule}
                 onDragCancel={() => setActiveDrag(null)}
@@ -549,6 +609,9 @@ const styles = StyleSheet.create({
   creatorScheduleCard: {
     backgroundColor: '#EAF6FB',
   },
+  closedScheduleCard: {
+    backgroundColor: '#F6F9FB',
+  },
   editingScheduleCard: {
     borderColor: '#DAE5EA',
     borderWidth: 1,
@@ -604,6 +667,11 @@ const styles = StyleSheet.create({
     lineHeight: 44,
     marginLeft: 16,
   },
+  galleryIcon: {
+    height: 22,
+    marginLeft: 16,
+    width: 22,
+  },
   editActions: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -635,6 +703,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     lineHeight: 26,
+  },
+  pinnedLabel: {
+    color: '#6EA4BF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 12,
   },
   emptyBox: {
     alignItems: 'center',

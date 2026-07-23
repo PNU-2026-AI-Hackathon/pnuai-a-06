@@ -6,7 +6,8 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { getMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
+import { getLatestMissionSession, getMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
+import { getTripSchedule } from '@/lib/trip-schedule-api';
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -18,30 +19,56 @@ export default function MissionResultScreen() {
   const sessionId = getParamValue(params.sessionId);
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [session, setSession] = useState<MissionSession | null>(null);
+  const [resultSessions, setResultSessions] = useState<MissionSession[]>([]);
+  const [currentResultIndex, setCurrentResultIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const passedSubmissions = useMemo(() => getPassedMissionSubmissions(session), [session]);
+  const currentSession = resultSessions[currentResultIndex] ?? session;
+  const passedSubmissions = useMemo(() => getPassedMissionSubmissions(currentSession), [currentSession]);
   const winnerSubmission = useMemo(() => {
     if (!passedSubmissions.length) {
       return null;
     }
 
-    const savedWinner = session?.winnerUserId ? passedSubmissions.find((submission) => submission.userId === session.winnerUserId) : null;
+    const savedWinner = currentSession?.winnerUserId ? passedSubmissions.find((submission) => submission.userId === currentSession.winnerUserId) : null;
 
     return savedWinner ?? [...passedSubmissions].sort((left, right) => right.likeCount - left.likeCount)[0];
-  }, [passedSubmissions, session?.winnerUserId]);
+  }, [currentSession?.winnerUserId, passedSubmissions]);
 
-  const refreshSession = useCallback(async () => {
-    if (!sessionId) {
-      setMessage('세션 정보가 없습니다.');
-      return;
-    }
-
+  const refreshResults = useCallback(async () => {
     setIsLoading(true);
     setMessage('');
 
     try {
+      if (scheduleId && !sessionId) {
+        const schedule = await getTripSchedule(scheduleId);
+        const nextSessions = (await Promise.all(schedule.missions.map(async (mission) => {
+          try {
+            const nextSession = await getLatestMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+            return nextSession.status === 'REVEALED' || nextSession.status === 'COMPLETED' ? nextSession : null;
+          } catch {
+            return null;
+          }
+        }))).filter((nextSession): nextSession is MissionSession => Boolean(nextSession) && getPassedMissionSubmissions(nextSession).length > 0);
+
+        setResultSessions(nextSessions);
+        setCurrentResultIndex(0);
+        setSession(nextSessions[0] ?? null);
+
+        if (nextSessions.length === 0) {
+          setMessage('표시할 결과가 없어요.');
+        }
+        return;
+      }
+
+      if (!sessionId) {
+        setMessage('세션 정보가 없습니다.');
+        return;
+      }
+
       const nextSession = await getMissionSession(sessionId);
+      setResultSessions([nextSession]);
+      setCurrentResultIndex(0);
       setSession(nextSession);
 
       if (getPassedMissionSubmissions(nextSession).length === 0) {
@@ -52,12 +79,12 @@ export default function MissionResultScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId]);
+  }, [scheduleId, sessionId]);
 
   useFocusEffect(
     useCallback(() => {
-      refreshSession();
-    }, [refreshSession])
+      refreshResults();
+    }, [refreshResults])
   );
 
   useEffect(() => {
@@ -70,8 +97,8 @@ export default function MissionResultScreen() {
   }, [message]);
 
   const goTrip = () => {
-    if (scheduleId) {
-      router.replace({ pathname: '/trip/active', params: { scheduleId } });
+    if (currentResultIndex < resultSessions.length - 1) {
+      setCurrentResultIndex((index) => index + 1);
       return;
     }
 
@@ -96,7 +123,7 @@ export default function MissionResultScreen() {
           <View style={styles.footer}>
             <Text style={styles.savedText}>이 사진이 매거진에 담겨요</Text>
             <ScalePressable onPress={goTrip} pressedScale={0.97} style={styles.tripButton}>
-              <Text style={styles.tripButtonText}>피드로 돌아가기</Text>
+              <Text style={styles.tripButtonText}>{currentResultIndex < resultSessions.length - 1 ? '다음' : '목록으로 돌아가기'}</Text>
             </ScalePressable>
           </View>
         </View>
