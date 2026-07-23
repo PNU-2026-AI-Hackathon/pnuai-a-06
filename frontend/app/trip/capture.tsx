@@ -9,7 +9,7 @@ import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } fro
 import { MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { getAuthItem } from '@/lib/auth-storage';
+import { getAuthItem, MISSION_COMPLETION_PENDING_KEY, setAuthItem } from '@/lib/auth-storage';
 import { completeMissionSession, connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, revealMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
@@ -259,6 +259,7 @@ export default function MissionCaptureScreen() {
     }
 
     if (participantCount !== 1) {
+      setAuthItem(MISSION_COMPLETION_PENDING_KEY, JSON.stringify({ scheduleId, sessionId: passedSessionId }));
       setIsMissionComplete(true);
       setUploadMessage('AI 확인이 완료됐어요.');
       setReturnCountdown(3);

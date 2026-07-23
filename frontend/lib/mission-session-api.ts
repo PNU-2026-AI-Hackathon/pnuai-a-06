@@ -275,6 +275,46 @@ export function getPassedMissionSubmissions(session: MissionSession | null | und
   return session?.submissions.filter((submission) => submission.judgeStatus === 'PASSED' || (allowFailedJudgementsForTesting && (submission.judgeStatus === 'REJECTED' || submission.judgeStatus === 'ERROR'))) ?? [];
 }
 
+export function getReviewMissionSubmissions(session: MissionSession | null | undefined) {
+  return session?.submissions.filter((submission) => Boolean(submission.imageUrl) && submission.judgeStatus !== 'REJECTED' && submission.judgeStatus !== 'ERROR') ?? [];
+}
+
+function mergeSubmissionSnapshots(current: MissionSubmission, next: MissionSubmission) {
+  const comments = new Map<string, MissionSubmission['comments'][number]>();
+
+  current.comments.forEach((comment, index) => {
+    comments.set(comment.id || `${comment.userId}:${comment.content}:${index}`, comment);
+  });
+  next.comments.forEach((comment, index) => {
+    comments.set(comment.id || `${comment.userId}:${comment.content}:${index}`, comment);
+  });
+
+  return {
+    ...current,
+    ...next,
+    comments: Array.from(comments.values()),
+  };
+}
+
+export function mergeMissionSessions(current: MissionSession | null | undefined, next: MissionSession) {
+  if (!current || current.id !== next.id) {
+    return next;
+  }
+
+  const submissions = new Map<string, MissionSubmission>();
+  current.submissions.forEach((submission) => submissions.set(submission.id, submission));
+  next.submissions.forEach((submission) => {
+    const previous = submissions.get(submission.id);
+    submissions.set(submission.id, previous ? mergeSubmissionSnapshots(previous, submission) : submission);
+  });
+
+  return {
+    ...current,
+    ...next,
+    submissions: Array.from(submissions.values()),
+  };
+}
+
 function normalizeSession(data: ApiMissionSession): MissionSession {
   const sessionId = data.id ?? data.session_id;
 

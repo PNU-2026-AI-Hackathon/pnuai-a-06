@@ -1,12 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScalePressable } from '@/components/scale-pressable';
-import { getAuthItem } from '@/lib/auth-storage';
-import { getLatestMissionSession, type MissionSession } from '@/lib/mission-session-api';
+import { getAuthItem, MISSION_COMPLETION_PENDING_KEY, setAuthItem } from '@/lib/auth-storage';
+import { getLatestMissionSession, getMissionSession, type MissionSession } from '@/lib/mission-session-api';
 import { getCachedTripSchedules, listTripSchedules, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
 type CompletionAlert = {
@@ -16,15 +16,18 @@ type CompletionAlert = {
 };
 
 function hasAllMemberSubmissions(session: MissionSession, memberCount: number) {
-  if (memberCount <= 1 || session.status === 'VOTING' || session.status === 'COMPLETED') {
+  const expectedMemberCount = Math.max(session.members.length, memberCount);
+
+  if (expectedMemberCount <= 1) {
     return false;
   }
 
   const submittedUserIds = new Set(session.submissions.map((submission) => submission.userId).filter(Boolean));
-  return submittedUserIds.size >= memberCount;
+  return submittedUserIds.size >= expectedMemberCount;
 }
 
 export function MissionCompletionAlert() {
+  const pathname = usePathname();
   const [alert, setAlert] = useState<CompletionAlert | null>(null);
   const alertRef = useRef<CompletionAlert | null>(null);
   const queuedAlertsRef = useRef<CompletionAlert[]>([]);
@@ -61,9 +64,30 @@ export function MissionCompletionAlert() {
         }
       }
 
+      const pendingCompletion = getAuthItem(MISSION_COMPLETION_PENDING_KEY);
+      let pendingSessionId: string | null = null;
+
+      if (pendingCompletion) {
+        try {
+          pendingSessionId = (JSON.parse(pendingCompletion) as { sessionId?: string }).sessionId ?? null;
+        } catch {
+          pendingSessionId = null;
+        }
+      }
+
       const completionAlerts = (await Promise.all(schedulesRef.current.flatMap((schedule) => schedule.missions.map(async (mission) => {
         try {
-          const session = await getLatestMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+          const latestSession = await getLatestMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+          const session = pendingSessionId === latestSession.id ? await getMissionSession(latestSession.id) : latestSession;
+
+          if (pendingSessionId === session.id && pathname !== '/trip/active') {
+            return null;
+          }
+
+          if (pendingSessionId !== session.id && (session.status === 'VOTING' || session.status === 'COMPLETED')) {
+            return null;
+          }
+
           if (!hasAllMemberSubmissions(session, schedule.participants.length)) {
             return null;
           }
@@ -86,13 +110,17 @@ export function MissionCompletionAlert() {
 
         notifiedSessionIdsRef.current.add(sessionKey);
         queuedAlertsRef.current.push(nextAlert);
+
+        if (pendingSessionId === nextAlert.session.id) {
+          setAuthItem(MISSION_COMPLETION_PENDING_KEY, '');
+        }
       });
 
       showNextAlert();
     } finally {
       isCheckingRef.current = false;
     }
-  }, [showNextAlert]);
+  }, [pathname, showNextAlert]);
 
   useEffect(() => {
     void checkMissionCompletions();

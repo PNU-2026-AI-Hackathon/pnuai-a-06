@@ -11,12 +11,15 @@ import { getAuthItem } from '@/lib/auth-storage';
 import {
   connectMissionSessionSocket,
   getMissionSession,
-  getPassedMissionSubmissions,
+  getReviewMissionSubmissions,
+  mergeMissionSessions,
   MissionSessionApiError,
   postMissionSessionComment,
   readyMissionSession,
   type MissionSession,
 } from '@/lib/mission-session-api';
+
+const nextArrowIcon = require('../../assets/svg/active/next_arrow.svg');
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -48,7 +51,17 @@ export default function MissionReviewScreen() {
   const [message, setMessage] = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  const [transitionSubmissionId, setTransitionSubmissionId] = useState<string | null>(null);
+  const [transitionCountdown, setTransitionCountdown] = useState<number | null>(null);
+  const sessionRef = useRef<MissionSession | null>(null);
   const hasNavigatedForward = useRef(false);
+
+  const applySession = useCallback((nextSession: MissionSession) => {
+    const mergedSession = mergeMissionSessions(sessionRef.current, nextSession);
+    sessionRef.current = mergedSession;
+    setSession(mergedSession);
+    return mergedSession;
+  }, []);
 
   useEffect(() => {
     const showSubscription = Keyboard.addListener('keyboardDidShow', (event) => setKeyboardHeight(event.endCoordinates.height));
@@ -81,13 +94,14 @@ export default function MissionReviewScreen() {
 
     try {
       const nextSession = await getMissionSession(sessionId);
-      setSession(nextSession);
+      return applySession(nextSession);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '세션을 불러오지 못했어요.');
+      return null;
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId]);
+  }, [applySession, sessionId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -133,7 +147,7 @@ export default function MissionReviewScreen() {
     const socket = connectMissionSessionSocket(sessionId, {
       onMessage: ({ session: nextSession, type }) => {
         if (nextSession) {
-          setSession(nextSession);
+          applySession(nextSession);
         }
 
         if (nextSession?.status === 'COMPLETED') {
@@ -151,7 +165,7 @@ export default function MissionReviewScreen() {
     return () => {
       socket.close();
     };
-  }, [navigateToResult, navigateToVote, sessionId]);
+  }, [applySession, navigateToResult, navigateToVote, sessionId]);
 
   const myMember = useMemo(() => {
     return session?.members.find((member) => member.userId === currentUserId) ?? null;
@@ -162,13 +176,20 @@ export default function MissionReviewScreen() {
     return members.length > 0 && members.every((member) => Boolean(member.readyAt));
   }, [session?.members]);
 
-  const passedSubmissions = useMemo(() => getPassedMissionSubmissions(session), [session]);
+  const passedSubmissions = useMemo(() => getReviewMissionSubmissions(session), [session]);
   const requiredCommentsPerPhoto = Math.max(1, session?.members.length ?? 0);
   const currentSubmissionIndex = useMemo(() => {
+    if (transitionSubmissionId) {
+      const transitionIndex = passedSubmissions.findIndex((submission) => submission.id === transitionSubmissionId);
+      if (transitionIndex >= 0) {
+        return transitionIndex;
+      }
+    }
+
     const nextIndex = passedSubmissions.findIndex((submission) => submission.comments.length < requiredCommentsPerPhoto);
 
     return nextIndex >= 0 ? nextIndex : Math.max(0, passedSubmissions.length - 1);
-  }, [passedSubmissions, requiredCommentsPerPhoto]);
+  }, [passedSubmissions, requiredCommentsPerPhoto, transitionSubmissionId]);
 
   const currentSubmission = passedSubmissions[currentSubmissionIndex] ?? null;
   const commentRemainingMs = getRemainingMs(session?.commentEndsAt, now);
@@ -179,7 +200,28 @@ export default function MissionReviewScreen() {
   const isAllCommentsComplete = Boolean(session && passedSubmissions.length > 0 && session.members.length > 0 && requiredCommentCount > 0 && commentProgress >= requiredCommentCount);
 
   useEffect(() => {
-    if (!isAllCommentsComplete) {
+    if (!transitionSubmissionId || transitionCountdown === null) {
+      return;
+    }
+
+    if (transitionCountdown <= 0) {
+      setTransitionSubmissionId(null);
+      setTransitionCountdown(null);
+      setCommentText('');
+
+      if (isAllCommentsComplete) {
+        navigateToVote();
+      }
+
+      return;
+    }
+
+    const timer = setTimeout(() => setTransitionCountdown((countdown) => countdown === null ? null : countdown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [isAllCommentsComplete, navigateToVote, transitionCountdown, transitionSubmissionId]);
+
+  useEffect(() => {
+    if (!isAllCommentsComplete || transitionSubmissionId) {
       return;
     }
 
@@ -190,7 +232,7 @@ export default function MissionReviewScreen() {
     return () => {
       clearTimeout(timer);
     };
-  }, [isAllCommentsComplete, navigateToVote]);
+  }, [isAllCommentsComplete, navigateToVote, transitionSubmissionId]);
 
   const handleReady = async () => {
     if (!sessionId || isSubmitting) {
@@ -201,9 +243,9 @@ export default function MissionReviewScreen() {
       setIsSubmitting(true);
       setMessage('');
       const currentSession = await getMissionSession(sessionId);
-      setSession(currentSession);
+      applySession(currentSession);
       const nextSession = await readyMissionSession(sessionId);
-      setSession(nextSession);
+      applySession(nextSession);
     } catch (error) {
       if (error instanceof MissionSessionApiError && [400, 409, 422].includes(error.status)) {
         setMessage('READY 상태를 확인하고 있어요. 잠시 후 다시 눌러주세요.');
@@ -227,12 +269,25 @@ export default function MissionReviewScreen() {
     try {
       setIsSubmitting(true);
       setMessage('');
-      await postMissionSessionComment(sessionId, currentSubmission.id, content);
+      const submissionId = currentSubmission.id;
+      await postMissionSessionComment(sessionId, submissionId, content);
       setCommentText('');
-      await refreshSession();
+      const nextSession = await refreshSession();
+      const nextSubmission = nextSession?.submissions.find((submission) => submission.id === submissionId);
+
+      if (nextSubmission && nextSubmission.comments.length >= requiredCommentsPerPhoto) {
+        setTransitionSubmissionId(submissionId);
+        setTransitionCountdown(3);
+      }
     } catch (error) {
       if (error instanceof MissionSessionApiError && error.status === 409) {
-        await refreshSession();
+        const nextSession = await refreshSession();
+        const nextSubmission = nextSession?.submissions.find((submission) => submission.id === currentSubmission?.id);
+
+        if (nextSubmission && nextSubmission.comments.length >= requiredCommentsPerPhoto) {
+          setTransitionSubmissionId(nextSubmission.id);
+          setTransitionCountdown(3);
+        }
         return;
       }
 
@@ -264,8 +319,8 @@ export default function MissionReviewScreen() {
           <Ionicons color="#121820" name="chevron-back" size={25} />
         </ScalePressable>
         <Text numberOfLines={1} style={styles.title}>{session?.missionTitle ?? '미션'}</Text>
-        <ScalePressable accessibilityLabel="댓글 완료" onPress={goNext} pressedScale={0.9} style={styles.doneButton}>
-          <Ionicons color="#CBD0D3" name="checkmark" size={27} />
+        <ScalePressable accessibilityLabel="다음" onPress={goNext} pressedScale={0.9} style={styles.doneButton}>
+          <Image source={nextArrowIcon} style={styles.nextArrowIcon} contentFit="contain" />
         </ScalePressable>
       </View>
 
@@ -306,6 +361,13 @@ export default function MissionReviewScreen() {
           {currentSubmission ? (
             <View style={[styles.photoCard, keyboardHeight > 0 && styles.keyboardPhotoCard]}>
               <Image source={{ uri: currentSubmission.imageUrl }} style={styles.photo} contentFit="cover" />
+              {transitionSubmissionId === currentSubmission.id && transitionCountdown !== null ? (
+                <View style={styles.photoTransitionOverlay}>
+                  <View style={styles.transitionCheck}><Ionicons color="#FFFFFF" name="checkmark" size={24} /></View>
+                  <Text style={styles.transitionTitle}>모두 댓글 작성을 완료했어요!</Text>
+                  <Text style={styles.transitionDescription}>{transitionCountdown}초 뒤 다음 사진으로 넘어가요!</Text>
+                </View>
+              ) : null}
             </View>
           ) : (
             <View style={styles.centerState}>
@@ -376,6 +438,10 @@ const styles = StyleSheet.create({
     height: 42,
     justifyContent: 'center',
     width: 42
+  },
+  nextArrowIcon: {
+    height: 14,
+    width: 18,
   },
   centerState: {
     alignItems: 'center',
@@ -505,8 +571,43 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   photoCard: {
-    overflow: 'hidden',
     alignItems: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  photoTransitionOverlay: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(12, 24, 30, 0.52)',
+    borderRadius: 20,
+    bottom: 0,
+    justifyContent: 'center',
+    left: '5%',
+    position: 'absolute',
+    right: '5%',
+    top: 0,
+  },
+  transitionCheck: {
+    alignItems: 'center',
+    borderColor: '#FFFFFF',
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 46,
+    justifyContent: 'center',
+    marginBottom: 12,
+    width: 46,
+  },
+  transitionTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  transitionDescription: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 3,
+    textAlign: 'center',
   },
   keyboardPhotoCard: {
     alignSelf: 'center',

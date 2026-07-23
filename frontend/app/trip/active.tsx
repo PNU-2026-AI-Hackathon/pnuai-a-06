@@ -19,6 +19,7 @@ import {
   getLatestMissionSession,
   getMissionSession,
   getPassedMissionSubmissions,
+  mergeMissionSessions,
   isMissionSessionNotFoundError,
   joinMissionSession,
   revealMissionSession,
@@ -101,12 +102,17 @@ function isFinishedSession(session: MissionSession | undefined) {
 
 function hasAllMemberSubmissions(session: MissionSession, requiredMemberCount: number) {
   const submittedUserIds = new Set(session.submissions.map((submission) => submission.userId).filter(Boolean));
+  const expectedMemberCount = Math.max(session.members.length, requiredMemberCount);
 
-  return requiredMemberCount > 0 && submittedUserIds.size >= requiredMemberCount;
+  return expectedMemberCount > 0 && submittedUserIds.size >= expectedMemberCount;
 }
 
 function getFeedSubmissions(session: MissionSession | undefined) {
   return session?.submissions.filter((submission) => submission.judgeStatus !== 'REJECTED') ?? [];
+}
+
+function isFeedReadySession(session: MissionSession, requiredMemberCount: number) {
+  return hasAllMemberSubmissions(session, requiredMemberCount);
 }
 
 function isStartedMissionSession(session: MissionSession) {
@@ -234,6 +240,8 @@ export default function ActiveTripScreen() {
   const [busyScheduleMissionId, setBusyScheduleMissionId] = useState<string | null>(null);
   const [missionListMessage, setMissionListMessage] = useState('');
   const revealingSessionIds = useRef(new Set<string>());
+  const missionSessionsRef = useRef<Record<string, MissionSession>>({});
+  const revealedSessionsRef = useRef<Record<string, MissionSession>>({});
   const missions = useMemo(() => schedule?.missions ?? [], [schedule]);
   const activeMissions = missions.filter((mission) => !isCompletedScheduleMission(mission) && !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
   const scheduleDateOptions = useMemo(() => getScheduleDateOptions(schedule), [schedule]);
@@ -266,37 +274,44 @@ export default function ActiveTripScreen() {
   const rememberFeedSession = useCallback((nextSession: MissionSession, fallbackScheduleMissionId?: string) => {
     const scheduleMissionId = nextSession.scheduleMissionId || fallbackScheduleMissionId;
 
-    if (scheduleMissionId) {
-      setMissionSessions((currentSessions) => ({
-        ...currentSessions,
-        [scheduleMissionId]: {
-          ...nextSession,
-          scheduleMissionId,
-        },
-      }));
-    }
-
-    const shouldShowInFeed = scheduleMissionId && hasAllMemberSubmissions(nextSession, requiredScheduleMemberCount) && getFeedSubmissions(nextSession).length > 0;
-
-    if (!shouldShowInFeed || !scheduleMissionId) {
+    if (!scheduleMissionId) {
       return;
     }
 
-    setRevealedSessions((currentSessions) => {
-      const normalizedSession = {
-        ...nextSession,
-        scheduleMissionId,
-      };
-      const nextSessions = {
-        ...currentSessions,
-        [scheduleMissionId]: normalizedSession,
-      };
+    const normalizedIncomingSession = {
+      ...nextSession,
+      scheduleMissionId,
+    };
+    const mergedMissionSession = mergeMissionSessions(missionSessionsRef.current[scheduleMissionId], normalizedIncomingSession);
 
+    missionSessionsRef.current = {
+      ...missionSessionsRef.current,
+      [scheduleMissionId]: mergedMissionSession,
+    };
+    setMissionSessions((currentSessions) => ({
+      ...currentSessions,
+      [scheduleMissionId]: mergeMissionSessions(currentSessions[scheduleMissionId], mergedMissionSession),
+    }));
+
+    const shouldShowInFeed = isFeedReadySession(mergedMissionSession, requiredScheduleMemberCount) && getFeedSubmissions(mergedMissionSession).length > 0;
+
+    if (!shouldShowInFeed) {
+      return;
+    }
+
+    const normalizedSession = mergeMissionSessions(revealedSessionsRef.current[scheduleMissionId], mergedMissionSession);
+    const nextRevealedSessions = {
+      ...revealedSessionsRef.current,
+      [scheduleMissionId]: normalizedSession,
+    };
+
+    revealedSessionsRef.current = nextRevealedSessions;
+    setRevealedSessions(() => {
       if (scheduleId) {
-        saveCachedRevealedSessions(scheduleId, nextSessions);
+        saveCachedRevealedSessions(scheduleId, nextRevealedSessions);
       }
 
-      return nextSessions;
+      return nextRevealedSessions;
     });
   }, [requiredScheduleMemberCount, scheduleId]);
 
@@ -356,11 +371,15 @@ export default function ActiveTripScreen() {
       setSchedule(null);
       setRevealedSessions({});
       setMissionSessions({});
+      revealedSessionsRef.current = {};
+      missionSessionsRef.current = {};
       setMessage('일정 정보가 없습니다.');
       return;
     }
 
     const cachedRevealedSessions = readCachedRevealedSessions(scheduleId);
+    revealedSessionsRef.current = cachedRevealedSessions;
+    missionSessionsRef.current = cachedRevealedSessions;
     setRevealedSessions(cachedRevealedSessions);
     setMissionSessions(cachedRevealedSessions);
 
@@ -572,6 +591,7 @@ export default function ActiveTripScreen() {
         delete nextSessions[mission.scheduleMissionId];
         return nextSessions;
       });
+      delete missionSessionsRef.current[mission.scheduleMissionId];
       setRevealedSessions((currentSessions) => {
         const nextSessions = { ...currentSessions };
         delete nextSessions[mission.scheduleMissionId];
@@ -580,6 +600,7 @@ export default function ActiveTripScreen() {
         }
         return nextSessions;
       });
+      delete revealedSessionsRef.current[mission.scheduleMissionId];
       setMissionListMessage(`${mission.title} 미션을 삭제했어요.`);
     } catch (error) {
       setMissionListMessage(error instanceof Error ? error.message : '미션을 삭제하지 못했어요.');
@@ -673,7 +694,7 @@ export default function ActiveTripScreen() {
   };
 
   const getMissionPhotos = (mission: TripScheduleMission) => {
-    const feedSession = revealedSessions[mission.scheduleMissionId];
+    const feedSession = missionSessions[mission.scheduleMissionId] ?? revealedSessions[mission.scheduleMissionId];
     const isMissionResultComplete = feedSession?.status === 'COMPLETED';
 
     return getFeedSubmissions(feedSession).map((submission) => ({
@@ -684,7 +705,7 @@ export default function ActiveTripScreen() {
   };
 
   const openFeedSession = (targetSession: MissionSession | undefined) => {
-    if (!targetSession?.id) {
+    if (!targetSession?.id || !isFeedReadySession(targetSession, requiredScheduleMemberCount)) {
       return;
     }
 
@@ -720,7 +741,11 @@ export default function ActiveTripScreen() {
   };
 
   const completedMissionFeeds = missions
-    .map((mission) => ({ mission, photos: getMissionPhotos(mission), session: revealedSessions[mission.scheduleMissionId] }))
+    .map((mission) => {
+      const session = missionSessions[mission.scheduleMissionId] ?? revealedSessions[mission.scheduleMissionId];
+
+      return { mission, photos: getMissionPhotos(mission), session };
+    })
     .filter((item) => item.photos.length > 0);
   const hasSavedMissions = missions.length > 0;
 
@@ -807,8 +832,11 @@ export default function ActiveTripScreen() {
               <Text style={styles.emptyText}>카메라로 미션 사진을 찍으면 여기에 보여요.</Text>
             </View>
           ) : (
-            completedMissionFeeds.map(({ mission, photos, session: feedSession }) => (
-              <ScalePressable key={mission.scheduleMissionId} onPress={() => openFeedSession(feedSession)} pressedScale={0.99} style={styles.feedMissionItem}>
+            completedMissionFeeds.map(({ mission, photos, session: feedSession }) => {
+              const canOpenFeed = Boolean(feedSession && isFeedReadySession(feedSession, requiredScheduleMemberCount));
+
+              return (
+              <ScalePressable disabled={!canOpenFeed} key={mission.scheduleMissionId} onPress={() => openFeedSession(feedSession)} pressedScale={0.99} style={styles.feedMissionItem}>
                 <View style={styles.feedIcon}>
                   <Image source={activeCameraIcon} style={styles.feedCameraIcon} contentFit="contain" />
                 </View>
@@ -822,7 +850,8 @@ export default function ActiveTripScreen() {
                   </ScrollView>
                 </View>
               </ScalePressable>
-            ))
+              );
+            })
           )}
         </View>
       </ScrollView>

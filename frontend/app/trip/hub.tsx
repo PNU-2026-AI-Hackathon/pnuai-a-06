@@ -124,7 +124,7 @@ function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEdi
   const dragY = useRef(new Animated.Value(0)).current;
   const previewY = useRef(new Animated.Value(0)).current;
   const isDeleting = deletingScheduleId === schedule.scheduleId;
-  const canDelete = schedule.permissions.canDeleteSchedule && !isClosedSchedule(schedule) && !isInProgressSchedule(schedule);
+  const canDelete = schedule.permissions.canDeleteSchedule && !isClosedSchedule(schedule);
   const isCreator = isCreatorSchedule(schedule);
   const isClosed = isClosedSchedule(schedule);
   const isEditingRef = useRef(isEditing);
@@ -285,8 +285,8 @@ export default function TripHubScreen() {
   };
 
   const deleteSchedule = async (schedule: TripSchedule) => {
-    if (!schedule.permissions.canDeleteSchedule || isClosedSchedule(schedule) || isInProgressSchedule(schedule)) {
-      setMessage('진행 중이거나 종료된 일정은 삭제할 수 없습니다.');
+    if (!schedule.permissions.canDeleteSchedule || isClosedSchedule(schedule)) {
+      setMessage('종료된 일정은 삭제할 수 없습니다.');
       return;
     }
 
@@ -307,8 +307,8 @@ export default function TripHubScreen() {
   };
 
   const confirmDeleteSchedule = (schedule: TripSchedule) => {
-    if (!schedule.permissions.canDeleteSchedule || isClosedSchedule(schedule) || isInProgressSchedule(schedule)) {
-      setMessage('진행 중이거나 종료된 일정은 삭제할 수 없습니다.');
+    if (!schedule.permissions.canDeleteSchedule || isClosedSchedule(schedule)) {
+      setMessage('종료된 일정은 삭제할 수 없습니다.');
       return;
     }
 
