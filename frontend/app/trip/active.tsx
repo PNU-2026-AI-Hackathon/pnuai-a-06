@@ -220,6 +220,21 @@ function getTripDayLabel(schedule: TripSchedule | null) {
 function getMissionDateLabel(date: string) {
   return date === 'UNPLANNED' ? '날짜 미정' : date;
 }
+
+function getScheduleSyncSignature(schedule: TripSchedule) {
+  return JSON.stringify({
+    endDate: schedule.endDate,
+    missions: schedule.missions.map((mission) => ({
+      plannedDate: mission.plannedDate,
+      scheduleMissionId: mission.scheduleMissionId,
+      status: mission.status,
+      title: mission.title,
+    })),
+    participants: schedule.participants.map((participant) => participant.id),
+    startDate: schedule.startDate,
+  });
+}
+
 export default function ActiveTripScreen() {
   const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
@@ -463,6 +478,55 @@ export default function ActiveTripScreen() {
   }, [initialSessionId, refreshSession, rememberFeedSession, scheduleId]);
 
   useFocusEffect(refreshSchedule);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!scheduleId) {
+        return undefined;
+      }
+
+      let isActive = true;
+      let isRequestInFlight = false;
+
+      const syncSchedule = async () => {
+        if (isRequestInFlight) {
+          return;
+        }
+
+        isRequestInFlight = true;
+
+        try {
+          const nextSchedule = await getTripSchedule(scheduleId);
+
+          if (!isActive) {
+            return;
+          }
+
+          setSchedule((currentSchedule) => {
+            if (currentSchedule && getScheduleSyncSignature(currentSchedule) === getScheduleSyncSignature(nextSchedule)) {
+              return currentSchedule;
+            }
+
+            return nextSchedule;
+          });
+        } catch {
+          // Keep the last rendered schedule when a background sync temporarily fails.
+        } finally {
+          isRequestInFlight = false;
+        }
+      };
+
+      void syncSchedule();
+      const syncTimer = setInterval(() => {
+        void syncSchedule();
+      }, 1000);
+
+      return () => {
+        isActive = false;
+        clearInterval(syncTimer);
+      };
+    }, [scheduleId])
+  );
 
   const closeInviteSheet = () => {
     if (isSharingInvite) {

@@ -54,10 +54,31 @@ export default function MissionReviewScreen() {
   const [transitionSubmissionId, setTransitionSubmissionId] = useState<string | null>(null);
   const [transitionCountdown, setTransitionCountdown] = useState<number | null>(null);
   const sessionRef = useRef<MissionSession | null>(null);
+  const transitionSubmissionIdRef = useRef<string | null>(null);
   const hasNavigatedForward = useRef(false);
 
   const applySession = useCallback((nextSession: MissionSession) => {
-    const mergedSession = mergeMissionSessions(sessionRef.current, nextSession);
+    const previousSession = sessionRef.current;
+    const mergedSession = mergeMissionSessions(previousSession, nextSession);
+
+    if (previousSession?.id === mergedSession.id && transitionSubmissionIdRef.current === null) {
+      const requiredComments = Math.max(1, mergedSession.members.length);
+      const newlyCompletedSubmission = mergedSession.submissions.find((submission) => {
+        if (submission.comments.length < requiredComments) {
+          return false;
+        }
+
+        const previousSubmission = previousSession.submissions.find((item) => item.id === submission.id);
+        return !previousSubmission || previousSubmission.comments.length < requiredComments;
+      });
+
+      if (newlyCompletedSubmission) {
+        transitionSubmissionIdRef.current = newlyCompletedSubmission.id;
+        setTransitionSubmissionId(newlyCompletedSubmission.id);
+        setTransitionCountdown(3);
+      }
+    }
+
     sessionRef.current = mergedSession;
     setSession(mergedSession);
     return mergedSession;
@@ -205,6 +226,7 @@ export default function MissionReviewScreen() {
     }
 
     if (transitionCountdown <= 0) {
+      transitionSubmissionIdRef.current = null;
       setTransitionSubmissionId(null);
       setTransitionCountdown(null);
       setCommentText('');
@@ -269,25 +291,12 @@ export default function MissionReviewScreen() {
     try {
       setIsSubmitting(true);
       setMessage('');
-      const submissionId = currentSubmission.id;
-      await postMissionSessionComment(sessionId, submissionId, content);
+      await postMissionSessionComment(sessionId, currentSubmission.id, content);
       setCommentText('');
-      const nextSession = await refreshSession();
-      const nextSubmission = nextSession?.submissions.find((submission) => submission.id === submissionId);
-
-      if (nextSubmission && nextSubmission.comments.length >= requiredCommentsPerPhoto) {
-        setTransitionSubmissionId(submissionId);
-        setTransitionCountdown(3);
-      }
+      await refreshSession();
     } catch (error) {
       if (error instanceof MissionSessionApiError && error.status === 409) {
-        const nextSession = await refreshSession();
-        const nextSubmission = nextSession?.submissions.find((submission) => submission.id === currentSubmission?.id);
-
-        if (nextSubmission && nextSubmission.comments.length >= requiredCommentsPerPhoto) {
-          setTransitionSubmissionId(nextSubmission.id);
-          setTransitionCountdown(3);
-        }
+        await refreshSession();
         return;
       }
 
