@@ -2,33 +2,72 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMe } from '@/lib/auth-api';
+import { getLatestMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
+import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
+import { ClipPath, Defs, Ellipse, Image as SvgImage, Svg } from 'react-native-svg';
 
 const splashText = require('../../assets/svg/logo_text.svg');
+const magazineTitle = require('../../assets/svg/magazine/JUST THE TWO OF US.svg');
+const magazineNumber = require('../../assets/svg/magazine/No.05.svg');
+const singleMagazineTitle = require('../../assets/svg/magazine/THE Starry Night.svg');
+const singleMagazineNumber = require('../../assets/svg/magazine/No.02.svg');
+const magazineBlackEllipse = require('../../assets/svg/magazine/black_ellipse.svg');
+
+function getDateKey(date: string | undefined) {
+  if (!date) {
+    return null;
+  }
+
+  const match = date.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (!match) {
+    return null;
+  }
+
+  return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+}
+
+function isClosedSchedule(schedule: TripSchedule) {
+  const lastDate = getDateKey(schedule.endDate ?? schedule.startDate);
+  if (!lastDate) {
+    return false;
+  }
+
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return lastDate < todayKey;
+}
+
+function getScheduleEndTime(schedule: TripSchedule) {
+  const lastDate = getDateKey(schedule.endDate ?? schedule.startDate);
+  return lastDate ? new Date(`${lastDate}T00:00:00`).getTime() : 0;
+}
+
+function getResultPhotoUrl(session: MissionSession) {
+  if (session.status !== 'REVEALED' && session.status !== 'COMPLETED') {
+    return null;
+  }
+
+  const passedSubmissions = getPassedMissionSubmissions(session);
+  const savedWinner = session.winnerUserId ? passedSubmissions.find((submission) => submission.userId === session.winnerUserId) : null;
+  const winnerSubmission = savedWinner ?? [...passedSubmissions].sort((left, right) => right.likeCount - left.likeCount)[0];
+
+  return winnerSubmission?.imageUrl ?? null;
+}
 
 export default function MainScreen() {
   const {
-    availableWidth,
     bottomActionInset,
-    height,
     horizontalPadding,
-    isTallScreen,
     topInset,
   } = useResponsiveLayout();
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
-  const cardGap = 10;
-  const smallCardWidth = (availableWidth - cardGap) / 2;
-  const smallCardHeight = isTallScreen ? 238 : 210;
-  const headerHeight = 56;
-  const verticalGaps = 18 + 12;
-  const availableMagazineHeight =
-    height - topInset - bottomActionInset - headerHeight - smallCardHeight - verticalGaps;
-  const magazineHeight = Math.max(300, Math.min(isTallScreen ? 520 : 440, availableMagazineHeight));
+  const [magazinePhotoUrls, setMagazinePhotoUrls] = useState<string[]>([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -54,6 +93,61 @@ export default function MainScreen() {
     }, []),
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const loadLatestMagazine = async () => {
+        try {
+          let schedules: TripSchedule[];
+
+          try {
+            schedules = await listTripSchedules();
+          } catch {
+            schedules = getCachedTripSchedules();
+          }
+
+          const latestClosedSchedule = schedules
+            .filter(isClosedSchedule)
+            .sort((left, right) => getScheduleEndTime(right) - getScheduleEndTime(left))[0];
+
+          if (!latestClosedSchedule) {
+            if (isActive) {
+              setMagazinePhotoUrls([]);
+            }
+            return;
+          }
+
+          const photoUrls = (await Promise.all(latestClosedSchedule.missions.map(async (mission) => {
+            try {
+              const session = await getLatestMissionSession(latestClosedSchedule.scheduleId, mission.scheduleMissionId);
+              return getResultPhotoUrl(session);
+            } catch {
+              return null;
+            }
+          }))).filter((photoUrl): photoUrl is string => Boolean(photoUrl)).slice(0, 3);
+
+          if (isActive) {
+            setMagazinePhotoUrls(photoUrls);
+          }
+        } catch {
+          if (isActive) {
+            setMagazinePhotoUrls([]);
+          }
+        }
+      };
+
+      void loadLatestMagazine();
+
+      return () => {
+        isActive = false;
+      };
+    }, []),
+  );
+
+  const isSingleMagazine = magazinePhotoUrls.length === 1;
+  const magazinePhotoSlots = [0, 1, 2].map((index) => magazinePhotoUrls[index] ?? null);
+
   return (
     <View
       style={[
@@ -72,46 +166,69 @@ export default function MainScreen() {
 
       <Pressable
         onPress={() => router.push('/magazine/detail')}
-        style={[styles.magazineCard, { height: magazineHeight }]}>
-        <Text style={styles.magazineText}>매거진 전시대</Text>
+        style={[styles.magazineCard, isSingleMagazine && styles.singleMagazineFrame]}>
+        {isSingleMagazine ? (
+          <View style={styles.singleMagazineInner}>
+            <Image source={singleMagazineTitle} style={styles.singleMagazineTitle} contentFit="contain" />
+            <Svg height="100%" style={styles.singleMagazinePhoto} viewBox="0 0 100 100" width="100%">
+              <Defs>
+                <ClipPath id="singleMagazinePhotoClip">
+                  <Ellipse cx="50" cy="51" rx="34" ry="52" transform="rotate(28 50 51)" />
+                </ClipPath>
+              </Defs>
+              <SvgImage
+                clipPath="url(#singleMagazinePhotoClip)"
+                height="100"
+                href={{ uri: magazinePhotoUrls[0] }}
+                preserveAspectRatio="xMidYMid slice"
+                width="100"
+                x="0"
+                y="0"
+              />
+            </Svg>
+            <Image source={magazineBlackEllipse} style={styles.singleMagazineDotTop} />
+            <Image source={magazineBlackEllipse} style={styles.singleMagazineDotBottom} />
+            <Image source={{ uri: magazinePhotoUrls[0] }} style={styles.singleMagazinePhotoBubble} contentFit="cover" />
+            <Image source={singleMagazineNumber} style={styles.singleMagazineNumber} contentFit="contain" />
+          </View>
+        ) : (
+          <>
+            <View style={styles.magazineCopy}>
+              <Image source={magazineTitle} style={styles.magazineTitle} contentFit="contain" />
+              <Image source={magazineNumber} style={styles.magazineNumber} contentFit="contain" />
+            </View>
+            <View style={styles.magazinePhotos}>
+              {magazinePhotoSlots.map((photoUrl, index) => photoUrl ? (
+                <Image key={`${photoUrl}-${index}`} source={{ uri: photoUrl }} style={styles.magazinePhoto} contentFit="cover" />
+              ) : (
+                <View key={`magazine-photo-placeholder-${index}`} style={styles.magazinePhotoPlaceholder} />
+              ))}
+            </View>
+          </>
+        )}
       </Pressable>
-
-      <View style={styles.bottomGrid}>
-        <Pressable
-          onPress={() => router.push('/map')}
-          style={[styles.smallCard, { minHeight: smallCardHeight, width: smallCardWidth }]}>
-          <Text style={styles.cardTitle}>여행지 탐색</Text>
-          <Text style={styles.cardSubtitle}>미션 확인하기</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => router.push('/trip/hub')}
-          style={[styles.smallCard, { minHeight: smallCardHeight, width: smallCardWidth }]}>
-          <Text style={styles.cardTitle}>일정 관리</Text>
-          <Text style={styles.cardSubtitle}>여행 시작하기</Text>
-        </Pressable>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#e9f4f8',
+    backgroundColor: '#FFFFFF',
     flex: 1,
   },
   header: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 18,
+    marginBottom: 27,
   },
   brandText: {
     color: '#000000',
     fontSize: 14,
   },
   logoText: {
-    height: 30,
-    width: 86,
+    height: 23,
+    width: 72,
   },
   profileButton: {
     borderRadius: 999,
@@ -120,36 +237,101 @@ const styles = StyleSheet.create({
     width: 56,
   },
   magazineCard: {
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 22,
-    justifyContent: 'center',
-    marginBottom: 12,
+    backgroundColor: '#224958',
+    borderRadius: 20,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 16,
+    overflow: 'hidden',
+    paddingHorizontal: 32,
+    paddingVertical: 32,
     width: '100%',
   },
-  magazineText: {
-    color: '#000000',
-    fontSize: 14,
+  singleMagazineFrame: {
+    backgroundColor: '#EAEAEA',
+    gap: 0,
+    padding: 0,
   },
-  bottomGrid: {
-    flexDirection: 'row',
+  singleMagazineInner: {
+    backgroundColor: '#EAEAEA',
+    borderRadius: 20,
+    flex: 1,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  singleMagazineTitle: {
+    aspectRatio: 206 / 63,
+    left: '2%',
+    position: 'absolute',
+    top: '1%',
+    width: '80%',
+    zIndex: 1,
+  },
+  singleMagazinePhoto: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
+  },
+  singleMagazineDotTop: {
+    height: 30,
+    left: '2%',
+    position: 'absolute',
+    top: '23%',
+    width: 30,
+    zIndex: 1,
+  },
+  singleMagazineDotBottom: {
+    bottom: '15%',
+    height: 25,
+    position: 'absolute',
+    right: '2%',
+    width: 25,
+    zIndex: 1,
+  },
+  singleMagazinePhotoBubble: {
+    borderRadius: 999,
+    bottom: '1%',
+    height: 60,
+    left: '2%',
+    position: 'absolute',
+    width: 60,
+    zIndex: 1,
+  },
+  singleMagazineNumber: {
+    aspectRatio: 94 / 27,
+    bottom: '1%',
+    position: 'absolute',
+    right: '2%',
+    width: '35%',
+    zIndex: 1,
+  },
+  magazineCopy: {
+    alignItems: 'flex-start',
+    flex: 1,
+    justifyContent: 'space-between',
+    minWidth: 0,
+  },
+  magazineTitle: {
+    aspectRatio: 161 / 105,
+    maxWidth: 205,
+    width: '100%',
+  },
+  magazineNumber: {
+    height: 34,
+    width: 120,
+  },
+  magazinePhotos: {
     gap: 10,
+    width: '37%',
   },
-  smallCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 22,
-    paddingHorizontal: 24,
-    paddingTop: 32,
+  magazinePhoto: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
   },
-  cardTitle: {
-    color: '#24394b',
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  cardSubtitle: {
-    color: '#adb3b7',
-    fontSize: 14,
-    marginTop: 10,
+  magazinePhotoPlaceholder: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
   },
 });

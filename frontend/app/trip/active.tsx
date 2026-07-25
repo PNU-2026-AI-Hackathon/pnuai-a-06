@@ -486,14 +486,15 @@ export default function ActiveTripScreen() {
       }
 
       let isActive = true;
-      let isRequestInFlight = false;
+      let isScheduleRequestInFlight = false;
+      let isActiveSessionRequestInFlight = false;
 
       const syncSchedule = async () => {
-        if (isRequestInFlight) {
+        if (isScheduleRequestInFlight) {
           return;
         }
 
-        isRequestInFlight = true;
+        isScheduleRequestInFlight = true;
 
         try {
           const nextSchedule = await getTripSchedule(scheduleId);
@@ -512,20 +513,42 @@ export default function ActiveTripScreen() {
         } catch {
           // Keep the last rendered schedule when a background sync temporarily fails.
         } finally {
-          isRequestInFlight = false;
+          isScheduleRequestInFlight = false;
+        }
+      };
+
+      const syncActiveMissionSession = async () => {
+        if (isActiveSessionRequestInFlight) {
+          return;
+        }
+
+        isActiveSessionRequestInFlight = true;
+
+        try {
+          const activeSession = await getActiveMissionSession(scheduleId);
+
+          if (isActive) {
+            rememberFeedSession(activeSession);
+          }
+        } catch {
+          // No active mission session is a valid state while the trip is idle.
+        } finally {
+          isActiveSessionRequestInFlight = false;
         }
       };
 
       void syncSchedule();
+      void syncActiveMissionSession();
       const syncTimer = setInterval(() => {
         void syncSchedule();
+        void syncActiveMissionSession();
       }, 1000);
 
       return () => {
         isActive = false;
         clearInterval(syncTimer);
       };
-    }, [scheduleId])
+    }, [rememberFeedSession, scheduleId])
   );
 
   const closeInviteSheet = () => {
