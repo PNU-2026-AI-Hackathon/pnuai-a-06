@@ -296,10 +296,28 @@ function mergeSubmissionSnapshots(current: MissionSubmission, next: MissionSubmi
   };
 }
 
+const missionSessionStatusOrder: MissionSessionStatus[] = ['WAITING', 'READY', 'SHOOTING', 'UPLOADING', 'VOTING', 'REVEALED', 'COMPLETED'];
+
+function getMissionSessionStatusRank(status: MissionSessionStatus) {
+  return missionSessionStatusOrder.indexOf(status);
+}
+
 export function mergeMissionSessions(current: MissionSession | null | undefined, next: MissionSession) {
   if (!current || current.id !== next.id) {
     return next;
   }
+
+  const members = new Map<string, MissionSession['members'][number]>();
+  current.members.forEach((member) => members.set(member.userId, member));
+  next.members.forEach((member) => {
+    const previous = members.get(member.userId);
+    members.set(member.userId, {
+      ...previous,
+      ...member,
+      joinedAt: member.joinedAt ?? previous?.joinedAt,
+      readyAt: member.readyAt ?? previous?.readyAt ?? null,
+    });
+  });
 
   const submissions = new Map<string, MissionSubmission>();
   current.submissions.forEach((submission) => submissions.set(submission.id, submission));
@@ -308,9 +326,14 @@ export function mergeMissionSessions(current: MissionSession | null | undefined,
     submissions.set(submission.id, previous ? mergeSubmissionSnapshots(previous, submission) : submission);
   });
 
+  const currentStatusRank = getMissionSessionStatusRank(current.status);
+  const nextStatusRank = getMissionSessionStatusRank(next.status);
+
   return {
     ...current,
     ...next,
+    members: Array.from(members.values()),
+    status: currentStatusRank > nextStatusRank ? current.status : next.status,
     submissions: Array.from(submissions.values()),
   };
 }

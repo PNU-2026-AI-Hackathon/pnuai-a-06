@@ -188,6 +188,44 @@ export default function MissionReviewScreen() {
     };
   }, [applySession, navigateToResult, navigateToVote, sessionId]);
 
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    let isActive = true;
+
+    const refreshReadyState = async () => {
+      const currentSession = sessionRef.current;
+      const allMembersReady = Boolean(currentSession && currentSession.members.length > 0 && currentSession.members.every((member) => Boolean(member.readyAt)));
+      const sessionHasMovedForward = currentSession && !['WAITING', 'READY'].includes(currentSession.status);
+
+      if (allMembersReady || sessionHasMovedForward) {
+        return;
+      }
+
+      try {
+        const nextSession = await getMissionSession(sessionId);
+        if (isActive) {
+          applySession(nextSession);
+        }
+      } catch {
+        // The socket and the next polling cycle can recover from a temporary request failure.
+      }
+    };
+
+    const refreshTimer = setInterval(() => {
+      void refreshReadyState();
+    }, 1000);
+
+    void refreshReadyState();
+
+    return () => {
+      isActive = false;
+      clearInterval(refreshTimer);
+    };
+  }, [applySession, sessionId]);
+
   const myMember = useMemo(() => {
     return session?.members.find((member) => member.userId === currentUserId) ?? null;
   }, [currentUserId, session?.members]);
@@ -620,7 +658,7 @@ const styles = StyleSheet.create({
   },
   keyboardPhotoCard: {
     alignSelf: 'center',
-    width: '78%',
+    width: '62%',
   },
   photo: {
     aspectRatio: 3 / 4,
