@@ -6,11 +6,19 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
+import { MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { revealMissionSession, uploadMissionSessionPhoto } from '@/lib/mission-session-api';
+import { getAuthItem, MISSION_COMPLETION_PENDING_KEY, setAuthItem } from '@/lib/auth-storage';
+import { completeMissionSession, connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, revealMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
+import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
-const missionFrame = require('../../assets/svg/mission_level/standard_frame.svg');
+const cameraBackIcon = require('../../assets/svg/camera/back.svg');
+const cameraFlashOffIcon = require('../../assets/svg/camera/flash_off.svg');
+const cameraFlashOnIcon = require('../../assets/svg/camera/flash_on.svg');
+const cameraSwitchIcon = require('../../assets/svg/camera/autorenew.svg');
+const cameraTimerIcon = require('../../assets/svg/camera/time_stamp.svg');
+
 const MISSION_CARD_SOURCE_WIDTH = 164;
 const MISSION_CARD_SOURCE_HEIGHT = 209;
 const MISSION_CARD_WIDTH = 350;
@@ -25,6 +33,24 @@ function wait(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function formatRemainingTime(ms: number) {
+  const safeMs = Math.max(0, ms);
+  const totalSeconds = Math.ceil(safeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getRemainingMs(deadline: string | null | undefined, now: number) {
+  if (!deadline) {
+    return null;
+  }
+
+  const deadlineTime = new Date(deadline).getTime();
+  return Number.isFinite(deadlineTime) ? deadlineTime - now : null;
 }
 
 async function runWithNetworkRetry<T>(task: () => Promise<T>, retries = 1): Promise<T> {
@@ -42,14 +68,51 @@ async function runWithNetworkRetry<T>(task: () => Promise<T>, retries = 1): Prom
   }
 }
 
+
+function isDuplicateSubmissionError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+
+  return message.includes('이미') || message.includes('already') || message.includes('duplicate') || message.includes('submitted') || message.includes('한 번');
+}
+
+function isWaitingJudgementStatus(status: MissionJudgementStatus | null | undefined) {
+  return status === 'PENDING' || status === 'PROCESSING' || status === 'REVIEW';
+}
+
+function isRetryableJudgementStatus(status: MissionJudgementStatus | null | undefined) {
+  return status === 'REJECTED' || status === 'ERROR';
+}
+
+function getJudgementWaitingMessage(status: MissionJudgementStatus | null | undefined) {
+  return status === 'PROCESSING' ? '사진을 확인하고 있어요.' : 'AI가 미션 사진을 확인하고 있어요.';
+}
+
+function getMyLatestSubmission(session: MissionSession, currentUserId: string | null, submittedSubmissionId: string | null) {
+  if (submittedSubmissionId) {
+    const submitted = session.submissions.find((submission) => submission.id === submittedSubmissionId);
+
+    if (submitted) {
+      return submitted;
+    }
+  }
+
+  if (!currentUserId) {
+    return null;
+  }
+
+  return [...session.submissions].reverse().find((submission) => submission.userId === currentUserId) ?? null;
+}
+
 export default function MissionCaptureScreen() {
-  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const params = useLocalSearchParams<{ scheduleId?: string | string[]; scheduleMissionId?: string | string[]; sessionId?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
+  const scheduleMissionId = getParamValue(params.scheduleMissionId);
   const sessionId = getParamValue(params.sessionId);
   const cameraRef = useRef<CameraView | null>(null);
   const missionCardTranslateY = useRef(new Animated.Value(0)).current;
   const missionCardOffsetY = useRef(0);
-  const { bottomSafeInset, height, topSafeInset } = useResponsiveLayout();
+  const isFinishingSoloMission = useRef(false);
+  const { bottomSafeInset, height, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>('back');
   const [flash, setFlash] = useState<FlashMode>('off');
@@ -59,6 +122,17 @@ export default function MissionCaptureScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
+  const [judgementSessionId, setJudgementSessionId] = useState<string | null>(null);
+  const [submittedSubmissionId, setSubmittedSubmissionId] = useState<string | null>(null);
+  const [judgeReason, setJudgeReason] = useState<string | null>(null);
+  const [judgeStatus, setJudgeStatus] = useState<MissionJudgementStatus | null>(null);
+  const [judgementDotCount, setJudgementDotCount] = useState(1);
+  const [session, setSession] = useState<MissionSession | null>(null);
+  const [mission, setMission] = useState<TripScheduleMission | null>(null);
+  const [scheduleParticipantCount, setScheduleParticipantCount] = useState<number | null>(null);
+  const [isMissionLoading, setIsMissionLoading] = useState(false);
+  const [missionError, setMissionError] = useState('');
+  const [now, setNow] = useState(() => Date.now());
   const missionCardCollapsedBottom = bottomSafeInset - (MISSION_CARD_HEIGHT - MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT);
   const missionCardExpandedY = missionCardCollapsedBottom - height / 2 + MISSION_CARD_HEIGHT / 2;
   const backdropOpacity = missionCardTranslateY.interpolate({
@@ -68,6 +142,251 @@ export default function MissionCaptureScreen() {
   });
 
   const hasPermission = permission?.granted;
+  const shootingRemainingMs = getRemainingMs(session?.shootingEndsAt ?? session?.photoUploadEndsAt, now);
+  const uploadRemainingMs = getRemainingMs(session?.photoUploadEndsAt ?? session?.shootingEndsAt, now);
+  const isShootingExpired = shootingRemainingMs !== null && shootingRemainingMs <= 0;
+  const isUploadExpired = uploadRemainingMs !== null && uploadRemainingMs <= 0;
+  const isWaitingForJudgement = isWaitingJudgementStatus(judgeStatus);
+  const needsRetakeAfterJudgement = isRetryableJudgementStatus(judgeStatus);
+
+  useEffect(() => {
+    if (!isWaitingForJudgement) {
+      setJudgementDotCount(1);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setJudgementDotCount((currentCount) => currentCount >= 3 ? 1 : currentCount + 1);
+    }, 450);
+
+    return () => clearInterval(timer);
+  }, [isWaitingForJudgement]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadSessionTimer() {
+      try {
+        if (sessionId) {
+          const nextSession = await getMissionSession(sessionId);
+          if (isActive) {
+            setSession(nextSession);
+          }
+          return;
+        }
+
+        if (scheduleId && scheduleMissionId) {
+          const latestSession = await getLatestMissionSession(scheduleId, scheduleMissionId);
+          if (isActive) {
+            setSession(latestSession);
+          }
+        }
+      } catch {
+        // Timer metadata is optional; upload flow still resolves the authoritative session.
+      }
+    }
+
+    loadSessionTimer();
+
+    return () => {
+      isActive = false;
+    };
+  }, [scheduleId, scheduleMissionId, sessionId]);
+
+  useEffect(() => {
+    if (!scheduleId || !scheduleMissionId) {
+      setMission(null);
+      setMissionError('미션 정보가 없습니다.');
+      return;
+    }
+
+    let isActive = true;
+    const currentScheduleId = scheduleId;
+    const currentScheduleMissionId = scheduleMissionId;
+
+    async function loadMission() {
+      try {
+        setIsMissionLoading(true);
+        setMissionError('');
+        const nextSchedule = await getTripSchedule(currentScheduleId);
+        const nextMission = nextSchedule.missions.find((item) => item.scheduleMissionId === currentScheduleMissionId) ?? null;
+
+        if (isActive) {
+          setMission(nextMission);
+          setScheduleParticipantCount(nextSchedule.participants.length || 1);
+          setMissionError(nextMission ? '' : '미션 정보를 찾지 못했어요.');
+        }
+      } catch (error) {
+        if (isActive) {
+          setMission(null);
+          setMissionError(error instanceof Error ? error.message : '미션 정보를 불러오지 못했어요.');
+        }
+      } finally {
+        if (isActive) {
+          setIsMissionLoading(false);
+        }
+      }
+    }
+
+    loadMission();
+
+    return () => {
+      isActive = false;
+    };
+  }, [scheduleId, scheduleMissionId]);
+
+  const finishPassedJudgement = useCallback(async (passedSessionId: string) => {
+    let participantCount = scheduleParticipantCount;
+
+    if (participantCount === null && scheduleId) {
+      try {
+        const latestSchedule = await getTripSchedule(scheduleId);
+        participantCount = latestSchedule.participants.length || 1;
+        setScheduleParticipantCount(participantCount);
+      } catch {
+        participantCount = null;
+      }
+    }
+
+    if (participantCount !== 1) {
+      setAuthItem(MISSION_COMPLETION_PENDING_KEY, JSON.stringify({ scheduleId, sessionId: passedSessionId }));
+      setIsMissionComplete(true);
+      setUploadMessage('AI 확인이 완료됐어요.');
+      setReturnCountdown(3);
+      return;
+    }
+
+    if (isFinishingSoloMission.current) {
+      return;
+    }
+
+    isFinishingSoloMission.current = true;
+    setJudgementSessionId(null);
+    setIsMissionComplete(true);
+    setUploadMessage('미션 결과를 준비하고 있어요.');
+    setReturnCountdown(null);
+
+    try {
+      let completedSession = await getMissionSession(passedSessionId);
+
+      if (completedSession.status !== 'REVEALED' && completedSession.status !== 'COMPLETED') {
+        completedSession = await revealMissionSession(passedSessionId);
+      }
+
+      if (completedSession.status !== 'COMPLETED') {
+        completedSession = await completeMissionSession(passedSessionId);
+      }
+
+      router.replace({
+        pathname: '/trip/result',
+        params: {
+          ...(scheduleId ? { scheduleId } : {}),
+          sessionId: completedSession.id,
+        },
+      });
+    } catch (error) {
+      isFinishingSoloMission.current = false;
+      setIsMissionComplete(false);
+      setUploadMessage(error instanceof Error ? error.message : '미션 결과를 준비하지 못했어요.');
+    }
+  }, [scheduleId, scheduleParticipantCount]);
+
+  useEffect(() => {
+    if (!judgementSessionId) {
+      return;
+    }
+
+    let isActive = true;
+    const currentUserId = getAuthItem('user_id');
+
+    const applyJudgementSession = (nextSession: MissionSession) => {
+      if (!isActive) {
+        return;
+      }
+
+      setSession(nextSession);
+      const mySubmission = getMyLatestSubmission(nextSession, currentUserId, submittedSubmissionId);
+
+      if (!mySubmission) {
+        return;
+      }
+
+      const nextJudgeStatus = mySubmission.judgeStatus ?? null;
+      setJudgeStatus(nextJudgeStatus);
+      setJudgeReason(mySubmission.judgeReason ?? null);
+
+      if (isWaitingJudgementStatus(nextJudgeStatus)) {
+        setUploadMessage(getJudgementWaitingMessage(nextJudgeStatus));
+        return;
+      }
+
+      setJudgementSessionId(null);
+
+      if (nextJudgeStatus === 'PASSED') {
+        void finishPassedJudgement(nextSession.id);
+        return;
+      }
+
+      if (nextJudgeStatus === 'REJECTED') {
+        // TEMP: AI 실패 여부와 관계없이 업로드 이후 플로우를 테스트한다.
+        // setIsMissionComplete(true);
+        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        // setReturnCountdown(3);
+        setIsMissionComplete(false);
+        setUploadMessage('AI 판정에 통과하지 못했어요. 다시 촬영해 주세요.');
+        setReturnCountdown(null);
+        return;
+      }
+
+      if (nextJudgeStatus === 'ERROR') {
+        // TEMP: AI 오류 사진도 성공 처리하던 테스트 우회 코드.
+        // setIsMissionComplete(true);
+        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        // setReturnCountdown(3);
+        setIsMissionComplete(false);
+        setUploadMessage('AI 확인 중 문제가 발생했어요. 다시 촬영해 주세요.');
+        setReturnCountdown(null);
+        return;
+      }
+
+      setJudgeStatus('PENDING');
+      setUploadMessage(getJudgementWaitingMessage('PENDING'));
+      setJudgementSessionId(nextSession.id);
+    };
+
+    const socket = connectMissionSessionSocket(judgementSessionId, {
+      onError: () => {
+        void getMissionSession(judgementSessionId).then(applyJudgementSession).catch(() => undefined);
+      },
+      onMessage: ({ session: nextSession, type }) => {
+        if (nextSession && (type === 'judgement_updated' || nextSession.id === judgementSessionId)) {
+          applyJudgementSession(nextSession);
+        }
+      },
+    });
+
+    const refreshTimer = setInterval(() => {
+      void getMissionSession(judgementSessionId).then(applyJudgementSession).catch(() => undefined);
+    }, 3000);
+
+    void getMissionSession(judgementSessionId).then(applyJudgementSession).catch(() => undefined);
+
+    return () => {
+      isActive = false;
+      clearInterval(refreshTimer);
+      socket.close();
+    };
+  }, [finishPassedJudgement, judgementSessionId, submittedSubmissionId]);
 
   useEffect(() => {
     if (returnCountdown === null) {
@@ -143,7 +462,7 @@ export default function MissionCaptureScreen() {
   };
 
   const handleCapture = async () => {
-    if (!cameraRef.current || isCapturing) {
+    if (!cameraRef.current || isCapturing || isShootingExpired) {
       return;
     }
 
@@ -153,6 +472,9 @@ export default function MissionCaptureScreen() {
       if (photo?.uri) {
         setCapturedPhotoUri(photo.uri);
         setIsMissionComplete(false);
+        setJudgeReason(null);
+        setJudgeStatus(null);
+        setSubmittedSubmissionId(null);
       }
     } finally {
       setIsCapturing(false);
@@ -164,29 +486,120 @@ export default function MissionCaptureScreen() {
     setIsMissionComplete(false);
     setUploadMessage('');
     setReturnCountdown(null);
+    setJudgementSessionId(null);
+    setJudgeReason(null);
+    setJudgeStatus(null);
+    setSubmittedSubmissionId(null);
   };
 
-  const handleComplete = async () => {
-    if (!capturedPhotoUri || isUploading) {
+  const ensureCurrentUserCanSubmit = async (uploadSessionId: string) => {
+    const currentUserId = getAuthItem('user_id');
+
+    if (!currentUserId) {
       return;
     }
 
-    if (!sessionId) {
-      setIsMissionComplete(true);
+    const currentSession = await getMissionSession(uploadSessionId);
+    const activeSubmission = [...currentSession.submissions].reverse().find((submission) => submission.userId === currentUserId && !isRetryableJudgementStatus(submission.judgeStatus));
+
+    if (activeSubmission) {
+      throw new Error('이미 수행한 미션이에요. 한 미션은 한 번만 제출할 수 있어요.');
+    }
+  };
+
+  const resolveUploadSessionId = async () => {
+    if (sessionId) {
+      try {
+        const currentSession = await getMissionSession(sessionId);
+        return currentSession.id;
+      } catch (error) {
+        if (!isMissionSessionNotFoundError(error) || !scheduleId || !scheduleMissionId) {
+          throw error;
+        }
+      }
+    }
+
+    if (!scheduleId || !scheduleMissionId) {
+      throw new Error('미션 세션 정보가 없습니다.');
+    }
+
+    const latestSession = await getLatestMissionSession(scheduleId, scheduleMissionId);
+
+    try {
+      const joinedSession = await joinMissionSession(latestSession.id);
+      return joinedSession.id;
+    } catch {
+      return latestSession.id;
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!capturedPhotoUri || isUploading || isUploadExpired) {
       return;
     }
 
     try {
       setIsUploading(true);
-      setUploadMessage('');
+      setUploadMessage('세션을 확인하는 중이에요.');
       setReturnCountdown(null);
-      await runWithNetworkRetry(() => uploadMissionSessionPhoto(sessionId, capturedPhotoUri), 1);
-      await runWithNetworkRetry(() => revealMissionSession(sessionId), 1);
-      setIsMissionComplete(true);
-      setUploadMessage('사진을 업로드했어요.');
-      setReturnCountdown(3);
+      setJudgementSessionId(null);
+      setJudgeReason(null);
+      setJudgeStatus(null);
+      setSubmittedSubmissionId(null);
+      const uploadSessionId = await resolveUploadSessionId();
+      const uploadSession = await getMissionSession(uploadSessionId);
+      setSession(uploadSession);
+      const deadlineMs = getRemainingMs(uploadSession.photoUploadEndsAt ?? uploadSession.shootingEndsAt, Date.now());
+      if (deadlineMs !== null && deadlineMs <= 0) {
+        throw new Error('제한 시간이 종료되어 업로드할 수 없어요.');
+      }
+      setUploadMessage('제출 가능 여부를 확인하는 중이에요.');
+      await ensureCurrentUserCanSubmit(uploadSessionId);
+      setUploadMessage('사진을 업로드하는 중이에요.');
+      const uploadedSubmission: MissionSubmission = await runWithNetworkRetry(() => uploadMissionSessionPhoto(uploadSessionId, capturedPhotoUri), 1);
+      const nextJudgeStatus = uploadedSubmission.judgeStatus ?? null;
+      setSubmittedSubmissionId(uploadedSubmission.id);
+      setJudgeStatus(nextJudgeStatus);
+      setJudgeReason(uploadedSubmission.judgeReason ?? null);
+
+      if (nextJudgeStatus === 'PASSED') {
+        void finishPassedJudgement(uploadSessionId);
+        return;
+      }
+
+      if (nextJudgeStatus === 'REJECTED') {
+        // TEMP: AI 실패 여부와 관계없이 업로드 이후 플로우를 테스트한다.
+        // setIsMissionComplete(true);
+        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        // setReturnCountdown(3);
+        setIsMissionComplete(false);
+        setUploadMessage('AI 판정에 통과하지 못했어요. 다시 촬영해 주세요.');
+        setReturnCountdown(null);
+        return;
+      }
+
+      if (nextJudgeStatus === 'ERROR') {
+        // TEMP: AI 오류 사진도 성공 처리하던 테스트 우회 코드.
+        // setIsMissionComplete(true);
+        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
+        // setReturnCountdown(3);
+        setIsMissionComplete(false);
+        setUploadMessage('AI 확인 중 문제가 발생했어요. 다시 촬영해 주세요.');
+        setReturnCountdown(null);
+        return;
+      }
+
+      if (isWaitingJudgementStatus(nextJudgeStatus)) {
+        setUploadMessage(getJudgementWaitingMessage(nextJudgeStatus));
+        setJudgementSessionId(uploadSessionId);
+        return;
+      }
+
+      setJudgeStatus('PENDING');
+      setUploadMessage(getJudgementWaitingMessage('PENDING'));
+      setJudgementSessionId(uploadSessionId);
     } catch (error) {
-      setUploadMessage(error instanceof Error ? error.message : '사진 업로드에 실패했어요.');
+      setUploadMessage(isDuplicateSubmissionError(error) ? '이미 수행한 미션이에요. 한 미션은 한 번만 제출할 수 있어요.' : error instanceof Error ? error.message : '사진 업로드에 실패했어요.');
     } finally {
       setIsUploading(false);
     }
@@ -220,24 +633,59 @@ export default function MissionCaptureScreen() {
   }
 
   if (capturedPhotoUri) {
+    if (needsRetakeAfterJudgement) {
+      return (
+        <View style={[styles.failureContainer, { paddingBottom: bottomSafeInset + 20, paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 90 }]}>
+          <StatusBar style="dark" />
+          <View style={styles.failureHeader}>
+            <Text style={styles.failureTitle}>거의 다 왔어요</Text>
+            <Text style={styles.failureSubtitle}>미션에 맞게 다시 찍어보세요</Text>
+          </View>
+
+          <View style={styles.failurePhotoCard}>
+            <Image contentFit="cover" source={{ uri: capturedPhotoUri }} style={styles.failurePhoto} />
+            <View style={styles.failurePhotoOverlay} />
+            <View style={styles.failureMissionCopy}>
+              <Ionicons color="#FFFFFF" name="alert-circle-outline" size={24} />
+              <Text style={styles.failureMissionDescription}>{mission?.description ?? '미션 설명을 확인하고 다시 촬영해 주세요.'}</Text>
+            </View>
+          </View>
+
+          <ScalePressable accessibilityLabel="다시 찍기" onPress={handleRetake} pressedScale={0.97} style={styles.failureRetakeButton}>
+            <Text style={styles.failureRetakeButtonText}>다시 찍기</Text>
+          </ScalePressable>
+        </View>
+      );
+    }
+
     return (
-      <View style={[styles.reviewContainer, { paddingBottom: bottomSafeInset + 25, paddingTop: topSafeInset + 70 }]}>
+      <View style={[styles.reviewContainer, { paddingBottom: bottomSafeInset + 25, paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 90 }]}>
         <StatusBar style="dark" />
         <View style={styles.reviewHeader}>
-          {isMissionComplete ? <Text style={styles.completeTitle}>미션 완료!</Text> : null}
-          {uploadMessage ? <Text style={styles.uploadMessage}>{uploadMessage}</Text> : null}
-          {returnCountdown !== null ? <Text style={styles.countdownText}>{returnCountdown}초 후 여행 화면으로 돌아가요</Text> : null}
+          <Text style={styles.previewTitle}>{isMissionComplete ? '미션 완료!' : isWaitingForJudgement ? `사진을 확인하고 있어요${'.'.repeat(judgementDotCount)}` : '사진을 확인해 주세요'}</Text>
+          <Text numberOfLines={2} style={styles.previewDescription}>
+            {returnCountdown !== null
+              ? `${returnCountdown}초 후 여행 화면으로 돌아가요`
+              : uploadMessage || judgeReason || (uploadRemainingMs !== null
+                ? `업로드 제한 ${formatRemainingTime(uploadRemainingMs)}`
+                : '미션에 맞게 촬영했는지 확인해 보세요')}
+          </Text>
         </View>
 
         <View style={styles.previewWrap}>
           <Image source={{ uri: capturedPhotoUri }} style={styles.previewImage} contentFit="cover" />
+          {isWaitingForJudgement ? (
+            <View style={styles.previewJudgementOverlay}>
+              <ActivityIndicator color="#FFFFFF" size="large" style={styles.previewJudgementLoader} />
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.reviewActions}>
-          <ScalePressable accessibilityLabel="다시 찍기" disabled={isMissionComplete || isUploading} onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
+          <ScalePressable accessibilityLabel="다시 찍기" disabled={isMissionComplete || isUploading || isWaitingForJudgement} onPress={handleRetake} pressedScale={0.96} style={[styles.reviewButton, styles.retakeButton, (isMissionComplete || isUploading || isWaitingForJudgement) && styles.disabledControl]}>
             <Text style={[styles.reviewButtonText, styles.retakeButtonText]}>다시 찍기</Text>
           </ScalePressable>
-          <ScalePressable accessibilityLabel="완료하기" disabled={isMissionComplete || isUploading} onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton, (isMissionComplete || isUploading) && styles.disabledControl]}>
+          <ScalePressable accessibilityLabel="완료하기" disabled={isMissionComplete || isUploading || isUploadExpired || isWaitingForJudgement || needsRetakeAfterJudgement} onPress={handleComplete} pressedScale={0.96} style={[styles.reviewButton, styles.completeButton, (isMissionComplete || isUploading || isUploadExpired || isWaitingForJudgement || needsRetakeAfterJudgement) && styles.disabledControl]}>
             {isUploading ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.reviewButtonText, styles.completeButtonText]}>{sessionId ? '업로드하기' : '완료하기'}</Text>}
           </ScalePressable>
         </View>
@@ -260,11 +708,22 @@ export default function MissionCaptureScreen() {
 
       <View pointerEvents="box-none" style={[styles.topControls, { paddingTop: topSafeInset + 24 }]}>
         <ScalePressable accessibilityLabel="닫기" onPress={() => router.back()} pressedScale={0.86} style={styles.iconButton}>
-          <Ionicons color="#ffffff" name="close" size={30} />
+          <Image contentFit="contain" source={cameraBackIcon} style={styles.closeIcon} />
         </ScalePressable>
         <ScalePressable accessibilityLabel="플래시" onPress={toggleFlash} pressedScale={0.86} style={styles.iconButton}>
-          <Ionicons color="#ffffff" name={flash === 'off' ? 'flash-off' : 'flash'} size={25} />
+          <Image contentFit="contain" source={flash === 'off' ? cameraFlashOffIcon : cameraFlashOnIcon} style={styles.flashIcon} />
         </ScalePressable>
+        <View style={styles.timerControl}>
+          <Image contentFit="contain" source={cameraTimerIcon} style={styles.timerIcon} />
+          {shootingRemainingMs !== null ? <Text style={[styles.cameraTimerText, isShootingExpired && styles.cameraTimerDanger]}>{formatRemainingTime(shootingRemainingMs)}</Text> : null}
+        </View>
+      </View>
+
+      <View pointerEvents="none" style={styles.cameraGuide}>
+        <View style={[styles.guideCorner, styles.guideTopLeft]} />
+        <View style={[styles.guideCorner, styles.guideTopRight]} />
+        <View style={[styles.guideCorner, styles.guideBottomLeft]} />
+        <View style={[styles.guideCorner, styles.guideBottomRight]} />
       </View>
 
       <View pointerEvents="box-none" style={styles.bottomOverlay}>
@@ -279,21 +738,33 @@ export default function MissionCaptureScreen() {
               transform: [{ translateY: missionCardTranslateY }],
             },
           ]}>
-          <Image source={missionFrame} style={styles.missionFrame} contentFit="contain" />
+          <MissionCard
+            errorMessage={missionError}
+            isLoading={isMissionLoading}
+            mission={mission ? {
+              description: mission.description,
+              iconText: mission.rewardItemIcon,
+              iconUrl: mission.emojiUrl ?? mission.photoUrl,
+              title: mission.title,
+              type: mission.type,
+            } : session ? {
+              title: session.missionTitle,
+            } : null}
+          />
         </Animated.View>
 
         <View pointerEvents="box-none" style={[styles.captureControls, { bottom: bottomSafeInset + 52 }]}>
           <ScalePressable
             accessibilityLabel="사진 촬영"
-            disabled={isCapturing}
+            disabled={isCapturing || isShootingExpired}
             onPress={handleCapture}
             pressedScale={0.92}
-            style={[styles.shutterOuter, isCapturing && styles.disabledControl]}>
+            style={[styles.shutterOuter, (isCapturing || isShootingExpired) && styles.disabledControl]}>
             <View style={styles.shutterInner} />
           </ScalePressable>
 
           <ScalePressable accessibilityLabel="카메라 전환" onPress={toggleFacing} pressedScale={0.86} style={styles.switchButton}>
-            <Ionicons color="#ffffff" name="sync" size={27} />
+            <Image contentFit="contain" source={cameraSwitchIcon} style={styles.switchIcon} />
           </ScalePressable>
         </View>
       </View>
@@ -309,13 +780,98 @@ const styles = StyleSheet.create({
   reviewContainer: {
     backgroundColor: '#F4F7FA',
     flex: 1,
-    paddingHorizontal: 36,
+  },
+  failureContainer: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    flex: 1,
+  },
+  failureHeader: {
+    alignItems: 'center',
+    height: 81,
+  },
+  failureTitle: {
+    color: '#252B30',
+    fontSize: 24,
+    fontWeight: '600',
+    lineHeight: 30,
+    textAlign: 'center',
+  },
+  failureSubtitle: {
+    color: '#8A9194',
+    fontSize: 12,
+    marginTop: 7,
+    textAlign: 'center',
+  },
+  failurePhotoCard: {
+    alignSelf: 'center',
+    aspectRatio: 3 / 4,
+    borderRadius: 20,
+    marginTop: 32,
+    overflow: 'hidden',
+    position: 'relative',
+    width: '78%',
+  },
+  failurePhoto: {
+    height: '100%',
+    width: '100%',
+  },
+  failurePhotoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10, 18, 24, 0.34)',
+  },
+  failureMissionCopy: {
+    alignItems: 'center',
+    left: 24,
+    position: 'absolute',
+    right: 24,
+    top: '41%',
+  },
+  failureMissionDescription: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 21,
+    marginTop: 3,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.45)',
+    textShadowOffset: { height: 1, width: 0 },
+    textShadowRadius: 4,
+  },
+  failureRetakeButton: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    backgroundColor: '#BAC0C3',
+    borderRadius: 999,
+    height: 63,
+    justifyContent: 'center',
+    marginTop: 'auto',
+  },
+  failureRetakeButtonText: {
+    color: '#5D686C',
+    fontSize: 18,
+    fontWeight: '500',
   },
   reviewHeader: {
     alignItems: 'center',
-    minHeight: 72,
+    height: 81,
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: 32,
+    position: 'relative',
+  },
+  previewTitle: {
+    color: '#252B30',
+    fontSize: 24,
+    fontWeight: '600',
+    lineHeight: 30,
+    textAlign: 'center',
+  },
+  previewDescription: {
+    color: '#8A9194',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 7,
+    textAlign: 'center',
   },
   completeTitle: {
     color: '#2D3C43',
@@ -329,6 +885,42 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: 'center',
   },
+  retakePromptMessage: {
+    color: '#2D3C43',
+    fontSize: 20,
+    fontWeight: '900',
+    marginTop: 10,
+  },
+  judgementLoader: {
+    marginTop: 6,
+  },
+  timeAttackText: {
+    color: '#D86C59',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  timeAttackDanger: {
+    color: '#C94435',
+  },
+  timeAttackBadge: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(18, 24, 32, 0.72)',
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  timeAttackBadgeDanger: {
+    backgroundColor: 'rgba(201, 68, 53, 0.88)',
+  },
+  timeAttackBadgeText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '900',
+  },
   countdownText: {
     color: '#8A9194',
     fontSize: 12,
@@ -338,22 +930,30 @@ const styles = StyleSheet.create({
   },
   previewWrap: {
     alignSelf: 'center',
+    aspectRatio: 3 / 4,
     backgroundColor: '#E5EEF3',
-    borderRadius: 18,
-    flex: 1,
-    maxHeight: 520,
-    minHeight: 300,
+    borderRadius: 20,
     overflow: 'hidden',
-    width: '100%',
+    position: 'relative',
+    width: '78%',
   },
   previewImage: {
     height: '100%',
     width: '100%',
   },
+  previewJudgementOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    backgroundColor: 'rgba(13, 23, 29, 0.22)',
+    justifyContent: 'center',
+  },
+  previewJudgementLoader: {
+    transform: [{ scale: 1.45 }],
+  },
   reviewActions: {
     flexDirection: 'row',
     gap: 18,
-    marginTop: 30,
+    marginTop: 'auto',
   },
   reviewButton: {
     alignItems: 'center',
@@ -379,6 +979,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   topControls: {
+    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
     left: 0,
@@ -386,12 +987,83 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0,
     top: 0,
+    zIndex: 4,
   },
   iconButton: {
     alignItems: 'center',
     height: 40,
     justifyContent: 'center',
     width: 40,
+  },
+  closeIcon: { 
+    height: 17, 
+    width: 17,
+  },
+  flashIcon: { 
+    height: 22,
+    width: 22,
+  },
+  timerControl: { 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    minHeight: 40, 
+    minWidth: 40,
+  },
+  timerIcon: { 
+    height: 23, 
+    width: 23,
+  },
+  cameraTimerText: { 
+    color: '#ffffff', 
+    fontSize: 11, 
+    fontWeight: '800', 
+    position: 'absolute', 
+    top: 34,
+  },
+  cameraTimerDanger: { 
+    color: '#FF7466',
+  },
+  cameraGuide: { 
+    bottom: '24%', 
+    left: 20, 
+    position: 'absolute', 
+    right: 20, 
+    top: '22%', 
+    zIndex: 1,
+  },
+  guideCorner: { 
+    borderColor: '#ffffff', 
+    height: 90, 
+    position: 'absolute', 
+    width: 90,
+  },
+  guideTopLeft: { 
+    borderLeftWidth: 4, 
+    borderTopLeftRadius: 44, 
+    borderTopWidth: 4, 
+    left: 0, 
+    top: 0,
+  },
+  guideTopRight: { 
+    borderRightWidth: 4, 
+    borderTopRightRadius: 44, 
+    borderTopWidth: 4, 
+    right: 0, 
+    top: 0,
+  },
+  guideBottomLeft: { 
+    borderBottomLeftRadius: 44, 
+    borderBottomWidth: 4, 
+    borderLeftWidth: 4, 
+    bottom: 0, 
+    left: 0,
+  },
+  guideBottomRight: { 
+    borderBottomRightRadius: 44, 
+    borderBottomWidth: 4, 
+    borderRightWidth: 4,
+    bottom: 0, 
+    right: 0,
   },
   bottomOverlay: {
     bottom: 0,
@@ -415,10 +1087,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: MISSION_CARD_WIDTH,
     zIndex: 3,
-  },
-  missionFrame: {
-    height: MISSION_CARD_HEIGHT,
-    width: MISSION_CARD_WIDTH,
   },
   captureControls: {
     alignItems: 'center',
@@ -454,12 +1122,15 @@ const styles = StyleSheet.create({
   },
   switchButton: {
     alignItems: 'center',
+    backgroundColor: 'rgba(227, 240, 246, 0.42)',
+    borderRadius: 999,
     height: 50,
     justifyContent: 'center',
     position: 'absolute',
     right: 31,
     width: 50,
   },
+  switchIcon: { height: 27, width: 27 },
   stateScreen: {
     alignItems: 'center',
     backgroundColor: '#0c1115',

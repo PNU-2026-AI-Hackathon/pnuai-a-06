@@ -4,26 +4,28 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Rect, Svg } from 'react-native-svg';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 import { shareKakaoInvite } from '@/lib/kakao-share';
 import {
-  completeMissionSession,
+  connectMissionSessionSocket,
   createMissionSession,
+  getActiveMissionSession,
   getLatestMissionSession,
   getMissionSession,
+  getPassedMissionSubmissions,
+  mergeMissionSessions,
+  isMissionSessionNotFoundError,
   joinMissionSession,
-  readyMissionSession,
   revealMissionSession,
-  startMissionSession,
   type MissionSession,
 } from '@/lib/mission-session-api';
-import { getTripSchedule, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
+import { getTripSchedule, removeMissionFromSchedule, updateScheduleMissionDate, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 
 function getParamValue(value: string | string[] | undefined) {
@@ -52,6 +54,9 @@ function getInviteUrl(invite: TripInvite | null) {
   return invite.inviteUrl ?? createFallbackInviteUrl(invite.inviteToken);
 }
 
+const activeCameraIcon = require('../../assets/svg/active/camera.svg');
+const activeAddPeopleIcon = require('../../assets/svg/active/add_people.svg');
+const activeSettingIcon = require('../../assets/svg/active/setting.svg');
 const REVEALED_SESSION_CACHE_PREFIX = 'trip_revealed_sessions:';
 
 function getRevealedSessionCacheKey(scheduleId: string) {
@@ -77,6 +82,54 @@ function saveCachedRevealedSessions(scheduleId: string, sessions: Record<string,
   setAuthItem(getRevealedSessionCacheKey(scheduleId), JSON.stringify(sessions));
 }
 
+function isAlreadyJoinedSessionError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+
+  return message.includes('이미') || message.includes('already') || message.includes('joined') || message.includes('member');
+}
+
+
+function hasAllComments(session: MissionSession) {
+  const requiredCommentsPerPhoto = session.members.length;
+
+  const passedSubmissions = getPassedMissionSubmissions(session);
+  return requiredCommentsPerPhoto > 0 && passedSubmissions.length > 0 && passedSubmissions.every((submission) => submission.comments.length >= requiredCommentsPerPhoto);
+}
+
+function isFinishedSession(session: MissionSession | undefined) {
+  return Boolean(session && (session.status === 'VOTING' || session.status === 'COMPLETED' || hasAllComments(session)));
+}
+
+function hasAllPassedMemberSubmissions(session: MissionSession, requiredMemberCount: number) {
+  const passedUserIds = new Set(session.submissions.filter((submission) => submission.judgeStatus === 'PASSED').map((submission) => submission.userId).filter(Boolean));
+  const expectedMemberCount = Math.max(session.members.length, requiredMemberCount);
+
+  return expectedMemberCount > 0 && passedUserIds.size >= expectedMemberCount;
+}
+
+function getFeedSubmissions(session: MissionSession | undefined) {
+  return session?.submissions.filter((submission) => submission.judgeStatus === 'PASSED') ?? [];
+}
+
+function isFeedReadySession(session: MissionSession, requiredMemberCount: number) {
+  return hasAllPassedMemberSubmissions(session, requiredMemberCount);
+}
+
+function isStartedMissionSession(session: MissionSession) {
+  return Boolean(session.startedAt) || (session.status !== 'WAITING' && session.status !== 'READY');
+}
+
+function hasSubmittedMissionPhoto(session: MissionSession | undefined, userId: string | null) {
+  return Boolean(userId && session?.submissions.some((submission) => submission.userId === userId
+    && Boolean(submission.photoUrl)
+    && submission.judgeStatus !== 'REJECTED'
+    && submission.judgeStatus !== 'ERROR'));
+}
+
+function isCompletedScheduleMission(mission: TripScheduleMission) {
+  return mission.status === 'COMPLETED';
+}
+
 function getMissionLocation(mission: TripScheduleMission) {
   if (mission.districtLabel && mission.placeLabel) {
     return `${mission.districtLabel}(${mission.placeLabel})`;
@@ -85,58 +138,248 @@ function getMissionLocation(mission: TripScheduleMission) {
   return mission.placeLabel ?? mission.districtLabel ?? '부산';
 }
 
+function getParticipantText(schedule: TripSchedule | null) {
+  const names = schedule?.participants
+    .map((participant) => participant.nickname || participant.email)
+    .filter((value): value is string => Boolean(value));
+
+  return names && names.length > 0 ? names.join(' · ') : '동행자 정보 없음';
+}
+
+function parseDateValue(value: string | null | undefined) {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function formatDateValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+
+  return nextDate;
+}
+
+function getScheduleDateOptions(schedule: TripSchedule | null) {
+  const startDate = parseDateValue(schedule?.startDate);
+  const endDate = parseDateValue(schedule?.endDate ?? schedule?.startDate);
+
+  if (!startDate || !endDate || startDate.getTime() > endDate.getTime()) {
+    return [];
+  }
+
+  const dates: string[] = [];
+  let cursor = startDate;
+
+  while (cursor.getTime() <= endDate.getTime()) {
+    dates.push(formatDateValue(cursor));
+    cursor = addDays(cursor, 1);
+  }
+
+  return dates;
+}
+
+function getCalendarDayNumber(date: Date) {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / (24 * 60 * 60 * 1000);
+}
+
+function getTripDayLabel(schedule: TripSchedule | null) {
+  const startDate = parseDateValue(schedule?.startDate);
+  const endDate = parseDateValue(schedule?.endDate ?? schedule?.startDate);
+
+  if (!startDate) {
+    return '여행 날짜 미정';
+  }
+
+  const today = new Date();
+  const todayDay = getCalendarDayNumber(today);
+  const startDay = getCalendarDayNumber(startDate);
+
+  if (todayDay < startDay) {
+    return `D-${startDay - todayDay}`;
+  }
+
+  if (endDate && todayDay > getCalendarDayNumber(endDate)) {
+    return '여행 종료';
+  }
+
+  return `오늘 · 여행 ${todayDay - startDay + 1}일차`;
+}
+
+function getMissionDateLabel(date: string) {
+  return date === 'UNPLANNED' ? '날짜 미정' : date;
+}
+
+function getScheduleSyncSignature(schedule: TripSchedule) {
+  return JSON.stringify({
+    endDate: schedule.endDate,
+    missions: schedule.missions.map((mission) => ({
+      plannedDate: mission.plannedDate,
+      scheduleMissionId: mission.scheduleMissionId,
+      status: mission.status,
+      title: mission.title,
+    })),
+    participants: schedule.participants.map((participant) => participant.id),
+    startDate: schedule.startDate,
+  });
+}
+
 export default function ActiveTripScreen() {
   const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
   const initialSessionId = getParamValue(params.sessionId);
+  const currentUserId = getAuthItem('user_id');
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [schedule, setSchedule] = useState<TripSchedule | null>(null);
-  const [selectedMission, setSelectedMission] = useState<TripScheduleMission | null>(null);
-  const [session, setSession] = useState<MissionSession | null>(null);
   const [revealedSessions, setRevealedSessions] = useState<Record<string, MissionSession>>({});
+  const [missionSessions, setMissionSessions] = useState<Record<string, MissionSession>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSessionBusy, setIsSessionBusy] = useState(false);
   const [isCreatingInvite, setIsCreatingInvite] = useState(false);
   const [isSharingInvite, setIsSharingInvite] = useState(false);
   const [message, setMessage] = useState('');
-  const [sessionMessage, setSessionMessage] = useState('');
   const [inviteMessage, setInviteMessage] = useState('');
   const [missionListVisible, setMissionListVisible] = useState(false);
-  const [sessionPanelVisible, setSessionPanelVisible] = useState(false);
+  const [pendingMission, setPendingMission] = useState<TripScheduleMission | null>(null);
   const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
   const [inviteData, setInviteData] = useState<TripInvite | null>(null);
-  const missions = schedule?.missions ?? [];
+  const [dateEditorMissionId, setDateEditorMissionId] = useState<string | null>(null);
+  const [busyScheduleMissionId, setBusyScheduleMissionId] = useState<string | null>(null);
+  const [missionListMessage, setMissionListMessage] = useState('');
+  const revealingSessionIds = useRef(new Set<string>());
+  const missionSessionsRef = useRef<Record<string, MissionSession>>({});
+  const revealedSessionsRef = useRef<Record<string, MissionSession>>({});
+  const missions = useMemo(() => schedule?.missions ?? [], [schedule]);
+  const activeMissions = missions.filter((mission) => !isCompletedScheduleMission(mission) && !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
+  const scheduleDateOptions = useMemo(() => getScheduleDateOptions(schedule), [schedule]);
+  const tripDayLabel = useMemo(() => getTripDayLabel(schedule), [schedule]);
+  const missionDateGroups = useMemo(() => {
+    const groups = scheduleDateOptions.map((date) => ({
+      date,
+      missions: missions.filter((mission) => mission.plannedDate === date),
+    }));
+    const unplannedMissions = missions.filter((mission) => !mission.plannedDate || !scheduleDateOptions.includes(mission.plannedDate));
+
+    if (unplannedMissions.length > 0) {
+      groups.push({ date: 'UNPLANNED', missions: unplannedMissions });
+    }
+
+    return groups;
+  }, [missions, scheduleDateOptions]);
+  const canAddMission = schedule?.permissions.canAddMission ?? false;
+  const requiredScheduleMemberCount = schedule?.participants.length ?? 0;
+  const activeBlockingSession = Object.values(missionSessions).find((nextSession) => !isFinishedSession(nextSession)) ?? null;
+  const hasStartedMissionSession = Object.values(missionSessions).some(isStartedMissionSession);
+  const canInviteCompanion = (schedule?.permissions.canInviteCompanion ?? false) && !hasStartedMissionSession;
   const inviteUrl = getInviteUrl(inviteData);
+  const pendingMissionSession = pendingMission ? missionSessions[pendingMission.scheduleMissionId] ?? revealedSessions[pendingMission.scheduleMissionId] : undefined;
+  const isPendingMissionCompleted = hasSubmittedMissionPhoto(pendingMissionSession, currentUserId);
+  const isMissionBlockedForPlay = useCallback((mission: TripScheduleMission) => {
+    return Boolean(activeBlockingSession?.scheduleMissionId && activeBlockingSession.scheduleMissionId !== mission.scheduleMissionId);
+  }, [activeBlockingSession]);
 
   const rememberFeedSession = useCallback((nextSession: MissionSession, fallbackScheduleMissionId?: string) => {
     const scheduleMissionId = nextSession.scheduleMissionId || fallbackScheduleMissionId;
-    const shouldShowInFeed = ['REVEALED', 'COMPLETED'].includes(nextSession.status) && nextSession.submissions.length > 0 && scheduleMissionId;
+
+    if (!scheduleMissionId) {
+      return;
+    }
+
+    const normalizedIncomingSession = {
+      ...nextSession,
+      scheduleMissionId,
+    };
+    const mergedMissionSession = mergeMissionSessions(missionSessionsRef.current[scheduleMissionId], normalizedIncomingSession);
+
+    missionSessionsRef.current = {
+      ...missionSessionsRef.current,
+      [scheduleMissionId]: mergedMissionSession,
+    };
+    setMissionSessions((currentSessions) => ({
+      ...currentSessions,
+      [scheduleMissionId]: mergeMissionSessions(currentSessions[scheduleMissionId], mergedMissionSession),
+    }));
+
+    const shouldShowInFeed = isFeedReadySession(mergedMissionSession, requiredScheduleMemberCount) && getFeedSubmissions(mergedMissionSession).length > 0;
 
     if (!shouldShowInFeed) {
       return;
     }
 
-    setRevealedSessions((currentSessions) => {
-      const normalizedSession = {
-        ...nextSession,
-        scheduleMissionId,
-      };
-      const nextSessions = {
-        ...currentSessions,
-        [scheduleMissionId]: normalizedSession,
-      };
+    const normalizedSession = mergeMissionSessions(revealedSessionsRef.current[scheduleMissionId], mergedMissionSession);
+    const nextRevealedSessions = {
+      ...revealedSessionsRef.current,
+      [scheduleMissionId]: normalizedSession,
+    };
 
+    revealedSessionsRef.current = nextRevealedSessions;
+    setRevealedSessions(() => {
       if (scheduleId) {
-        saveCachedRevealedSessions(scheduleId, nextSessions);
+        saveCachedRevealedSessions(scheduleId, nextRevealedSessions);
       }
 
-      return nextSessions;
+      return nextRevealedSessions;
     });
-  }, [scheduleId]);
+  }, [requiredScheduleMemberCount, scheduleId]);
+
+  useEffect(() => {
+    if (!activeBlockingSession?.id) {
+      return;
+    }
+
+    const activeSessionId = activeBlockingSession.id;
+    const socket = connectMissionSessionSocket(activeSessionId, {
+      onError: () => {
+        void getMissionSession(activeSessionId).then((nextSession) => rememberFeedSession(nextSession)).catch(() => undefined);
+      },
+      onMessage: ({ session: nextSession }) => {
+        if (nextSession) {
+          rememberFeedSession(nextSession);
+        }
+      },
+    });
+
+    const refreshTimer = setInterval(() => {
+      void getMissionSession(activeSessionId).then((nextSession) => rememberFeedSession(nextSession)).catch(() => undefined);
+    }, 1000);
+
+    return () => {
+      clearInterval(refreshTimer);
+      socket.close();
+    };
+  }, [activeBlockingSession?.id, rememberFeedSession]);
+
+  useEffect(() => {
+    const completedUploadSession = Object.values(missionSessions).find((nextSession) =>
+      hasAllPassedMemberSubmissions(nextSession, requiredScheduleMemberCount)
+      && nextSession.status !== 'REVEALED'
+      && nextSession.status !== 'VOTING'
+      && nextSession.status !== 'COMPLETED'
+    );
+
+    if (!completedUploadSession || revealingSessionIds.current.has(completedUploadSession.id)) {
+      return;
+    }
+
+    revealingSessionIds.current.add(completedUploadSession.id);
+    void revealMissionSession(completedUploadSession.id)
+      .then((nextSession) => rememberFeedSession(nextSession, completedUploadSession.scheduleMissionId))
+      .catch(() => getMissionSession(completedUploadSession.id).then((nextSession) => rememberFeedSession(nextSession, completedUploadSession.scheduleMissionId)).catch(() => undefined));
+  }, [missionSessions, rememberFeedSession, requiredScheduleMemberCount]);
 
   const refreshSession = useCallback(async (sessionId: string) => {
     const nextSession = await getMissionSession(sessionId);
-    setSession(nextSession);
     rememberFeedSession(nextSession);
     return nextSession;
   }, [rememberFeedSession]);
@@ -145,11 +388,18 @@ export default function ActiveTripScreen() {
     if (!scheduleId) {
       setSchedule(null);
       setRevealedSessions({});
+      setMissionSessions({});
+      revealedSessionsRef.current = {};
+      missionSessionsRef.current = {};
       setMessage('일정 정보가 없습니다.');
       return;
     }
 
-    setRevealedSessions(readCachedRevealedSessions(scheduleId));
+    const cachedRevealedSessions = readCachedRevealedSessions(scheduleId);
+    revealedSessionsRef.current = cachedRevealedSessions;
+    missionSessionsRef.current = cachedRevealedSessions;
+    setRevealedSessions(cachedRevealedSessions);
+    setMissionSessions(cachedRevealedSessions);
 
     let isActive = true;
 
@@ -164,27 +414,48 @@ export default function ActiveTripScreen() {
 
         setSchedule(nextSchedule);
 
-        await Promise.all(nextSchedule.missions.map(async (mission) => {
+        void Promise.all(Object.values(cachedRevealedSessions).map(async (cachedSession) => {
+          try {
+            const latestSession = await getMissionSession(cachedSession.id);
+            if (isActive) {
+              rememberFeedSession(latestSession, cachedSession.scheduleMissionId);
+            }
+          } catch {
+            // Cached feed sessions are best-effort and can disappear server-side.
+          }
+        }));
+
+        void Promise.all(nextSchedule.missions.map(async (mission) => {
           try {
             const latestSession = await getLatestMissionSession(nextSchedule.scheduleId, mission.scheduleMissionId);
             if (isActive) {
               rememberFeedSession(latestSession, mission.scheduleMissionId);
             }
-          } catch {
-            // A mission can legitimately have no session yet.
+          } catch (error) {
+            if (!isMissionSessionNotFoundError(error)) {
+              throw error;
+            }
           }
-        }));
+        })).catch(() => {
+          // Schedule rendering should not fail just because one session refresh failed.
+        });
+
+        void getActiveMissionSession(nextSchedule.scheduleId)
+          .then((activeSession) => {
+            if (isActive) {
+              rememberFeedSession(activeSession);
+            }
+          })
+          .catch(() => {
+            // A schedule can legitimately have no active mission session yet.
+          });
 
         if (initialSessionId) {
           try {
-            const nextSession = await refreshSession(initialSessionId);
-            if (isActive) {
-              setSelectedMission(nextSchedule.missions.find((mission) => mission.scheduleMissionId === nextSession.scheduleMissionId) ?? null);
-              setSessionPanelVisible(true);
-            }
+            await refreshSession(initialSessionId);
           } catch (error) {
             if (isActive) {
-              setSessionMessage(error instanceof Error ? error.message : '세션을 불러오지 못했어요.');
+              setMessage(error instanceof Error ? error.message : '세션을 불러오지 못했어요.');
             }
           }
         }
@@ -208,6 +479,78 @@ export default function ActiveTripScreen() {
 
   useFocusEffect(refreshSchedule);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!scheduleId) {
+        return undefined;
+      }
+
+      let isActive = true;
+      let isScheduleRequestInFlight = false;
+      let isActiveSessionRequestInFlight = false;
+
+      const syncSchedule = async () => {
+        if (isScheduleRequestInFlight) {
+          return;
+        }
+
+        isScheduleRequestInFlight = true;
+
+        try {
+          const nextSchedule = await getTripSchedule(scheduleId);
+
+          if (!isActive) {
+            return;
+          }
+
+          setSchedule((currentSchedule) => {
+            if (currentSchedule && getScheduleSyncSignature(currentSchedule) === getScheduleSyncSignature(nextSchedule)) {
+              return currentSchedule;
+            }
+
+            return nextSchedule;
+          });
+        } catch {
+          // Keep the last rendered schedule when a background sync temporarily fails.
+        } finally {
+          isScheduleRequestInFlight = false;
+        }
+      };
+
+      const syncActiveMissionSession = async () => {
+        if (isActiveSessionRequestInFlight) {
+          return;
+        }
+
+        isActiveSessionRequestInFlight = true;
+
+        try {
+          const activeSession = await getActiveMissionSession(scheduleId);
+
+          if (isActive) {
+            rememberFeedSession(activeSession);
+          }
+        } catch {
+          // No active mission session is a valid state while the trip is idle.
+        } finally {
+          isActiveSessionRequestInFlight = false;
+        }
+      };
+
+      void syncSchedule();
+      void syncActiveMissionSession();
+      const syncTimer = setInterval(() => {
+        void syncSchedule();
+        void syncActiveMissionSession();
+      }, 1000);
+
+      return () => {
+        isActive = false;
+        clearInterval(syncTimer);
+      };
+    }, [rememberFeedSession, scheduleId])
+  );
+
   const closeInviteSheet = () => {
     if (isSharingInvite) {
       return;
@@ -218,6 +561,16 @@ export default function ActiveTripScreen() {
   };
 
   const handleCreateInvite = async () => {
+    if (!schedule?.permissions.canInviteCompanion) {
+      setInviteMessage('동행자 추가 권한이 없습니다.');
+      return;
+    }
+
+    if (hasStartedMissionSession) {
+      setInviteMessage('이미 시작한 미션이 있어 동행자를 추가할 수 없어요.');
+      return;
+    }
+
     if (!schedule || isCreatingInvite) {
       return;
     }
@@ -262,79 +615,235 @@ export default function ActiveTripScreen() {
     setInviteMessage('초대 링크를 복사했어요.');
   };
 
-  const openMissionSession = async (mission: TripScheduleMission) => {
-    if (!schedule?.scheduleId || isSessionBusy) {
+
+  const reloadCurrentSchedule = async () => {
+    if (!scheduleId) {
+      return null;
+    }
+
+    const nextSchedule = await getTripSchedule(scheduleId);
+    setSchedule(nextSchedule);
+
+    return nextSchedule;
+  };
+
+  const isMissionLockedForEdit = (mission: TripScheduleMission) => {
+    return isCompletedScheduleMission(mission) || Boolean(missionSessions[mission.scheduleMissionId]) || isFinishedSession(revealedSessions[mission.scheduleMissionId]);
+  };
+
+  const isTemporaryMission = (mission: TripScheduleMission) => {
+    const session = missionSessions[mission.scheduleMissionId];
+
+    return Boolean(session && !isCompletedScheduleMission(mission) && !isFinishedSession(session));
+  };
+
+  const handleChangeMissionDate = async (mission: TripScheduleMission, plannedDate: string) => {
+    if (!schedule?.scheduleId || busyScheduleMissionId || plannedDate === mission.plannedDate) {
+      return;
+    }
+
+    if (isMissionLockedForEdit(mission)) {
+      setMissionListMessage('진행 중이거나 완료된 미션은 날짜를 바꿀 수 없어요.');
       return;
     }
 
     try {
-      setIsSessionBusy(true);
-      setSessionMessage('');
-      setSelectedMission(mission);
-      setMissionListVisible(false);
-      const nextSession = await createMissionSession(schedule.scheduleId, mission.scheduleMissionId);
-      setSession(nextSession);
-      rememberFeedSession(nextSession, mission.scheduleMissionId);
-      setSessionPanelVisible(true);
+      setBusyScheduleMissionId(mission.scheduleMissionId);
+      setMissionListMessage('');
+      await updateScheduleMissionDate(schedule.scheduleId, mission.scheduleMissionId, plannedDate);
+      await reloadCurrentSchedule();
+      setDateEditorMissionId(null);
+      setMissionListMessage(`${mission.title} 미션 날짜를 ${plannedDate}로 바꿨어요.`);
     } catch (error) {
-      setSessionMessage(error instanceof Error ? error.message : '미션 세션을 만들지 못했어요.');
-      setSessionPanelVisible(true);
+      setMissionListMessage(error instanceof Error ? error.message : '미션 날짜를 바꾸지 못했어요.');
     } finally {
-      setIsSessionBusy(false);
+      setBusyScheduleMissionId(null);
     }
   };
 
-  const runSessionAction = async (action: () => Promise<MissionSession>, successMessage: string, options?: { refreshAfter?: boolean }) => {
-    if (isSessionBusy) {
+  const removeScheduledMission = async (mission: TripScheduleMission) => {
+    if (!schedule?.scheduleId || busyScheduleMissionId) {
+      return;
+    }
+
+    if (!schedule.permissions.canRemoveMission) {
+      setMissionListMessage('미션 삭제 권한이 없습니다.');
+      return;
+    }
+
+    if (isMissionLockedForEdit(mission) && !isTemporaryMission(mission)) {
+      setMissionListMessage('진행 중이거나 완료된 미션은 삭제할 수 없어요.');
       return;
     }
 
     try {
-      setIsSessionBusy(true);
-      setSessionMessage('');
-      const actionSession = await action();
-      const nextSession = options?.refreshAfter && actionSession.id ? await getMissionSession(actionSession.id) : actionSession;
-      setSession(nextSession);
-      rememberFeedSession(nextSession, selectedMission?.scheduleMissionId);
-      setSessionMessage(successMessage);
+      setBusyScheduleMissionId(mission.scheduleMissionId);
+      setMissionListMessage('');
+      await removeMissionFromSchedule(schedule.scheduleId, mission.scheduleMissionId);
+      await reloadCurrentSchedule();
+      setDateEditorMissionId(null);
+      setMissionSessions((currentSessions) => {
+        const nextSessions = { ...currentSessions };
+        delete nextSessions[mission.scheduleMissionId];
+        return nextSessions;
+      });
+      delete missionSessionsRef.current[mission.scheduleMissionId];
+      setRevealedSessions((currentSessions) => {
+        const nextSessions = { ...currentSessions };
+        delete nextSessions[mission.scheduleMissionId];
+        if (scheduleId) {
+          saveCachedRevealedSessions(scheduleId, nextSessions);
+        }
+        return nextSessions;
+      });
+      delete revealedSessionsRef.current[mission.scheduleMissionId];
+      setMissionListMessage(`${mission.title} 미션을 삭제했어요.`);
     } catch (error) {
-      setSessionMessage(error instanceof Error ? error.message : '미션 세션 요청에 실패했어요.');
+      setMissionListMessage(error instanceof Error ? error.message : '미션을 삭제하지 못했어요.');
     } finally {
-      setIsSessionBusy(false);
+      setBusyScheduleMissionId(null);
     }
   };
 
-  const requireSessionId = () => {
-    if (!session?.id) {
-      throw new Error('먼저 미션 세션을 만들어 주세요.');
-    }
-
-    return session.id;
+  const handleRemoveScheduledMission = (mission: TripScheduleMission) => {
+    Alert.alert('미션 삭제', `${mission.title} 미션을 일정에서 삭제할까요?`, [
+      { text: '취소', style: 'cancel' },
+      { text: '삭제', style: 'destructive', onPress: () => void removeScheduledMission(mission) },
+    ]);
   };
-
-  const openCapture = () => {
-    if (!session?.id || !schedule?.scheduleId || !selectedMission?.scheduleMissionId) {
-      setSessionMessage('먼저 미션 세션을 만들어 주세요.');
+  const openMissionDetail = () => {
+    if (!schedule?.scheduleId) {
+      setMessage('일정 정보가 없습니다.');
       return;
     }
 
     router.push({
-      pathname: '/trip/capture',
+      pathname: '/mission/detail',
+      params: { scheduleId: schedule.scheduleId },
+    });
+  };
+
+  const openMissionSession = (mission: TripScheduleMission) => {
+    if (!schedule?.scheduleId || isSessionBusy) {
+      return;
+    }
+
+    if (isMissionBlockedForPlay(mission)) {
+      setMessage('진행 중인 미션을 먼저 완료해주세요.');
+      return;
+    }
+
+    setMessage('');
+    setMissionListVisible(false);
+    setPendingMission(mission);
+  };
+
+  const startPendingMission = async () => {
+    if (!schedule?.scheduleId || !pendingMission || isSessionBusy || isPendingMissionCompleted) {
+      return;
+    }
+
+    const mission = pendingMission;
+
+    try {
+      setIsSessionBusy(true);
+      setMessage('');
+
+      let nextSession: MissionSession;
+
+      try {
+        const existingSession = await getLatestMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+
+        try {
+          nextSession = await joinMissionSession(existingSession.id);
+        } catch (error) {
+          if (!isAlreadyJoinedSessionError(error)) {
+            throw error;
+          }
+
+          nextSession = await getMissionSession(existingSession.id);
+        }
+      } catch (error) {
+        if (!isMissionSessionNotFoundError(error)) {
+          throw error;
+        }
+
+        nextSession = await createMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+      }
+
+      rememberFeedSession(nextSession, mission.scheduleMissionId);
+      setPendingMission(null);
+      router.push({
+        pathname: '/trip/capture',
+        params: {
+          scheduleId: schedule.scheduleId,
+          scheduleMissionId: mission.scheduleMissionId,
+          sessionId: nextSession.id,
+        },
+      });
+    } catch (error) {
+      setPendingMission(null);
+      setMessage(error instanceof Error ? error.message : '미션 세션을 열지 못했어요.');
+    } finally {
+      setIsSessionBusy(false);
+    }
+  };
+
+  const getMissionPhotos = (mission: TripScheduleMission) => {
+    const feedSession = missionSessions[mission.scheduleMissionId] ?? revealedSessions[mission.scheduleMissionId];
+    const isMissionResultComplete = feedSession?.status === 'COMPLETED';
+
+    return getFeedSubmissions(feedSession).map((submission) => ({
+      id: submission.id,
+      imageUrl: submission.imageUrl,
+      isBlurred: !isMissionResultComplete && submission.userId !== currentUserId,
+    }));
+  };
+
+  const openFeedSession = (targetSession: MissionSession | undefined) => {
+    if (!targetSession?.id || !isFeedReadySession(targetSession, requiredScheduleMemberCount)) {
+      return;
+    }
+
+    if (targetSession.status === 'VOTING') {
+      router.push({
+        pathname: '/trip/vote',
+        params: {
+          ...(scheduleId ? { scheduleId } : {}),
+          sessionId: targetSession.id,
+        },
+      });
+      return;
+    }
+
+    if (targetSession.status === 'COMPLETED') {
+      router.push({
+        pathname: '/trip/result',
+        params: {
+          ...(scheduleId ? { scheduleId } : {}),
+          sessionId: targetSession.id,
+        },
+      });
+      return;
+    }
+
+    router.push({
+      pathname: '/trip/review',
       params: {
-        scheduleId: schedule.scheduleId,
-        scheduleMissionId: selectedMission.scheduleMissionId,
-        sessionId: session.id,
+        ...(scheduleId ? { scheduleId } : {}),
+        sessionId: targetSession.id,
       },
     });
   };
 
-  const getMissionPhotos = (mission: TripScheduleMission) => {
-    return revealedSessions[mission.scheduleMissionId]?.submissions.map((submission) => submission.imageUrl) ?? [];
-  };
-
   const completedMissionFeeds = missions
-    .map((mission) => ({ mission, photos: getMissionPhotos(mission) }))
+    .map((mission) => {
+      const session = missionSessions[mission.scheduleMissionId] ?? revealedSessions[mission.scheduleMissionId];
+
+      return { mission, photos: getMissionPhotos(mission), session };
+    })
     .filter((item) => item.photos.length > 0);
+  const hasSavedMissions = missions.length > 0;
 
   return (
     <View style={styles.container}>
@@ -342,52 +851,63 @@ export default function ActiveTripScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingBottom: bottomSafeInset + 94,
+            paddingBottom: hasSavedMissions ? bottomSafeInset + 94 : 0,
             paddingHorizontal: horizontalPadding,
             paddingTop: topSafeInset + 28,
           },
         ]}
+        scrollEnabled={hasSavedMissions || isLoading || Boolean(message)}
         showsVerticalScrollIndicator={false}>
         <View style={styles.tripHeader}>
           <View style={styles.tripTitleBlock}>
             <Text numberOfLines={2} style={styles.tripTitle}>{schedule?.roomName ?? '여행 일정'}</Text>
-            <Text style={styles.companionsText}>나 · 선우 · 이정</Text>
+            <Text style={styles.companionsText}>{getParticipantText(schedule)}</Text>
           </View>
-          <ScalePressable accessibilityLabel="담긴 미션 보기" onPress={() => setMissionListVisible(true)} pressedScale={0.9} style={styles.settingsButton}>
-            <Ionicons color="#8A9194" name="options-outline" size={28} />
-          </ScalePressable>
+          <View style={styles.headerActions}>
+            {canInviteCompanion ? (
+              <ScalePressable accessibilityLabel="동행자 추가" disabled={!schedule || isCreatingInvite} onPress={handleCreateInvite} pressedScale={0.9} style={styles.settingsButton}>
+                {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Image source={activeAddPeopleIcon} style={styles.headerIcon} contentFit="contain" />}
+              </ScalePressable>
+            ) : null}
+            <ScalePressable accessibilityLabel="담긴 미션 보기" onPress={() => setMissionListVisible(true)} pressedScale={0.9} style={styles.settingsButton}>
+              <Image source={activeSettingIcon} style={styles.headerIcon} contentFit="contain" />
+            </ScalePressable>
+          </View>
         </View>
-        <Text style={styles.sectionLabel}>담긴 미션</Text>
+        <Text style={styles.sectionLabel}>담은 미션들</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={{ marginHorizontal: -horizontalPadding }}
           contentContainerStyle={[styles.photoStrip, { paddingHorizontal: horizontalPadding }]}>
-          <ScalePressable accessibilityRole="button" accessibilityLabel="동행자 추가" disabled={!schedule || isCreatingInvite} onPress={handleCreateInvite} pressedScale={0.96} style={styles.inviteTile}>
-            {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Ionicons color="#8A9194" name="person-add" size={20} />}
-            <Text style={styles.inviteTileText}>초대하기</Text>
-          </ScalePressable>
-          {missions.map((mission) => (
-            <ScalePressable key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={styles.photoTile}>
+          {canAddMission ? (
+            <ScalePressable accessibilityRole="button" accessibilityLabel="미션 상세 리스트 열기" disabled={!schedule} onPress={openMissionDetail} pressedScale={0.96} style={styles.inviteTile}>
+              <Image source={activeCameraIcon} style={styles.addTileIcon} contentFit="contain" />
+              <Text style={styles.addTileText}>미션추가</Text>
+            </ScalePressable>
+          ) : null}
+          {activeMissions.map((mission) => {
+            const isPlayBlocked = isMissionBlockedForPlay(mission);
+            const isTodayMission = mission.plannedDate === formatDateValue(new Date());
+
+            return (
+            <ScalePressable disabled={!isTodayMission || isPlayBlocked} key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.96} style={[styles.photoTile, isPlayBlocked && styles.blockedMissionTile]}>
               <Svg height="100%" pointerEvents="none" style={styles.photoTileGradient} viewBox="0 0 82 96" width="100%">
-                <Defs>
-                  <LinearGradient id="missionTileBorderGradient" x1="1" x2="0" y1="0" y2="1">
-                    <Stop offset="0" stopColor="#CCEBF5" />
-                    <Stop offset="1" stopColor="#5FC1E0" />
-                  </LinearGradient>
-                </Defs>
-                <Rect fill="url(#missionTileBorderGradient)" height="96" rx="28" width="82" x="0" y="0" />
+                <Rect fill={isTodayMission ? '#AFD8E5' : '#C3D2D7'} height="96" rx="28" width="82" x="0" y="0" />
               </Svg>
               <View style={styles.photoTileInner}>
-                {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.photoTileImage} contentFit="cover" /> : <View style={styles.photoTilePlaceholder} />}
+                <View style={[styles.missionTileContent, isTodayMission ? styles.todayMissionTileInner : styles.futureMissionTileInner]}>
+                  {isTodayMission && mission.emojiUrl ? <Image source={{ uri: mission.emojiUrl }} style={styles.missionTileIcon} contentFit="contain" /> : null}
+                </View>
               </View>
             </ScalePressable>
-          ))}
+            );
+          })}
         </ScrollView>
         {inviteMessage && !inviteSheetVisible ? <Text style={styles.inlineMessage}>{inviteMessage}</Text> : null}
 
-        <View style={styles.feedPanel}>
-          <Text style={styles.dayLabel}>오늘 · 여행 2일차</Text>
+        <View style={[styles.feedPanel, !hasSavedMissions && styles.emptyFeedPanel]}>
+          <Text style={styles.dayLabel}>{tripDayLabel}</Text>
           {isLoading ? (
             <View style={styles.stateBox}>
               <ActivityIndicator color="#409CB7" />
@@ -401,32 +921,33 @@ export default function ActiveTripScreen() {
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>아직 담긴 미션이 없어요</Text>
               <Text style={styles.emptyText}>미션 상세 리스트에서 원하는 미션을 담아보세요.</Text>
-              <ScalePressable onPress={() => router.push('/mission/detail')} pressedScale={0.96} style={styles.emptyButton}>
-                <Text style={styles.emptyButtonText}>미션 보러가기</Text>
-              </ScalePressable>
             </View>
           ) : completedMissionFeeds.length === 0 ? (
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>아직 찍은 사진이 없어요</Text>
-              <Text style={styles.emptyText}>카메라로 미션 사진을 찍고 공개하면 여기에 보여요.</Text>
+              <Text style={styles.emptyText}>카메라로 미션 사진을 찍으면 여기에 보여요.</Text>
             </View>
           ) : (
-            completedMissionFeeds.map(({ mission, photos }) => (
-              <ScalePressable key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.99} style={styles.feedMissionItem}>
+            completedMissionFeeds.map(({ mission, photos, session: feedSession }) => {
+              const canOpenFeed = Boolean(feedSession && isFeedReadySession(feedSession, requiredScheduleMemberCount));
+
+              return (
+              <ScalePressable disabled={!canOpenFeed} key={mission.scheduleMissionId} onPress={() => openFeedSession(feedSession)} pressedScale={0.99} style={styles.feedMissionItem}>
                 <View style={styles.feedIcon}>
-                  <Ionicons color="#ffffff" name="camera" size={20} />
+                  <Image source={activeCameraIcon} style={styles.feedCameraIcon} contentFit="contain" />
                 </View>
                 <View style={styles.feedCopy}>
                   <Text style={styles.feedTitle}>{mission.title}</Text>
                   <Text style={styles.feedLocation}>{getMissionLocation(mission)}</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedPhotoRow}>
-                    {photos.map((photoUrl, index) => (
-                      <Image key={`${mission.scheduleMissionId}-${index}`} source={{ uri: photoUrl }} style={styles.feedPhoto} contentFit="cover" />
+                    {photos.map((photo) => (
+                      <Image blurRadius={photo.isBlurred ? 18 : 0} key={`${mission.scheduleMissionId}-${photo.id}`} source={{ uri: photo.imageUrl }} style={styles.feedPhoto} contentFit="cover" />
                     ))}
                   </ScrollView>
                 </View>
               </ScalePressable>
-            ))
+              );
+            })
           )}
         </View>
       </ScrollView>
@@ -434,59 +955,75 @@ export default function ActiveTripScreen() {
       <Modal animationType="fade" transparent visible={missionListVisible} onRequestClose={() => setMissionListVisible(false)}>
         <Pressable accessibilityLabel="담긴 미션 닫기" onPress={() => setMissionListVisible(false)} style={styles.modalBackdrop}>
           <Pressable style={styles.missionPanel}>
-            <Text style={styles.panelTitle}>담긴 미션</Text>
+            <Text style={styles.panelTitle}>날짜별 담긴 미션</Text>
+            {missionListMessage ? <Text style={styles.missionListMessage}>{missionListMessage}</Text> : null}
             <ScrollView contentContainerStyle={styles.panelMissionList} showsVerticalScrollIndicator={false}>
-              {missions.map((mission) => (
-                <ScalePressable accessibilityRole="button" key={mission.scheduleMissionId} onPress={() => openMissionSession(mission)} pressedScale={0.98} style={styles.panelMissionItem}>
-                  {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.panelMissionPhoto} contentFit="cover" /> : <View style={styles.panelMissionPhotoPlaceholder} />}
-                  <View style={styles.panelMissionCopy}>
-                    <Text numberOfLines={1} style={styles.panelMissionTitle}>{mission.title}</Text>
-                    <Text numberOfLines={2} style={styles.panelMissionDescription}>{mission.description}</Text>
-                    <Text style={styles.panelMissionStatus}>{mission.status ?? 'ADDED'}</Text>
-                  </View>
-                </ScalePressable>
+              {missions.length === 0 ? (
+                <View style={styles.panelEmptyBox}>
+                  <Text style={styles.emptyTitle}>담긴 미션이 없어요</Text>
+                  <Text style={styles.emptyText}>미션 상세 리스트에서 원하는 미션을 담아보세요.</Text>
+                </View>
+              ) : missionDateGroups.map((group) => (
+                <View key={group.date} style={styles.missionDateGroup}>
+                  <Text style={styles.missionDateTitle}>{getMissionDateLabel(group.date)}</Text>
+                  {group.missions.length === 0 ? (
+                    <View style={styles.emptyDateBox}>
+                      <Text style={styles.emptyDateText}>담긴 미션 없음</Text>
+                    </View>
+                  ) : group.missions.map((mission) => {
+                    const isBusy = busyScheduleMissionId === mission.scheduleMissionId;
+                    const isLocked = isMissionLockedForEdit(mission);
+                    const isTemporary = isTemporaryMission(mission);
+                    const isPlayBlocked = isMissionBlockedForPlay(mission);
+                    const canEditMission = !isLocked && !isBusy;
+                    const canDeleteMission = !isBusy && !isCompletedScheduleMission(mission) && (!isLocked || isTemporary);
+
+                    return (
+                      <View key={mission.scheduleMissionId} style={styles.panelMissionItem}>
+                        <ScalePressable accessibilityRole="button" disabled={isBusy || isPlayBlocked} onPress={() => openMissionSession(mission)} pressedScale={0.98} style={[styles.panelMissionOpenArea, isPlayBlocked && styles.blockedMissionOpenArea]}>
+                          {mission.photoUrl ? <Image source={{ uri: mission.photoUrl }} style={styles.panelMissionPhoto} contentFit="cover" /> : <View style={styles.panelMissionPhotoPlaceholder} />}
+                          <View style={styles.panelMissionCopy}>
+                            <Text numberOfLines={1} style={styles.panelMissionTitle}>{mission.title}</Text>
+                            <Text numberOfLines={2} style={styles.panelMissionDescription}>{mission.description}</Text>
+                            <Text style={styles.panelMissionStatus}>{mission.status ?? 'ADDED'}</Text>
+                          </View>
+                        </ScalePressable>
+                        <View style={styles.panelMissionActions}>
+                          <ScalePressable accessibilityLabel="미션 날짜 변경" disabled={!canEditMission} onPress={() => setDateEditorMissionId((currentId) => currentId === mission.scheduleMissionId ? null : mission.scheduleMissionId)} pressedScale={0.9} style={[styles.iconActionButton, !canEditMission && styles.disabledButton]}>
+                            {isBusy ? <ActivityIndicator color="#626E75" /> : <Ionicons color="#626E75" name="calendar-outline" size={18} />}
+                          </ScalePressable>
+                          <ScalePressable accessibilityLabel="미션 삭제" disabled={!canDeleteMission || !schedule?.permissions.canRemoveMission} onPress={() => handleRemoveScheduledMission(mission)} pressedScale={0.9} style={[styles.iconActionButton, (!canDeleteMission || !schedule?.permissions.canRemoveMission) && styles.disabledButton]}>
+                            <Ionicons color="#D06958" name="trash-outline" size={18} />
+                          </ScalePressable>
+                        </View>
+                        {dateEditorMissionId === mission.scheduleMissionId ? (
+                          <View style={styles.dateEditorGrid}>
+                            {scheduleDateOptions.map((date) => {
+                              const isSelectedDate = mission.plannedDate === date;
+
+                              return (
+                                <ScalePressable
+                                  accessibilityRole="button"
+                                  disabled={isSelectedDate || isBusy}
+                                  key={date}
+                                  onPress={() => handleChangeMissionDate(mission, date)}
+                                  pressedScale={0.96}
+                                  style={[styles.dateEditorOption, isSelectedDate && styles.selectedDateEditorOption, isBusy && styles.disabledButton]}>
+                                  <Text style={[styles.dateEditorText, isSelectedDate && styles.selectedDateEditorText]}>{date}</Text>
+                                </ScalePressable>
+                              );
+                            })}
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
               ))}
             </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
-
-      <Modal animationType="slide" transparent visible={sessionPanelVisible} onRequestClose={() => setSessionPanelVisible(false)}>
-        <Pressable accessibilityLabel="미션 세션 닫기" onPress={() => setSessionPanelVisible(false)} style={styles.modalBackdrop}>
-          <Pressable style={styles.sessionPanel}>
-            <Text style={styles.panelTitle}>미션 세션 테스트</Text>
-            <Text style={styles.sessionMissionTitle}>{selectedMission?.title ?? session?.missionTitle ?? '미션'}</Text>
-            <View style={styles.sessionInfoBox}>
-              <Text style={styles.sessionInfoText}>sessionId: {session?.id ?? '-'}</Text>
-              <Text style={styles.sessionInfoText}>status: {session?.status ?? '-'}</Text>
-              <Text style={styles.sessionInfoText}>members: {session?.members.length ?? 0}</Text>
-              <Text style={styles.sessionInfoText}>submissions: {session?.submissions.length ?? 0}</Text>
-            </View>
-            {sessionMessage ? <Text style={styles.sessionMessage}>{sessionMessage}</Text> : null}
-            {isSessionBusy ? <ActivityIndicator color="#409CB7" style={styles.sessionLoader} /> : null}
-            <View style={styles.sessionActionGrid}>
-              <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => refreshSession(requireSessionId()), '세션을 조회했어요.')} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>조회</Text></ScalePressable>
-              <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => joinMissionSession(requireSessionId()), '세션에 참여했어요.')} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>join</Text></ScalePressable>
-              <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => readyMissionSession(requireSessionId()), '준비 완료 처리했어요.')} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>ready</Text></ScalePressable>
-              <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => startMissionSession(requireSessionId()), '촬영 시작 처리했어요.')} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>start</Text></ScalePressable>
-              <ScalePressable disabled={!session?.id || isSessionBusy} onPress={openCapture} pressedScale={0.95} style={[styles.sessionActionButton, styles.captureActionButton]}><Text style={[styles.sessionActionText, styles.captureActionText]}>촬영</Text></ScalePressable>
-              <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => revealMissionSession(requireSessionId()), '사진을 공개했어요.', { refreshAfter: true })} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>reveal</Text></ScalePressable>
-              <ScalePressable disabled={!session?.id || isSessionBusy} onPress={() => runSessionAction(() => completeMissionSession(requireSessionId()), '미션을 완료했어요.', { refreshAfter: true })} pressedScale={0.95} style={styles.sessionActionButton}><Text style={styles.sessionActionText}>complete</Text></ScalePressable>
-            </View>
-            {session?.status === 'REVEALED' && session.submissions.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.submissionRow}>
-                {session.submissions.map((submission) => (
-                  <View key={submission.id} style={styles.submissionCard}>
-                    <Image source={{ uri: submission.imageUrl }} style={styles.submissionImage} contentFit="cover" />
-                    <Text numberOfLines={1} style={styles.submissionText}>{submission.nickname ?? submission.userId}</Text>
-                  </View>
-                ))}
-              </ScrollView>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
       <Modal animationType="fade" transparent visible={inviteSheetVisible} onRequestClose={closeInviteSheet}>
         <Pressable accessibilityLabel="초대 닫기" onPress={closeInviteSheet} style={styles.inviteModalBackdrop}>
           <Pressable style={[styles.invitePanel, { paddingBottom: bottomSafeInset + 22 }]}>
@@ -498,14 +1035,7 @@ export default function ActiveTripScreen() {
                 </View>
                 <Text style={styles.inviteOptionText}>카카오톡</Text>
               </Pressable>
-              {[{ label: '연진이' }, { label: '김민지' }].map((item) => (
-                <Pressable accessibilityRole="button" accessibilityLabel={`${item.label}에게 초대 공유`} key={item.label} onPress={handleShareInvite} style={styles.inviteOption}>
-                  <View style={styles.inviteContactAvatar}>
-                    <View style={styles.contactKakaoBadge}><Text style={styles.contactKakaoText}>TALK</Text></View>
-                  </View>
-                  <Text style={styles.inviteOptionText}>{item.label}</Text>
-                </Pressable>
-              ))}
+
             </View>
             <View style={styles.inviteDivider} />
             <Pressable accessibilityRole="button" accessibilityLabel="초대 링크 복사하기" onPress={handleCopyInviteLink} style={styles.copyInviteButton}>
@@ -516,16 +1046,46 @@ export default function ActiveTripScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => !isSessionBusy && setPendingMission(null)}
+        transparent
+        visible={Boolean(pendingMission)}>
+        <Pressable
+          accessibilityLabel="미션 시작 팝업 닫기"
+          disabled={isSessionBusy}
+          onPress={() => setPendingMission(null)}
+          style={styles.missionStartOverlay}>
+          <Pressable style={styles.missionStartDialog}>
+            <View style={styles.missionStartCard}>
+              {pendingMission?.emojiUrl ? <Image source={{ uri: pendingMission.emojiUrl }} style={styles.missionStartCardIcon} contentFit="contain" /> : <Ionicons color="#6EA6BF" name="camera-outline" size={42} />}
+            </View>
+            <Text numberOfLines={2} style={styles.missionStartTitle}>{pendingMission?.title ?? '미션'}</Text>
+            <Text style={styles.missionStartQuestion}>이 미션을 시작할까요?</Text>
+            <View style={styles.missionStartActions}>
+              <ScalePressable
+                disabled={isSessionBusy || isPendingMissionCompleted}
+                onPress={startPendingMission}
+                pressedScale={0.97}
+                style={[styles.missionStartButton, isPendingMissionCompleted && styles.missionCompletedButton]}>
+                {isSessionBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.missionStartButtonText}>{isPendingMissionCompleted ? '완료됨' : '시작하기'}</Text>}
+              </ScalePressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#F4F7FA',
+    backgroundColor: '#ffffff',
     flex: 1,
   },
   scrollContent: {
+    backgroundColor: '#F4F7FA',
     paddingTop: 28,
   },
   tripHeader: {
@@ -554,11 +1114,20 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 4,
   },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
   settingsButton: {
     alignItems: 'center',
     height: 44,
     justifyContent: 'center',
     width: 44,
+  },
+  headerIcon: {
+    height: 20,
+    width: 20,
   },
   sectionLabel: {
     color: '#8A9194',
@@ -585,7 +1154,11 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     width: 80,
   },
-  inviteTileText: {
+  addTileIcon: {
+    height: 20,
+    width: 22,
+  },
+  addTileText: {
     color: '#8A9194',
     fontSize: 10,
     fontWeight: '500',
@@ -599,16 +1172,36 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '4deg' }],
     width: 82,
   },
+  blockedMissionTile: {
+    opacity: 0.35,
+  },
   photoTileGradient: {
     ...StyleSheet.absoluteFillObject,
   },
   photoTileInner: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FFFFFF',
     borderRadius: 20,
     height: 86,
     overflow: 'hidden',
-    padding: 2,
+    padding: 4,
     width: 72,
+  },
+  missionTileContent: {
+    alignItems: 'center',
+    borderRadius: 16,
+    flex: 1,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  todayMissionTileInner: {
+    backgroundColor: '#AFD8E5',
+  },
+  futureMissionTileInner: {
+    backgroundColor: '#C3D2D7',
+  },
+  missionTileIcon: {
+    height: 58,
+    width: 58,
   },
   photoTileImage: {
     borderRadius: 19,
@@ -638,6 +1231,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 18,
   },
+  emptyFeedPanel: {
+    minHeight: 0,
+    paddingBottom: 30,
+  },
   dayLabel: {
     borderBottomColor: '#E7EAEB',
     borderBottomWidth: 1,
@@ -661,6 +1258,10 @@ const styles = StyleSheet.create({
     height: 42,
     justifyContent: 'center',
     width: 42,
+  },
+  feedCameraIcon: {
+    height: 18,
+    width: 18,
   },
   feedCopy: {
     flex: 1,
@@ -742,6 +1343,75 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 34,
   },
+  missionStartOverlay: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 22, 31, 0.78)',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  missionStartDialog: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 26,
+    elevation: 12,
+    paddingBottom: 22,
+    paddingHorizontal: 22,
+    paddingTop: 28,
+    shadowColor: '#000000',
+    shadowOffset: { height: 10, width: 0 },
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    width: '100%',
+  },
+  missionStartCard: {
+    alignItems: 'center',
+    backgroundColor: '#AFD8E5',
+    borderRadius: 22,
+    height: 132,
+    justifyContent: 'center',
+    marginBottom: 18,
+    width: 112,
+  },
+  missionStartCardIcon: {
+    height: 90,
+    width: 90,
+  },
+  missionStartTitle: {
+    color: '#2D3C43',
+    fontSize: 17,
+    fontWeight: '600',
+    lineHeight: 29,
+    textAlign: 'center',
+  },
+  missionStartQuestion: {
+    color: '#8A9194',
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  missionStartActions: {
+    flexDirection: 'row',
+    marginTop: 28,
+    width: '100%',
+  },
+  missionStartButton: {
+    alignItems: 'center',
+    backgroundColor: '#63B5CD',
+    borderRadius: 999,
+    flex: 1.45,
+    height: 54,
+    justifyContent: 'center',
+  },
+  missionCompletedButton: {
+    backgroundColor: '#C3D2D7',
+  },
+  missionStartButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   missionPanel: {
     backgroundColor: '#ffffff',
     borderRadius: 22,
@@ -756,15 +1426,90 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 16,
   },
+  missionListMessage: {
+    color: '#409CB7',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginBottom: 12,
+  },
   panelMissionList: {
     gap: 12,
+  },
+  panelEmptyBox: {
+    alignItems: 'center',
+    paddingVertical: 26,
+  },
+  missionDateGroup: {
+    gap: 8,
+  },
+  missionDateTitle: {
+    color: '#53626A',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  emptyDateBox: {
+    backgroundColor: '#F4F7F8',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  emptyDateText: {
+    color: '#9AA3A8',
+    fontSize: 12,
+    fontWeight: '600',
   },
   panelMissionItem: {
     backgroundColor: '#F4F7F8',
     borderRadius: 16,
+    gap: 10,
+    padding: 12,
+  },
+  panelMissionOpenArea: {
     flexDirection: 'row',
     gap: 12,
-    padding: 12,
+  },
+  blockedMissionOpenArea: {
+    opacity: 0.45,
+  },
+  panelMissionActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'flex-end',
+  },
+  iconActionButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  dateEditorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  dateEditorOption: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 38,
+    paddingHorizontal: 12,
+  },
+  selectedDateEditorOption: {
+    backgroundColor: '#409CB7',
+  },
+  dateEditorText: {
+    color: '#53626A',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  selectedDateEditorText: {
+    color: '#FFFFFF',
   },
   panelMissionPhoto: {
     backgroundColor: '#E3E9EC',
@@ -797,86 +1542,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     marginTop: 6,
-  },
-  sessionPanel: {
-    backgroundColor: '#ffffff',
-    borderRadius: 22,
-    maxHeight: '84%',
-    paddingHorizontal: 20,
-    paddingVertical: 24,
-    width: '100%',
-  },
-  sessionMissionTitle: {
-    color: '#2D3C43',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  sessionInfoBox: {
-    backgroundColor: '#F4F7F8',
-    borderRadius: 14,
-    gap: 5,
-    padding: 12,
-  },
-  sessionInfoText: {
-    color: '#53626A',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  sessionMessage: {
-    color: '#409CB7',
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-    marginTop: 10,
-  },
-  sessionLoader: {
-    marginTop: 10,
-  },
-  sessionActionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 16,
-  },
-  sessionActionButton: {
-    alignItems: 'center',
-    backgroundColor: '#EAF5F9',
-    borderRadius: 999,
-    justifyContent: 'center',
-    minHeight: 42,
-    paddingHorizontal: 15,
-  },
-  sessionActionText: {
-    color: '#409CB7',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  captureActionButton: {
-    backgroundColor: '#409CB7',
-  },
-  captureActionText: {
-    color: '#ffffff',
-  },
-  submissionRow: {
-    gap: 10,
-    marginTop: 16,
-  },
-  submissionCard: {
-    width: 116,
-  },
-  submissionImage: {
-    aspectRatio: 1,
-    backgroundColor: '#E3E9EC',
-    borderRadius: 14,
-    width: '100%',
-  },
-  submissionText: {
-    color: '#53626A',
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 6,
-    textAlign: 'center',
   },
   inviteModalBackdrop: {
     alignItems: 'center',

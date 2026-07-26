@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { getMissionCardLevel, MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, type MissionItem } from '@/lib/mission-api';
@@ -12,17 +13,6 @@ const themeMapByCategory: Record<MissionTheme, number> = {
   MOUNTAIN: require('../../assets/svg/map/mountain_map.svg'),
   SEA: require('../../assets/svg/map/sea_map.svg'),
   CITY: require('../../assets/svg/map/city_map.svg'),
-};
-const missionLevelFrames = [
-  require('../../assets/svg/mission_level/standard_frame.svg'),
-  require('../../assets/svg/mission_level/rare_frame.svg'),
-  require('../../assets/svg/mission_level/side_frame.svg'),
-];
-
-const missionLevelByType = {
-  BASIC: { accentColor: '#437084', frame: missionLevelFrames[0], label: '기본 미션', titleColor: '#163745' },
-  RARE: { accentColor: '#83B1C3', frame: missionLevelFrames[1], label: '희귀 미션', titleColor: '#F3F9FC' },
-  SIDE: { accentColor: '#245B6B', frame: missionLevelFrames[2], label: '사이드 미션', titleColor: '#182428' },
 };
 
 type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
@@ -101,10 +91,15 @@ const DEFAULT_THEME_DISTRICTS: Record<MissionTheme, string[]> = {
 const MAP_ASPECT_RATIO = 1;
 const MISSION_FRAME_ASPECT_RATIO = 164 / 209;
 
-function getMissionLevel(mission?: MissionItem) {
-  const type = mission?.type === 'RARE' || mission?.type === 'SIDE' ? mission.type : 'BASIC';
 
-  return missionLevelByType[type];
+function prefetchMissionEmojiIcons(missions: MissionItem[]) {
+  const emojiUrls = Array.from(new Set(missions.map((mission) => mission.emojiUrl).filter(Boolean) as string[]));
+
+  if (emojiUrls.length === 0) {
+    return;
+  }
+
+  void Image.prefetch(emojiUrls, 'memory-disk').catch(() => undefined);
 }
 
 function getPolygonBounds(points: string) {
@@ -143,7 +138,6 @@ export default function BusanMapScreen() {
   const [deckMissions, setDeckMissions] = useState<MissionItem[]>([]);
   const [isDeckMissionLoading, setIsDeckMissionLoading] = useState(false);
   const [deckMissionError, setDeckMissionError] = useState('');
-  const [isMissionTitleMultiline, setIsMissionTitleMultiline] = useState(false);
   const activeMissionIndexRef = useRef(0);
   const isCardAnimatingRef = useRef(false);
   const cardTranslateX = useRef(new Animated.Value(0)).current;
@@ -181,6 +175,7 @@ export default function BusanMapScreen() {
         setThemeDistrictError('');
         // 선택 테마에 미션이 있는 구만 요청
         const missions = await fetchMissions({ theme: missionTheme });
+        prefetchMissionEmojiIcons(missions);
         const districts = Array.from(
           new Set(missions.flatMap((mission) => [mission.districtLabel, mission.districtCode].filter(Boolean) as string[]))
         );
@@ -234,6 +229,7 @@ export default function BusanMapScreen() {
         districtCode: target.districtCode,
         ...(selectedMissionTheme ? { theme: selectedMissionTheme } : {}),
       });
+      prefetchMissionEmojiIcons(missions);
       setDeckMissions(missions);
     } catch (error) {
       setDeckMissionError(error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.');
@@ -310,13 +306,9 @@ export default function BusanMapScreen() {
   const nextMissionIndex = (activeMissionIndex + 1) % missionDeckCount;
   const previousMissionIndex = (activeMissionIndex - 1 + missionDeckCount) % missionDeckCount;
   const activeMission = deckMissions[activeMissionIndex];
-  const activeMissionLevel = getMissionLevel(activeMission);
   const nextMission = deckMissions[nextMissionIndex];
   const previousMission = deckMissions[previousMissionIndex];
 
-  useEffect(() => {
-    setIsMissionTitleMultiline(false);
-  }, [activeMission?.id, activeMission?.title]);
 
   const openMissionDetail = () => {
     router.push({
@@ -426,14 +418,14 @@ export default function BusanMapScreen() {
           <View style={[styles.frameDeck, { height: frameHeight, width: frameWidth + 72 }]}>
             {shouldShowPreviousFrame ? (
               <Image
-                source={getMissionLevel(previousMission).frame}
+                source={getMissionCardLevel(previousMission).frame}
                 style={[styles.missionFrame, styles.backFrameLeft, { height: frameHeight, width: frameWidth }]}
                 contentFit="contain"
               />
             ) : null}
             {shouldShowNextFrame ? (
               <Image
-                source={getMissionLevel(nextMission).frame}
+                source={getMissionCardLevel(nextMission).frame}
                 style={[styles.missionFrame, styles.backFrameRight, { height: frameHeight, width: frameWidth }]}
                 contentFit="contain"
               />
@@ -448,49 +440,17 @@ export default function BusanMapScreen() {
                   width: frameWidth,
                 },
               ]}>
-              <Image source={activeMissionLevel.frame} style={styles.frontMissionImage} contentFit="contain" />
-              <View style={styles.missionCardContent} pointerEvents="none">
-                {isDeckMissionLoading ? (
-                  <View style={styles.deckStateBox}>
-                    <ActivityIndicator color={activeMissionLevel.titleColor} />
-                    <Text style={[styles.deckStateText, { color: activeMissionLevel.accentColor }]}>미션을 불러오는 중</Text>
-                  </View>
-                ) : deckMissionError ? (
-                  <View style={styles.deckStateBox}>
-                    <Text style={[styles.deckStateText, { color: activeMissionLevel.accentColor }]}>{deckMissionError}</Text>
-                  </View>
-                ) : activeMission ? (
-                  <>
-                    <View style={[styles.missionTypeBadge, { borderColor: activeMissionLevel.accentColor }]}>
-                      <Text style={[styles.missionTypeText, { color: activeMissionLevel.accentColor }]}>{activeMissionLevel.label}</Text>
-                    </View>
-                    <Text
-                      style={[
-                        styles.deckMissionTitle,
-                        isMissionTitleMultiline && styles.longDeckMissionTitle,
-                        { color: activeMissionLevel.titleColor },
-                      ]}
-                      numberOfLines={2}
-                      onTextLayout={(event) => {
-                        if (!isMissionTitleMultiline && event.nativeEvent.lines.length > 1) {
-                          setIsMissionTitleMultiline(true);
-                        }
-                      }}>
-                      {activeMission.title}
-                    </Text>
-                    {activeMission.photoUrl ? (
-                      <Image source={{ uri: activeMission.photoUrl }} style={styles.deckMissionPhoto} contentFit="cover" />
-                    ) : (
-                      <View style={styles.deckMissionPhotoPlaceholder} />
-                    )}
-                    <Text style={[styles.deckMissionDescription, { color: activeMissionLevel.accentColor }]} numberOfLines={2}>{activeMission.description}</Text>
-                  </>
-                ) : (
-                  <View style={styles.deckStateBox}>
-                    <Text style={[styles.deckStateText, { color: activeMissionLevel.accentColor }]}>표시할 미션이 없습니다.</Text>
-                  </View>
-                )}
-              </View>
+              <MissionCard
+                errorMessage={deckMissionError}
+                isLoading={isDeckMissionLoading}
+                mission={activeMission ? {
+                  description: activeMission.description,
+                  iconText: activeMission.rewardItemIcon,
+                  iconUrl: activeMission.emojiUrl,
+                  title: activeMission.title,
+                  type: activeMission.type,
+                } : null}
+              />
             </Animated.View>
           </View>
 
@@ -782,78 +742,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     position: 'absolute',
     zIndex: 3,
-  },
-  frontMissionImage: {
-    height: '100%',
-    width: '100%',
-    zIndex: 1,
-  },
-  missionCardContent: {
-    alignItems: 'center',
-    bottom: '15%',
-    left: '10%',
-    paddingHorizontal: 10,
-    position: 'absolute',
-    right: '10%',
-    top: '15%',
-    zIndex: 2,
-  },
-  missionTypeBadge: {
-    borderRadius: 999,
-    borderWidth: 1,
-    marginBottom: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  missionTypeText: {
-    fontSize: 10,
-    fontWeight: '500',
-  },
-  deckMissionTitle: {
-    width: '75%',
-    fontSize: 18,
-    fontWeight: '700',
-    lineHeight: 22,
-    marginBottom: 8,
-    minHeight: 22,
-    textAlign: 'center',
-  },
-  longDeckMissionTitle: {
-    fontSize: 16,
-    lineHeight: 20,
-    minHeight: 40,
-  },
-  deckMissionPhoto: {
-    aspectRatio: 1,
-    backgroundColor: '#ffffff',
-    width: '68%',
-  },
-  deckMissionPhotoPlaceholder: {
-    aspectRatio: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.58)',
-    borderColor: 'rgba(95, 121, 136, 0.26)',
-    borderWidth: 1,
-    width: '68%',
-  },
-  deckMissionDescription: {
-    width: '80%',
-    fontSize: 12,
-    fontWeight: '500',
-    lineHeight: 15,
-    marginTop: 7,
-    textAlign: 'center',
-  },
-  deckStateBox: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 10,
-    justifyContent: 'center',
-    paddingHorizontal: 22,
-  },
-  deckStateText: {
-    fontSize: 12,
-    fontWeight: '500',
-    textAlign: 'center',
   },
   pagination: {
     flexDirection: 'row',

@@ -7,6 +7,7 @@ import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { BottomNavigationBar } from '@/components/bottom-navigation-bar';
+import { MissionCompletionAlert } from '@/components/mission-completion-alert';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 function getKakaoInviteToken(url: string) {
   try {
@@ -75,6 +76,7 @@ export default function RootLayout() {
           </Stack>
         </View>
         <BottomNavigationBar />
+        <MissionCompletionAlert />
       </View>
       <StatusBar style="auto" />
     </ThemeProvider>

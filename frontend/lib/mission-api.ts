@@ -1,6 +1,10 @@
+import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
+
 const API_BASE_URL = 'http://211.213.193.67:7020';
 
 type MissionApiItem = Record<string, unknown>;
+
+const MISSION_CACHE_KEY = 'mission_list_cache';
 
 export type MissionItem = {
   id: string;
@@ -10,7 +14,9 @@ export type MissionItem = {
   title: string;
   location: string;
   description: string;
+  emojiUrl: string | null;
   photoUrl: string | null;
+  rewardItemIcon: string | null;
   theme: string | null;
   type: string | null;
 };
@@ -56,6 +62,7 @@ function toMissionItem(item: MissionApiItem, index: number): MissionItem {
   const place = getString(item, ['place', 'place_name', 'placeName', 'location', 'address']);
   const location = [district ? `부산 · ${district}` : '', place].filter(Boolean).join(' · ');
   const photoUrl = getString(item, ['target_photo_url', 'photo_url', 'photoUrl', 'image_url', 'imageUrl']);
+  const emojiUrl = getString(item, ['emoji_url', 'emojiUrl', 'mission_emoji_url', 'missionEmojiUrl']);
 
   return {
     id,
@@ -65,7 +72,9 @@ function toMissionItem(item: MissionApiItem, index: number): MissionItem {
     title: getString(item, ['title', 'name', 'mission_name', 'missionName']) || '미션명',
     location: location || '부산',
     description: getString(item, ['description', 'content', 'guide', 'summary']) || '미션 설명이 아직 없습니다.',
+    emojiUrl: normalizePhotoUrl(emojiUrl),
     photoUrl: normalizePhotoUrl(photoUrl) || (code ? getMissionPhotoUrl(code) : null),
+    rewardItemIcon: getString(item, ['reward_item_icon', 'rewardItemIcon']) || null,
     theme: getString(item, ['theme']) || null,
     type: getString(item, ['type', 'mission_type', 'missionType']) || null,
   };
@@ -93,6 +102,25 @@ function normalizePhotoUrl(photoUrl: string) {
 
 export function getMissionPhotoUrl(missionCode: string) {
   return `${API_BASE_URL}/missions/${encodeURIComponent(missionCode)}/photo`;
+}
+
+export function getCachedMissions() {
+  const raw = getAuthItem(MISSION_CACHE_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as MissionItem[];
+    return Array.isArray(parsed) ? parsed.filter((mission) => mission.id && mission.title) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMissionCache(missions: MissionItem[]) {
+  setAuthItem(MISSION_CACHE_KEY, JSON.stringify(missions));
 }
 
 export async function fetchMissions(params: { districtCode?: string; theme?: string }) {

@@ -3,7 +3,7 @@ import { router, usePathname, type Href } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const hiddenPathnames = ['/', '/login', '/auth/callback', '/trip/capture'];
+const hiddenPathnames = ['/', '/login', '/auth/callback', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result'];
 
 type FeatherIconName = React.ComponentProps<typeof Feather>['name'];
 

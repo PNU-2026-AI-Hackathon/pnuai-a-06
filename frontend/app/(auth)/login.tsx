@@ -1,8 +1,9 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -31,7 +32,7 @@ function getErrorMessage(error: unknown) {
 }
 
 export default function LoginScreen() {
-  const { bottomActionInset, horizontalPadding, topInset } = useResponsiveLayout();
+  const { bottomActionInset, bottomSafeInset, horizontalPadding, topInset } = useResponsiveLayout();
   const [mode, setMode] = useState<AuthMode>('home');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -39,6 +40,21 @@ export default function LoginScreen() {
   const [verificationCode, setVerificationCode] = useState('');
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const authScrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', (event) => setKeyboardHeight(event.endCoordinates.height));
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+      authScrollRef.current?.scrollTo({ animated: true, y: 0 });
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const resetMessage = () => {
     setMessage('');
@@ -119,18 +135,26 @@ export default function LoginScreen() {
   const authTitle = mode === 'login' ? '이메일 로그인' : mode === 'verify' ? '이메일 인증' : '회원가입';
   const authButtonText = mode === 'login' ? '로그인' : mode === 'verify' ? '인증하고 시작하기' : '가입하기';
   const submitAuth = mode === 'login' ? handleLogin : mode === 'verify' ? handleVerify : handleRegister;
+  const isKeyboardVisible = keyboardHeight > 0;
+  const authBottomInset = isKeyboardVisible ? 0 : Math.max(bottomSafeInset, 12);
+  const keyboardScrollPadding = isKeyboardVisible ? Math.max(keyboardHeight - topInset, 120) : 28;
+
+  const keepFocusedInputVisible = () => {
+    window.setTimeout(() => {
+      authScrollRef.current?.scrollTo({ animated: true, y: 96 });
+    }, 80);
+  };
 
   if (mode !== 'home') {
     return (
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 18}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboardView}>
         <View
           style={[
             styles.authContainer,
             {
-              paddingBottom: bottomActionInset,
+              paddingBottom: authBottomInset,
               paddingHorizontal: horizontalPadding,
               paddingTop: topInset,
             },
@@ -143,8 +167,12 @@ export default function LoginScreen() {
           </View>
 
           <ScrollView
+            ref={authScrollRef}
             bounces={false}
-            contentContainerStyle={styles.authScrollContent}
+            contentContainerStyle={[
+              styles.authScrollContent,
+              { paddingBottom: keyboardScrollPadding },
+            ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             <View style={styles.formArea}>
@@ -160,6 +188,7 @@ export default function LoginScreen() {
                   editable={mode !== 'verify' && !isSubmitting}
                   keyboardType="email-address"
                   onChangeText={setEmail}
+                  onFocus={keepFocusedInputVisible}
                   placeholder="이메일"
                   placeholderTextColor="#9AA0A4"
                   style={[styles.input, mode === 'verify' && styles.disabledInput]}
@@ -169,6 +198,7 @@ export default function LoginScreen() {
                   <TextInput
                     editable={!isSubmitting}
                     onChangeText={setName}
+                    onFocus={keepFocusedInputVisible}
                     placeholder="이름"
                     placeholderTextColor="#9AA0A4"
                     style={styles.input}
@@ -179,6 +209,7 @@ export default function LoginScreen() {
                   <TextInput
                     editable={!isSubmitting}
                     onChangeText={setPassword}
+                    onFocus={keepFocusedInputVisible}
                     placeholder="비밀번호"
                     placeholderTextColor="#9AA0A4"
                     secureTextEntry
@@ -190,6 +221,7 @@ export default function LoginScreen() {
                     editable={!isSubmitting}
                     keyboardType="number-pad"
                     onChangeText={setVerificationCode}
+                    onFocus={keepFocusedInputVisible}
                     placeholder="인증 코드"
                     placeholderTextColor="#9AA0A4"
                     style={styles.input}

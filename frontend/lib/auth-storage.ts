@@ -2,6 +2,8 @@ import { Platform } from 'react-native';
 
 const memoryStorage = new Map<string, string>();
 
+export const MISSION_COMPLETION_PENDING_KEY = 'mission_completion_alert_pending';
+
 export function setAuthItem(key: string, value: string) {
   if (Platform.OS === 'web') {
     localStorage.setItem(key, value);
