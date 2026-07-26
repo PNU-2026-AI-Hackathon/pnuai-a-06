@@ -138,6 +138,12 @@ function getMissionLocation(mission: TripScheduleMission) {
   return mission.placeLabel ?? mission.districtLabel ?? '부산';
 }
 
+function prefetchMissionIcons(missions: TripScheduleMission[]) {
+  const iconUrls = Array.from(new Set(missions.map((mission) => mission.emojiUrl).filter((url): url is string => Boolean(url))));
+
+  void Promise.all(iconUrls.map((url) => Image.prefetch(url, 'memory-disk'))).catch(() => undefined);
+}
+
 function getParticipantText(schedule: TripSchedule | null) {
   const names = schedule?.participants
     .map((participant) => participant.nickname || participant.email)
@@ -261,7 +267,23 @@ export default function ActiveTripScreen() {
   const missionSessionsRef = useRef<Record<string, MissionSession>>({});
   const revealedSessionsRef = useRef<Record<string, MissionSession>>({});
   const missions = useMemo(() => schedule?.missions ?? [], [schedule]);
-  const activeMissions = missions.filter((mission) => !isCompletedScheduleMission(mission) && !isFinishedSession(revealedSessions[mission.scheduleMissionId]));
+  const [todayDay, setTodayDay] = useState(() => getCalendarDayNumber(new Date()));
+  const activeMissions = missions.filter((mission) => {
+    const plannedDay = parseDateValue(mission.plannedDate);
+
+    return !isCompletedScheduleMission(mission)
+      && !isFinishedSession(revealedSessions[mission.scheduleMissionId])
+      && (!plannedDay || getCalendarDayNumber(plannedDay) >= todayDay);
+  });
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const nextTodayDay = getCalendarDayNumber(new Date());
+      setTodayDay((currentTodayDay) => currentTodayDay === nextTodayDay ? currentTodayDay : nextTodayDay);
+    }, 60 * 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
   const scheduleDateOptions = useMemo(() => getScheduleDateOptions(schedule), [schedule]);
   const tripDayLabel = useMemo(() => getTripDayLabel(schedule), [schedule]);
   const missionDateGroups = useMemo(() => {
@@ -412,6 +434,7 @@ export default function ActiveTripScreen() {
           return;
         }
 
+        prefetchMissionIcons(nextSchedule.missions);
         setSchedule(nextSchedule);
 
         void Promise.all(Object.values(cachedRevealedSessions).map(async (cachedSession) => {
@@ -851,7 +874,7 @@ export default function ActiveTripScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingBottom: hasSavedMissions ? bottomSafeInset + 94 : 0,
+            paddingBottom: hasSavedMissions ? 24 : 0,
             paddingHorizontal: horizontalPadding,
             paddingTop: topSafeInset + 28,
           },
@@ -1085,7 +1108,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    backgroundColor: '#F4F7FA',
+    backgroundColor: '#ffffff',
     paddingTop: 28,
   },
   tripHeader: {

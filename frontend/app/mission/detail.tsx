@@ -118,6 +118,18 @@ function addDays(date: Date, days: number) {
   return nextDate;
 }
 
+function isPastDate(value: string) {
+  const date = parseDateValue(value);
+
+  if (!date) {
+    return false;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date.getTime() < today.getTime();
+}
+
 function getScheduleDateOptions(schedule: TripSchedule) {
   const startDate = parseDateValue(schedule.startDate);
   const endDate = parseDateValue(schedule.endDate ?? schedule.startDate);
@@ -343,7 +355,10 @@ export default function MissionDetailScreen() {
     try {
       setIsAddingMission(true);
       setActionMessage('');
-      await addMissionToSchedule(schedule.scheduleId, mission.id, plannedDate);
+      const addedScheduleMission = await addMissionToSchedule(schedule.scheduleId, mission.id, plannedDate);
+      if (addedScheduleMission.emojiUrl) {
+        void Image.prefetch(addedScheduleMission.emojiUrl, 'memory-disk').catch(() => undefined);
+      }
       if (targetScheduleId && schedule.scheduleId === targetScheduleId) {
         await refreshTargetSchedule();
       }
@@ -380,7 +395,7 @@ export default function MissionDetailScreen() {
     setSelectedMission(mission);
     const dateOptions = getScheduleDateOptions(targetSchedule);
 
-    if (dateOptions.length === 1) {
+    if (dateOptions.length === 1 && !isPastDate(dateOptions[0])) {
       void addMissionForDate(mission, targetSchedule, dateOptions[0]);
       return;
     }
@@ -462,7 +477,7 @@ export default function MissionDetailScreen() {
 
     const dateOptions = getScheduleDateOptions(schedule);
 
-    if (dateOptions.length === 1) {
+    if (dateOptions.length === 1 && !isPastDate(dateOptions[0])) {
       void addMissionForDate(selectedMission, schedule, dateOptions[0]);
       return;
     }
@@ -591,15 +606,16 @@ export default function MissionDetailScreen() {
                     <Text style={styles.dateEmptyText}>선택할 수 있는 날짜가 없어요.</Text>
                   ) : getScheduleDateOptions(selectedScheduleForDate).map((date, index) => {
                     const isSelectedDate = selectedPlannedDate === date;
+                    const isDateDisabled = isPastDate(date);
 
                     return (
                     <ScalePressable
                       accessibilityRole="button"
-                      disabled={isAddingMission}
+                      disabled={isAddingMission || isDateDisabled}
                       key={date}
                       onPress={() => setSelectedPlannedDate(date)}
                       pressedScale={0.96}
-                      style={[styles.dateOption, isSelectedDate && styles.selectedDateOption, isAddingMission && styles.disabledButton]}>
+                      style={[styles.dateOption, isSelectedDate && styles.selectedDateOption, (isAddingMission || isDateDisabled) && styles.disabledButton]}>
                       <Text style={[styles.dateOptionText, isSelectedDate && styles.selectedDateOptionText]}>{index + 1}</Text>
                     </ScalePressable>
                     );
