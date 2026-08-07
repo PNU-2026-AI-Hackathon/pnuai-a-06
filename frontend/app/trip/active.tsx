@@ -892,7 +892,7 @@ export default function ActiveTripScreen() {
                 {isCreatingInvite ? <ActivityIndicator color="#8A9194" /> : <Image source={activeAddPeopleIcon} style={styles.headerIcon} contentFit="contain" />}
               </ScalePressable>
             ) : null}
-            <ScalePressable accessibilityLabel="담긴 미션 보기" onPress={() => setMissionListVisible(true)} pressedScale={0.9} style={styles.settingsButton}>
+            <ScalePressable accessibilityLabel="여행 설정" onPress={() => schedule?.scheduleId && router.push({ pathname: '/trip/edit' as never, params: { scheduleId: schedule.scheduleId } })} pressedScale={0.9} style={styles.settingsButton}>
               <Image source={activeSettingIcon} style={styles.headerIcon} contentFit="contain" />
             </ScalePressable>
           </View>

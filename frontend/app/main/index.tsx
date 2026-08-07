@@ -68,6 +68,8 @@ export default function MainScreen() {
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
   const [magazinePhotoUrls, setMagazinePhotoUrls] = useState<string[]>([]);
+  const [isMagazineLoading, setIsMagazineLoading] = useState(true);
+  const [hasLoadedMagazine, setHasLoadedMagazine] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -98,6 +100,10 @@ export default function MainScreen() {
       let isActive = true;
 
       const loadLatestMagazine = async () => {
+        if (isActive) {
+          setIsMagazineLoading(true);
+        }
+
         try {
           let schedules: TripSchedule[];
 
@@ -127,12 +133,19 @@ export default function MainScreen() {
             }
           }))).filter((photoUrl): photoUrl is string => Boolean(photoUrl)).slice(0, 3);
 
+          await Promise.all(photoUrls.map((photoUrl) => Image.prefetch(photoUrl, 'memory-disk'))).catch(() => undefined);
+
           if (isActive) {
             setMagazinePhotoUrls(photoUrls);
           }
         } catch {
           if (isActive) {
             setMagazinePhotoUrls([]);
+          }
+        } finally {
+          if (isActive) {
+            setIsMagazineLoading(false);
+            setHasLoadedMagazine(true);
           }
         }
       };
@@ -164,9 +177,11 @@ export default function MainScreen() {
         </Pressable>
       </View>
 
-      <Pressable
-        onPress={() => router.push('/magazine/detail')}
-        style={[styles.magazineCard, isSingleMagazine && styles.singleMagazineFrame]}>
+      {hasLoadedMagazine ? (
+        <Pressable
+          disabled={isMagazineLoading}
+          onPress={() => router.push('/magazine/detail')}
+          style={[styles.magazineCard, isSingleMagazine && styles.singleMagazineFrame]}>
         {isSingleMagazine ? (
           <View style={styles.singleMagazineInner}>
             <Image source={singleMagazineTitle} style={styles.singleMagazineTitle} contentFit="contain" />
@@ -206,7 +221,8 @@ export default function MainScreen() {
             </View>
           </>
         )}
-      </Pressable>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -304,6 +320,7 @@ const styles = StyleSheet.create({
     width: '35%',
     zIndex: 1,
   },
+
   magazineCopy: {
     alignItems: 'flex-start',
     flex: 1,

@@ -43,9 +43,18 @@ type ApiScheduleMission = {
 };
 
 type ApiScheduleUser = {
+  avatar_url?: string | null;
+  avatarUrl?: string | null;
   email?: string | null;
   id?: string | number;
   nickname?: string | null;
+  profile?: ApiScheduleUser | null;
+  profile_emoji?: string | null;
+  profile_image?: string | null;
+  profile_image_url?: string | null;
+  profileEmoji?: string | null;
+  profileImageUrl?: string | null;
+  user?: ApiScheduleUser | null;
 };
 
 type ApiScheduleMember = {
@@ -137,6 +146,8 @@ export type TripScheduleUser = {
   email?: string | null;
   id?: string;
   nickname?: string | null;
+  profileEmoji?: string | null;
+  profileImageUrl?: string | null;
 };
 
 export type TripSchedulePermissions = {
@@ -337,19 +348,22 @@ function normalizeScheduleUser(data: ApiScheduleUser | null | undefined): TripSc
     return null;
   }
 
-  const id = data.id === undefined || data.id === null ? undefined : String(data.id);
-  const nickname = data.nickname ?? null;
-  const email = data.email ?? null;
+  const profile = data.profile ?? data;
+  const id = profile.id === undefined || profile.id === null ? undefined : String(profile.id);
+  const nickname = profile.nickname ?? null;
+  const email = profile.email ?? null;
+  const profileImageUrl = normalizePhotoUrl(profile.profile_image_url ?? profile.profile_image ?? profile.profileImageUrl ?? profile.avatar_url ?? profile.avatarUrl);
+  const profileEmoji = profile.profile_emoji ?? profile.profileEmoji ?? null;
 
   if (!id && !nickname && !email) {
     return null;
   }
 
-  return { email, id, nickname };
+  return { email, id, nickname, profileEmoji, profileImageUrl };
 }
 
 function normalizeScheduleParticipants(data: ApiSchedule) {
-  const participants = Array.isArray(data.participants) ? data.participants.map(normalizeScheduleUser).filter((user): user is TripScheduleUser => Boolean(user)) : [];
+  const participants = Array.isArray(data.participants) ? data.participants.map((participant) => normalizeScheduleUser(participant.user ?? participant)).filter((user): user is TripScheduleUser => Boolean(user)) : [];
   const participantIds = new Set(participants.map((user) => user.id).filter(Boolean));
   const creator = normalizeScheduleUser(data.creator);
 
