@@ -17,7 +17,7 @@ import { removeTripCompanion } from '@/lib/trip-companion-api';
 import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 import { removeMissionFromSchedule, getTripSchedule, updateDraftSchedule, updateScheduleMissionDate, type TripSchedule, type TripScheduleMission, type TripScheduleUser } from '@/lib/trip-schedule-api';
 
-const crownIcon = require('../../assets/svg/active/crown.svg');
+const crownIcon = require('../../assets/svg/active/crown_black.svg');
 const blackChevronIcon = require('../../assets/svg/active/inv_chevron_black.svg');
 const greyChevronIcon = require('../../assets/svg/active/inv_chevron_grey.svg');
 
@@ -67,7 +67,7 @@ function createFallbackInviteUrl(invite: TripInvite) {
 export default function EditTripScreen() {
   const params = useLocalSearchParams<{ scheduleId?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
-  const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
+  const { bottomSafeInset, horizontalPadding, topInset } = useResponsiveLayout();
   const [schedule, setSchedule] = useState<TripSchedule | null>(null);
   const [scheduleName, setScheduleName] = useState('');
   const [startDate, setStartDate] = useState<string | null>(null);
@@ -250,7 +250,7 @@ export default function EditTripScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={{ paddingHorizontal: horizontalPadding, paddingTop: topSafeInset }}><TopBar title="여행 수정" /></View>
+      <View style={{ paddingHorizontal: horizontalPadding, paddingTop: topInset }}><TopBar title="여행 수정" /></View>
       <ScrollView contentContainerStyle={{ paddingBottom: bottomSafeInset + 120, paddingHorizontal: horizontalPadding }} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>일정 이름</Text>
         <View style={styles.inputBox}>
