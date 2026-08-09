@@ -9,6 +9,7 @@ import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, Style
 import { Rect, Svg } from 'react-native-svg';
 
 import { ScalePressable } from '@/components/scale-pressable';
+import { TripInviteSheet } from '@/components/trip-invite-sheet';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 import { shareKakaoInvite } from '@/lib/kakao-share';
@@ -1047,28 +1048,16 @@ export default function ActiveTripScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-      <Modal animationType="fade" transparent visible={inviteSheetVisible} onRequestClose={closeInviteSheet}>
-        <Pressable accessibilityLabel="초대 닫기" onPress={closeInviteSheet} style={styles.inviteModalBackdrop}>
-          <Pressable style={[styles.invitePanel, { paddingBottom: bottomSafeInset + 22 }]}>
-            <Text style={styles.invitePanelTitle}>동행자 추가하기</Text>
-            <View style={styles.inviteOptionsRow}>
-              <Pressable accessibilityRole="button" accessibilityLabel="카카오톡으로 초대하기" onPress={handleShareInvite} style={styles.inviteOption}>
-                <View style={[styles.kakaoInviteAvatar, isSharingInvite && styles.disabledButton]}>
-                  {isSharingInvite ? <ActivityIndicator color="#3A2D00" /> : <Text style={styles.kakaoTalkText}>TALK</Text>}
-                </View>
-                <Text style={styles.inviteOptionText}>카카오톡</Text>
-              </Pressable>
-
-            </View>
-            <View style={styles.inviteDivider} />
-            <Pressable accessibilityRole="button" accessibilityLabel="초대 링크 복사하기" onPress={handleCopyInviteLink} style={styles.copyInviteButton}>
-              <Text style={styles.copyInviteText}>링크 복사하기</Text>
-              <Ionicons color="#626E75" name="copy-outline" size={27} />
-            </Pressable>
-            {inviteMessage ? <Text style={styles.inviteMessageText}>{inviteMessage}</Text> : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <TripInviteSheet
+        bottomSafeInset={bottomSafeInset}
+        invite={inviteData}
+        isSharing={isSharingInvite}
+        message={inviteMessage}
+        onClose={closeInviteSheet}
+        onCopy={() => void handleCopyInviteLink()}
+        onShare={() => void handleShareInvite()}
+        visible={inviteSheetVisible}
+      />
 
       <Modal
         animationType="fade"

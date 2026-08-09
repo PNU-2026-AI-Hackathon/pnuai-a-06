@@ -8,6 +8,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, 
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
 import { TopBar } from '@/components/top-bar';
+import { TripInviteSheet } from '@/components/trip-invite-sheet';
 import { TripDatePicker } from '@/components/trip-date-picker';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
@@ -17,6 +18,8 @@ import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from
 import { removeMissionFromSchedule, getTripSchedule, updateDraftSchedule, updateScheduleMissionDate, type TripSchedule, type TripScheduleMission, type TripScheduleUser } from '@/lib/trip-schedule-api';
 
 const crownIcon = require('../../assets/svg/active/crown.svg');
+const blackChevronIcon = require('../../assets/svg/active/inv_chevron_black.svg');
+const greyChevronIcon = require('../../assets/svg/active/inv_chevron_grey.svg');
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -258,9 +261,15 @@ export default function EditTripScreen() {
 
         <Text style={[styles.sectionTitle, styles.periodTitle]}>기간</Text>
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: !isCreator || isTripStarted }} disabled={!isCreator || isTripStarted} onPress={() => setDatePickerVisible(true)} style={[styles.periodRow, isTripStarted && styles.periodDisabled]}>
-          <View style={[styles.dateBox, isStartDateChanged && styles.changedDateBox]}><Text style={styles.dateText}>{formatDateLabel(startDate, false)}</Text><Text style={styles.downIcon}>⌄</Text></View>
+          <View style={[styles.dateBox, isStartDateChanged && styles.changedDateBox]}>
+  <Text style={[styles.dateText, isStartDateChanged && styles.changedDateText]}>{formatDateLabel(startDate, false)}</Text>
+  <Image source={isStartDateChanged ? blackChevronIcon : greyChevronIcon} style={styles.chevronIcon} />
+</View>
           <Text style={styles.wave}>~</Text>
-          <View style={[styles.dateBox, isEndDateChanged && styles.changedDateBox]}><Text style={styles.dateText}>{formatDateLabel(endDate, false)}</Text><Text style={styles.downIcon}>⌄</Text></View>
+          <View style={[styles.dateBox, isEndDateChanged && styles.changedDateBox]}>
+  <Text style={[styles.dateText, isEndDateChanged && styles.changedDateText]}>{formatDateLabel(endDate, false)}</Text>
+  <Image source={isEndDateChanged ? blackChevronIcon : greyChevronIcon} style={styles.chevronIcon} />
+</View>
         </Pressable>
         <Text style={styles.durationText}>{dateCount > 0 ? `${dateCount}일간 여행` : '여행 기간을 선택해 주세요.'}</Text>
 
@@ -302,7 +311,16 @@ export default function EditTripScreen() {
 
       <TripDatePicker endDate={endDate} onClose={() => setDatePickerVisible(false)} onConfirm={handleDateConfirm} startDate={startDate} visible={datePickerVisible} />
       <TripDatePicker endDate={missionForDatePicker?.plannedDate ?? startDate} maxDate={endDate ?? undefined} minDate={startDate ?? undefined} onClose={() => setMissionDatePickerId(null)} onConfirm={(nextStartDate) => void handleMissionDateConfirm(nextStartDate)} startDate={missionForDatePicker?.plannedDate ?? startDate} visible={Boolean(missionForDatePicker)} />
-      {invite ? <View style={styles.inviteOverlay}><Pressable onPress={() => setInvite(null)} style={StyleSheet.absoluteFill} /><View style={styles.inviteCard}><Text style={styles.inviteTitle}>동행자 추가하기</Text><ScalePressable disabled={isSharingInvite} onPress={() => void handleShareInvite()} style={styles.inviteButton}><Text style={styles.inviteButtonText}>{isSharingInvite ? '열는 중...' : '카카오톡으로 초대'}</Text></ScalePressable><ScalePressable onPress={() => void handleCopyInvite()} style={styles.copyButton}><Text style={styles.copyButtonText}>초대 링크 복사</Text></ScalePressable></View></View> : null}
+      <TripInviteSheet
+        bottomSafeInset={bottomSafeInset}
+        invite={invite}
+        isSharing={isSharingInvite}
+        message={message}
+        onClose={() => setInvite(null)}
+        onCopy={() => void handleCopyInvite()}
+        onShare={() => void handleShareInvite()}
+        visible={Boolean(invite)}
+      />
     </View>
   );
 }
@@ -370,7 +388,7 @@ const styles = StyleSheet.create({
   dateBox: {
     alignItems: 'center',
     backgroundColor: '#F5F5F5',
-    borderRadius: 24,
+    borderRadius: 12,
     flex: 1,
     flexDirection: 'row',
     height: 47,
@@ -385,10 +403,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
-  downIcon: {
-    color: '#111820',
-    fontSize: 24,
-    marginTop: -8,
+  changedDateText: {
+    color: '#10161F',
+  },
+  chevronIcon: {
+    height: 5,
+    width: 8,
   },
   wave: {
     color: '#10161F',

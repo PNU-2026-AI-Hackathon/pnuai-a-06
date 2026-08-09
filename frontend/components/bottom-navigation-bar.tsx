@@ -28,7 +28,7 @@ const navItems: {
   },
   {
     accessibilityLabel: '미션',
-    href: '/mission/detail',
+    href: '/map',
     icon: 'flag',
     match: ['/mission/detail', '/mission/locked', '/map', '/map/district'],
     type: 'standard',
