@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   typeBadge: {
     borderRadius: 999,
     borderWidth: 1,
-    marginBottom: 12,
+    marginBottom: 17,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 22,
     marginBottom: 8,
-    minHeight: 44,
+    minHeight: 22,
     textAlign: 'center',
     width: '75%',
   },
@@ -139,8 +139,8 @@ const styles = StyleSheet.create({
     width: '68%',
   },
   iconImage: {
-    height: '100%',
-    width: '100%',
+    height: '95%',
+    width: '95%',
   },
   rewardIcon: {
     fontSize: 64,

@@ -55,32 +55,33 @@ function getSortedMissions(
 ) {
   const focusedDistrictCode = normalizeValue(options.districtCode);
   const focusedMissionCode = normalizeValue(options.missionCode);
+  const seenMissionKeys = new Set<string>();
+  const themedMissions = missions.filter((mission) => normalizeValue(mission.theme) === options.theme);
+  const uniqueThemedMissions = themedMissions.filter((mission) => {
+    const missionKey = normalizeValue(mission.code ?? mission.id);
 
-  return missions
+    if (seenMissionKeys.has(missionKey)) {
+      return false;
+    }
+
+    seenMissionKeys.add(missionKey);
+    return true;
+  });
+
+  return uniqueThemedMissions
     .map((mission, index) => {
       const missionCode = normalizeValue(mission.code ?? mission.id);
-      const missionTheme = normalizeValue(mission.theme);
       const missionDistrictCode = normalizeValue(mission.districtCode);
-      const isSameTheme = missionTheme === options.theme;
       const isSameDistrict =
         Boolean(focusedDistrictCode && missionDistrictCode === focusedDistrictCode) || mission.districtLabel === options.district;
       const isSameMission = Boolean(focusedMissionCode && missionCode === focusedMissionCode);
-      let priority = 4;
-
-      if (isSameTheme && isSameDistrict) {
-        priority = isSameMission ? 0 : 1;
-      } else if (isSameTheme) {
-        priority = 2;
-      } else if (isSameDistrict) {
-        priority = 3;
-      }
+      const priority = isSameMission ? 0 : isSameDistrict ? 1 : 2;
 
       return { index, mission, priority };
     })
     .sort((a, b) => a.priority - b.priority || a.index - b.index)
     .map(({ mission }) => mission);
 }
-
 function formatScheduleDate(schedule: TripSchedule) {
   if (schedule.startDate && schedule.endDate) {
     if (schedule.startDate === schedule.endDate) {
@@ -196,25 +197,27 @@ export default function MissionDetailScreen() {
     let isActive = true;
 
     async function loadMissions() {
+      const cachedMissions = getCachedMissions();
+      const cachedThemeMissions = cachedMissions.filter((mission) => normalizeValue(mission.theme) === selectedTheme);
+
       try {
-        const cachedMissions = getCachedMissions();
-        if (cachedMissions.length > 0) {
-          setMissions(cachedMissions);
+        if (cachedThemeMissions.length > 0) {
+          setMissions(cachedThemeMissions);
           setIsLoading(false);
         } else {
+          setMissions([]);
           setIsLoading(true);
         }
         setErrorMessage('');
-        const missionList = await fetchMissions({});
+        const missionList = await fetchMissions({ theme: selectedTheme });
 
         if (isActive) {
           setMissions(missionList);
         }
       } catch (error) {
         if (isActive) {
-          const cachedMissions = getCachedMissions();
-          setMissions(cachedMissions);
-          setErrorMessage(cachedMissions.length === 0 ? (error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.') : '');
+          setMissions(cachedThemeMissions);
+          setErrorMessage(cachedThemeMissions.length === 0 ? (error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.') : '');
         }
       } finally {
         if (isActive) {
@@ -223,12 +226,12 @@ export default function MissionDetailScreen() {
       }
     }
 
-    loadMissions();
+    void loadMissions();
 
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [selectedTheme]);
 
   useEffect(() => {
     if (!targetScheduleId) {

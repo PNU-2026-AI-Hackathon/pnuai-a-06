@@ -401,10 +401,10 @@ export default function BusanMapScreen() {
                 })}
               </View>
             ) : null}
-            {!isMissionDeckOpen && (isThemeDistrictLoading || themeDistrictError) ? (
+            {!isMissionDeckOpen && isThemeDistrictLoading ? <ActivityIndicator color="#202124" size="small" style={styles.mapLoadingIndicator} /> : null}
+            {!isMissionDeckOpen && !isThemeDistrictLoading && themeDistrictError ? (
               <View style={styles.mapStatusBox}>
-                {isThemeDistrictLoading ? <ActivityIndicator color="#202124" size="small" /> : null}
-                <Text style={styles.mapStatusText}>{isThemeDistrictLoading ? '미션 구를 불러오는 중' : themeDistrictError}</Text>
+                <Text style={styles.mapStatusText}>{themeDistrictError}</Text>
               </View>
             ) : null}
           </View>
@@ -620,6 +620,12 @@ const styles = StyleSheet.create({
   selectedMapPieceLabel: {
     backgroundColor: '#202124',
     color: '#ffffff',
+  },
+  mapLoadingIndicator: {
+    left: '50%',
+    position: 'absolute',
+    top: '50%',
+    transform: [{ translateX: -10 }, { translateY: -10 }],
   },
   mapStatusBox: {
     alignItems: 'center',

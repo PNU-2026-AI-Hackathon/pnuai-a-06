@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Rect, Svg } from 'react-native-svg';
 
+import { getMissionCardLevel } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { TripInviteSheet } from '@/components/trip-invite-sheet';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -55,9 +56,10 @@ function getInviteUrl(invite: TripInvite | null) {
   return invite.inviteUrl ?? createFallbackInviteUrl(invite.inviteToken);
 }
 
-const activeCameraIcon = require('../../assets/svg/active/camera.svg');
+const activeAddIcon = require('../../assets/svg/active/add.svg');
 const activeAddPeopleIcon = require('../../assets/svg/active/add_people.svg');
 const activeSettingIcon = require('../../assets/svg/active/setting.svg');
+const crownIcon = require('../../assets/svg/active/crown.svg');
 const REVEALED_SESSION_CACHE_PREFIX = 'trip_revealed_sessions:';
 
 function getRevealedSessionCacheKey(scheduleId: string) {
@@ -301,12 +303,15 @@ export default function ActiveTripScreen() {
     return groups;
   }, [missions, scheduleDateOptions]);
   const canAddMission = schedule?.permissions.canAddMission ?? false;
+  const isScheduleCreator = Boolean(schedule?.creatorId && currentUserId && schedule.creatorId === currentUserId);
   const requiredScheduleMemberCount = schedule?.participants.length ?? 0;
   const activeBlockingSession = Object.values(missionSessions).find((nextSession) => !isFinishedSession(nextSession)) ?? null;
   const hasStartedMissionSession = Object.values(missionSessions).some(isStartedMissionSession);
   const canInviteCompanion = (schedule?.permissions.canInviteCompanion ?? false) && !hasStartedMissionSession;
   const inviteUrl = getInviteUrl(inviteData);
   const pendingMissionSession = pendingMission ? missionSessions[pendingMission.scheduleMissionId] ?? revealedSessions[pendingMission.scheduleMissionId] : undefined;
+  const pendingMissionLevel = getMissionCardLevel(pendingMission);
+
   const isPendingMissionCompleted = hasSubmittedMissionPhoto(pendingMissionSession, currentUserId);
   const isMissionBlockedForPlay = useCallback((mission: TripScheduleMission) => {
     return Boolean(activeBlockingSession?.scheduleMissionId && activeBlockingSession.scheduleMissionId !== mission.scheduleMissionId);
@@ -884,7 +889,10 @@ export default function ActiveTripScreen() {
         showsVerticalScrollIndicator={false}>
         <View style={styles.tripHeader}>
           <View style={styles.tripTitleBlock}>
-            <Text numberOfLines={2} style={styles.tripTitle}>{schedule?.roomName ?? '여행 일정'}</Text>
+            <View style={styles.tripTitleRow}>
+              <Text numberOfLines={2} style={styles.tripTitle}>{schedule?.roomName ?? '여행 일정'}</Text>
+              {isScheduleCreator ? <Image contentFit="contain" source={crownIcon} style={styles.creatorCrown} /> : null}
+            </View>
             <Text style={styles.companionsText}>{getParticipantText(schedule)}</Text>
           </View>
           <View style={styles.headerActions}>
@@ -898,7 +906,7 @@ export default function ActiveTripScreen() {
             </ScalePressable>
           </View>
         </View>
-        <Text style={styles.sectionLabel}>담은 미션들</Text>
+        <Text style={styles.sectionLabel}>미션 리스트</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -906,7 +914,7 @@ export default function ActiveTripScreen() {
           contentContainerStyle={[styles.photoStrip, { paddingHorizontal: horizontalPadding }]}>
           {canAddMission ? (
             <ScalePressable accessibilityRole="button" accessibilityLabel="미션 상세 리스트 열기" disabled={!schedule} onPress={openMissionDetail} pressedScale={0.96} style={styles.inviteTile}>
-              <Image source={activeCameraIcon} style={styles.addTileIcon} contentFit="contain" />
+              <Image source={activeAddIcon} style={styles.addTileIcon} contentFit="contain" />
               <Text style={styles.addTileText}>미션추가</Text>
             </ScalePressable>
           ) : null}
@@ -958,7 +966,7 @@ export default function ActiveTripScreen() {
               return (
               <ScalePressable disabled={!canOpenFeed} key={mission.scheduleMissionId} onPress={() => openFeedSession(feedSession)} pressedScale={0.99} style={styles.feedMissionItem}>
                 <View style={styles.feedIcon}>
-                  <Image source={activeCameraIcon} style={styles.feedCameraIcon} contentFit="contain" />
+                  <Image source={activeAddIcon} style={styles.feedCameraIcon} contentFit="contain" />
                 </View>
                 <View style={styles.feedCopy}>
                   <Text style={styles.feedTitle}>{mission.title}</Text>
@@ -1060,7 +1068,7 @@ export default function ActiveTripScreen() {
       />
 
       <Modal
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => !isSessionBusy && setPendingMission(null)}
         transparent
         visible={Boolean(pendingMission)}>
@@ -1069,19 +1077,19 @@ export default function ActiveTripScreen() {
           disabled={isSessionBusy}
           onPress={() => setPendingMission(null)}
           style={styles.missionStartOverlay}>
-          <Pressable style={styles.missionStartDialog}>
-            <View style={styles.missionStartCard}>
-              {pendingMission?.emojiUrl ? <Image source={{ uri: pendingMission.emojiUrl }} style={styles.missionStartCardIcon} contentFit="contain" /> : <Ionicons color="#6EA6BF" name="camera-outline" size={42} />}
-            </View>
-            <Text numberOfLines={2} style={styles.missionStartTitle}>{pendingMission?.title ?? '미션'}</Text>
-            <Text style={styles.missionStartQuestion}>이 미션을 시작할까요?</Text>
-            <View style={styles.missionStartActions}>
+          <Pressable style={[styles.missionStartDialog, { paddingBottom: bottomSafeInset + 22 }]}>
+            <Image contentFit="fill" source={pendingMissionLevel.frame} style={styles.missionStartFrame} />
+            <View style={styles.missionStartContent}>
+              <Text numberOfLines={2} style={[styles.missionStartQuestion, { color: pendingMissionLevel.titleColor }]}>{pendingMission?.title ?? '미션'}</Text>
+              {pendingMission?.emojiUrl ? <Image contentFit="contain" source={{ uri: pendingMission.emojiUrl }} style={styles.missionStartCardIcon} /> : <Ionicons color={pendingMissionLevel.titleColor} name="camera-outline" size={72} />}
+
+              <Text numberOfLines={3} style={[styles.missionStartDescription, { color: pendingMissionLevel.accentColor }]}>{pendingMission?.description ?? '미션 설명이 아직 없습니다.'}</Text>
               <ScalePressable
                 disabled={isSessionBusy || isPendingMissionCompleted}
                 onPress={startPendingMission}
                 pressedScale={0.97}
-                style={[styles.missionStartButton, isPendingMissionCompleted && styles.missionCompletedButton]}>
-                {isSessionBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.missionStartButtonText}>{isPendingMissionCompleted ? '완료됨' : '시작하기'}</Text>}
+                style={[styles.missionStartButton, { backgroundColor: '#63B5CD' }, isPendingMissionCompleted && styles.missionCompletedButton]}>
+                {isSessionBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.missionStartButtonText}>{isPendingMissionCompleted ? '완료됨' : '미션하기'}</Text>}
               </ScalePressable>
             </View>
           </Pressable>
@@ -1112,12 +1120,23 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  tripTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0,
+  },
   tripTitle: {
     color: '#2D3C43',
+    flexShrink: 1,
     fontSize: 24,
     fontWeight: '600',
     letterSpacing: 0,
     lineHeight: 37,
+  },
+  creatorCrown: {
+    height: 20,
+    width: 20,
   },
   companionsText: {
     color: '#8A9194',
@@ -1168,13 +1187,13 @@ const styles = StyleSheet.create({
   },
   addTileIcon: {
     height: 20,
-    width: 22,
+    width: 20,
   },
   addTileText: {
     color: '#8A9194',
     fontSize: 10,
     fontWeight: '500',
-    marginTop: 4,
+    marginTop: 8,
   },
   photoTile: {
     alignItems: 'center',
@@ -1356,72 +1375,70 @@ const styles = StyleSheet.create({
     paddingVertical: 34,
   },
   missionStartOverlay: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 22, 31, 0.78)',
+    backgroundColor: 'rgba(16, 22, 31, 0.28)',
     flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 28,
+    justifyContent: 'flex-end',
   },
   missionStartDialog: {
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 26,
-    elevation: 12,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    minHeight: 450,
+    overflow: 'hidden',
     paddingBottom: 22,
-    paddingHorizontal: 22,
-    paddingTop: 28,
-    shadowColor: '#000000',
-    shadowOffset: { height: 10, width: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 30,
+    position: 'relative',
     width: '100%',
   },
-  missionStartCard: {
+  missionStartFrame: {
+    bottom: -20,
+    left: -20,
+    position: 'absolute',
+    right: -20,
+    top: -20,
+    transform: [{ scale: 1.5 }],
+    zIndex: 0,
+  },
+  missionStartContent: {
     alignItems: 'center',
-    backgroundColor: '#AFD8E5',
-    borderRadius: 22,
-    height: 132,
-    justifyContent: 'center',
-    marginBottom: 18,
-    width: 112,
+    flex: 1,
+    justifyContent: 'space-between',
+    zIndex: 1,
   },
   missionStartCardIcon: {
-    height: 90,
-    width: 90,
+    height: 150,
+    marginVertical: 12,
+    width: 150,
   },
-  missionStartTitle: {
-    color: '#2D3C43',
-    fontSize: 17,
-    fontWeight: '600',
-    lineHeight: 29,
-    textAlign: 'center',
-  },
+
   missionStartQuestion: {
-    color: '#8A9194',
-    fontSize: 13,
-    fontWeight: '500',
-    marginTop: 4,
+    fontSize: 20,
+    fontWeight: '600',
+    lineHeight: 36,
     textAlign: 'center',
   },
-  missionStartActions: {
-    flexDirection: 'row',
-    marginTop: 28,
-    width: '100%',
+  missionStartDescription: {
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 21,
+    marginTop: 8,
+    maxWidth: 320,
+    textAlign: 'center',
   },
   missionStartButton: {
     alignItems: 'center',
-    backgroundColor: '#63B5CD',
     borderRadius: 999,
-    flex: 1.45,
-    height: 54,
+    height: 55,
     justifyContent: 'center',
+    marginTop: 28,
+    width: '100%',
   },
   missionCompletedButton: {
     backgroundColor: '#C3D2D7',
   },
   missionStartButtonText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
   },
   missionPanel: {
