@@ -50,16 +50,16 @@ Mission district tags and place labels currently reflect the latest DB seed/upda
 ```text
 MTN_B01   MOUNTAIN  BASIC  이제 부산은 제 겁니다              NAM       남구      황령산 봉수대
 MTN_B02   MOUNTAIN  BASIC  템플스테이                        BUSANJIN  부산진구  삼광사
-MTN_R01   MOUNTAIN  RARE   피톤치드 힐링                     DONGNAE   동래구    금강공원
+MTN_R01   MOUNTAIN  RARE   피톤치드 힐링                     BUK       북구      백양산
 MTN_S01   MOUNTAIN  SIDE   주모 한 잔 추가요                 GEUMJEONG 금정구    금정산성
 SEA_B01   SEA       BASIC  서핑 좋아하세요?                  HAEUNDAE  해운대구  송정
-SEA_B02   SEA       BASIC  둘이서 떠나요                     GIJANG    기장군    일광
-SEA_R01   SEA       RARE   바다에 왔으면 옷이 젖어야 하는 법 HAEUNDAE  해운대구  해운대 해수욕장
-SEA_S01   SEA       SIDE   와사비 폭탄                       SAHA      사하구    다대포
-CITY_B01  CITY      BASIC  카멜레온 게임                     JUNG      중구      국제시장
-CITY_B02  CITY      BASIC  사이버펑크 부산                   YEONJE    연제구    부산시청
+SEA_B02   SEA       BASIC  둘이서 떠나요                     SEO       서구      송도
+SEA_R01   SEA       RARE   바다에 왔으면 옷이 젖어야 하는 법 SAHA      사하구    다대포 해수욕장
+SEA_S01   SEA       SIDE   친구야 선물이야                   JUNG      중구      자갈치시장
+CITY_B01  CITY      BASIC  카멜레온 게임                     BUK       북구      구포시장
+CITY_B02  CITY      BASIC  사이버펑크 부산                   NAM       남구      부산항대교, 문현금융단지
 CITY_R01  CITY      RARE   서울숲 아니고 부산숲              GANGSEO   강서구    을숙도
-CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  JUNG      중구      부산역
+CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   동래구    동래시장
 ```
 
 ## Code Organization
