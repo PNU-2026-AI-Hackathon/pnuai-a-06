@@ -18,6 +18,9 @@ from app.models.schedules import (
     ScheduleMission,
 )
 from app.services.mission_session_ws import manager
+from app.services.mission_session_timeouts import schedule_participant_timeout
+from app.services.mission_sessions import apply_judgement_to_participant
+from app.services.schedule_mission_ws import manager as schedule_mission_ws
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -101,17 +104,28 @@ def _request_body(submission: MissionSubmission, target_image: Path, user_image:
             f"키워드: {mission.target_keyword}" if mission.target_keyword else None,
         ) if value
     )
+    judgement_rules = json.dumps(
+        mission.judgement_rules or {}, ensure_ascii=False, indent=2
+    )
     prompt = f"""당신은 사진 미션 검수기입니다.
 미션 정보:
 {mission_details}
 
+아래 JSON은 이 미션의 판정 규칙이다. 제목이나 예시 사진보다 이 규칙을 우선하여
+사진에서 실제로 확인되는 요소만 평가하라. 확인할 수 없는 요소는 충족으로 추정하지 마라.
+판정 규칙:
+{judgement_rules}
+
 첫 번째 이미지는 DB에 등록된 미션 예시 사진이고, 두 번째 이미지는 사용자가 제출한 사진입니다.
-미션 제목/내용과 예시 사진을 기준으로 사용자의 사진이 미션을 실제로 수행했다는 시각적 증거를 평가하세요.
+각 required_elements를 개별적으로 검사하고, forbidden_elements가 보이면 감점하세요.
+사람 수·OCR·행동 조건은 사진에서 명확하게 보이는 경우에만 인정하세요.
+사용자가 실제로 음식을 먹었는지, GPS 위치가 맞는지는 사진만으로 추정하지 마세요.
 사람의 신원, GPS, 촬영 장소의 실제 위치는 이번 판정에서 사용하지 마세요.
 사진에 미션 수행을 보여주는 글자나 물체가 있으면 OCR/시각적 증거로 고려하세요.
 score는 0~100 정수에 가깝게 반환하고, 명확한 증거가 부족하면 REVIEW 또는 FAIL로 판단하세요.
 PASS는 명확히 미션을 수행한 경우, FAIL은 미션과 무관하거나 조작/증거 부족인 경우입니다.
-criteria에는 제목/내용 부합, 예시 사진과의 핵심 요소 부합, 사진 증거의 명확성을 각각 평가하세요."""
+criteria에는 JSON 규칙의 필수 조건과 금지 조건을 각각 평가하고, evidence에는
+사진에서 확인한 구체적인 근거를 적으세요."""
     return {
         "model": get_settings().openai_vision_model,
         "input": [{
@@ -143,12 +157,38 @@ def _output_text(payload: dict) -> str:
     raise ValueError("OpenAI returned no structured judgement text.")
 
 
-def _mark_error(db: Session, submission: MissionSubmission, reason: str) -> None:
+def _mark_error(
+    db: Session, submission: MissionSubmission, reason: str
+) -> datetime | None:
     submission.judge_status = "ERROR"
     submission.judge_reason = reason
     submission.judge_error = reason
     submission.judged_at = datetime.now(timezone.utc)
+    deadline = apply_judgement_to_participant(submission, "ERROR")
     db.commit()
+    return deadline
+
+
+async def _publish_judgement(
+    db: Session, submission: MissionSubmission, deadline: datetime | None
+) -> None:
+    session = _load_session_for_broadcast(db, submission.session_id)
+    if session is None:
+        return
+    if session.status == "REVEALED":
+        event_type = "commentary_started"
+    elif session.status == "COMPLETED":
+        event_type = "session_completed"
+    elif session.status == "CANCELLED":
+        event_type = "session_cancelled"
+    else:
+        event_type = "judgement_updated"
+    await manager.broadcast_session(session, event_type)
+    await schedule_mission_ws.broadcast_session(
+        session.schedule_mission.schedule_id, session, event_type
+    )
+    if deadline is not None:
+        schedule_participant_timeout(session.id, deadline)
 
 
 async def judge_submission(submission_id: int) -> None:
@@ -163,16 +203,19 @@ async def judge_submission(submission_id: int) -> None:
 
         settings = get_settings()
         if not settings.openai_api_key:
-            _mark_error(db, submission, "OPENAI_API_KEY is not configured.")
+            deadline = _mark_error(db, submission, "OPENAI_API_KEY is not configured.")
+            await _publish_judgement(db, submission, deadline)
             return
         target_code = submission.session.schedule_mission.mission.target_photo_id or submission.session.schedule_mission.mission.code
         target_image = MISSION_PHOTO_ROOT / f"{target_code}.jpg"
         user_image = _safe_static_path(submission.storage_key)
         if not target_image.is_file():
-            _mark_error(db, submission, "Mission target image is not available.")
+            deadline = _mark_error(db, submission, "Mission target image is not available.")
+            await _publish_judgement(db, submission, deadline)
             return
         if not user_image.is_file():
-            _mark_error(db, submission, "Submitted image is not available.")
+            deadline = _mark_error(db, submission, "Submitted image is not available.")
+            await _publish_judgement(db, submission, deadline)
             return
 
         try:
@@ -185,7 +228,10 @@ async def judge_submission(submission_id: int) -> None:
                 response.raise_for_status()
                 result = json.loads(_output_text(response.json()))
         except Exception as error:
-            _mark_error(db, submission, f"Mission judgement request failed: {error}")
+            deadline = _mark_error(
+                db, submission, f"Mission judgement request failed: {error}"
+            )
+            await _publish_judgement(db, submission, deadline)
             return
 
         score = max(0.0, min(100.0, float(result.get("score", 0))))
@@ -201,22 +247,8 @@ async def judge_submission(submission_id: int) -> None:
         submission.judge_model = settings.openai_vision_model
         submission.judged_at = datetime.now(timezone.utc)
         submission.judge_error = None
-        if status == "PASSED":
-            expected_members = len(submission.session.members)
-            submitted = submission.session.submissions
-            if expected_members > 0 and len(submitted) == expected_members and all(
-                item.judge_status == "PASSED" for item in submitted
-            ):
-                submission.session.status = "REVEALED"
-                submission.session.revealed_at = datetime.now(timezone.utc)
-        elif submission.session.status in ("REVEALED", "VOTING"):
-            submission.session.status = "UPLOADING"
-            submission.session.revealed_at = None
-            submission.session.voting_expires_at = None
+        deadline = apply_judgement_to_participant(submission, status)
         db.commit()
-
-        session = _load_session_for_broadcast(db, submission.session_id)
-        if session is not None:
-            await manager.broadcast_session(session, "judgement_updated")
+        await _publish_judgement(db, submission, deadline)
     finally:
         db.close()

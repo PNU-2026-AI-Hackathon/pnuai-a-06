@@ -259,6 +259,12 @@ class MissionSession(Base):
     )
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="WAITING")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    participants_locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    shooting_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     revealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -303,6 +309,15 @@ class MissionSessionMember(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    participation_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="UNDECIDED", server_default="UNDECIDED", index=True
+    )
+    decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exclusion_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    upload_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

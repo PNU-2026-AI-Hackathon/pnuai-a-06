@@ -16,12 +16,22 @@ from app.models.schedules import (
 )
 
 
-OPEN_SESSION_STATUSES = ("WAITING", "READY", "SHOOTING", "UPLOADING", "REVEALED")
+OPEN_SESSION_STATUSES = (
+    "WAITING",
+    "READY",
+    "SHOOTING",
+    "UPLOADING",
+    "REVEALED",
+    "VOTING",
+)
 # A newly created session is also the current session for the schedule. This
 # lets the client discover WAITING/READY sessions before the camera starts.
 ACTIVE_MISSION_STATUSES = OPEN_SESSION_STATUSES
 SESSION_DURATION = timedelta(minutes=30)
+SHOOTING_DURATION = timedelta(seconds=60)
+RETAKE_DURATION = timedelta(seconds=60)
 VOTING_DURATION = timedelta(minutes=10)
+TERMINAL_MEMBER_STATUSES = ("SKIPPED", "LOCKED_OUT", "TIMED_OUT", "COMPLETED")
 
 
 class ActiveMissionSessionConflict(Exception):
@@ -51,6 +61,18 @@ class SubmissionCommentAlreadyExists(Exception):
 
 
 class VotingNotReady(Exception):
+    pass
+
+
+class ParticipationLocked(Exception):
+    pass
+
+
+class ParticipationNotAllowed(Exception):
+    pass
+
+
+class NoParticipants(Exception):
     pass
 
 
@@ -98,6 +120,36 @@ def _can_participate(schedule: MissionSchedule, user_id: int) -> bool:
     )
 
 
+def can_access_schedule(db: Session, schedule_id: int, user_id: int) -> bool:
+    schedule = db.scalar(
+        select(MissionSchedule)
+        .where(MissionSchedule.id == schedule_id)
+        .options(selectinload(MissionSchedule.members))
+    )
+    return bool(schedule and _can_participate(schedule, user_id))
+
+
+def _member(session: MissionSession, user_id: int) -> MissionSessionMember | None:
+    return next((item for item in session.members if item.user_id == user_id), None)
+
+
+def _completed_user_ids(session: MissionSession) -> set[int]:
+    return {
+        member.user_id
+        for member in session.members
+        if member.participation_status == "COMPLETED"
+    }
+
+
+def _eligible_submissions(session: MissionSession) -> list[MissionSubmission]:
+    completed_user_ids = _completed_user_ids(session)
+    return [
+        item
+        for item in session.submissions
+        if item.user_id in completed_user_ids and item.judge_status == "PASSED"
+    ]
+
+
 def _active_session_for_schedule(
     db: Session,
     schedule_id: int,
@@ -109,7 +161,6 @@ def _active_session_for_schedule(
         .where(
             ScheduleMission.schedule_id == schedule_id,
             MissionSession.status.in_(ACTIVE_MISSION_STATUSES),
-            (MissionSession.expires_at.is_(None) | (MissionSession.expires_at > datetime.now(timezone.utc))),
         )
         .order_by(MissionSession.started_at.desc(), MissionSession.id.desc())
     )
@@ -121,25 +172,17 @@ def _active_session_for_schedule(
 def _ensure_session_not_expired(
     db: Session, session: MissionSession, *, allow_voting: bool = False
 ) -> None:
-    # Repair sessions created by the old behavior where the creator's first
-    # upload started voting before all accepted schedule participants joined.
     now = datetime.now(timezone.utc)
-    if (
-        session.status == "VOTING"
-        and session.expires_at is not None
-        and session.expires_at > now
-        and len(session.members) < _expected_session_member_count(
-            db, session.schedule_mission.schedule_id
-        )
-    ):
-        session.status = "UPLOADING"
-        session.voting_expires_at = None
-        db.commit()
     allowed_statuses = OPEN_SESSION_STATUSES + (("VOTING",) if allow_voting else ())
     if session.status not in allowed_statuses:
         raise VotingSessionExpired("Mission execution is closed.")
-    if session.expires_at is not None and session.expires_at <= now:
-        _enter_commentary(session)
+    if (
+        session.status != "VOTING"
+        and session.expires_at is not None
+        and session.expires_at <= now
+    ):
+        _expire_late_participants(session, now, force=True)
+        _maybe_finish_shooting(session)
         db.commit()
         raise MissionSessionExpired("Mission session expired.")
 
@@ -153,18 +196,112 @@ def _enter_voting(db: Session, session: MissionSession) -> None:
 def _enter_commentary(session: MissionSession) -> None:
     if session.status in ("SHOOTING", "UPLOADING"):
         session.status = "REVEALED"
+        session.revealed_at = datetime.now(timezone.utc)
         session.voting_expires_at = None
 
 
+def _expire_late_participants(
+    session: MissionSession, now: datetime, *, force: bool = False
+) -> bool:
+    if session.status not in ("SHOOTING", "UPLOADING"):
+        return False
+    submissions_by_user = {item.user_id: item for item in session.submissions}
+    changed = False
+    for member in session.members:
+        if member.participation_status != "PARTICIPATING":
+            continue
+        deadline = member.upload_deadline_at or session.shooting_deadline_at
+        if not force and (deadline is None or deadline > now):
+            continue
+        submission = submissions_by_user.get(member.user_id)
+        if (
+            submission is not None
+            and submission.judge_status in ("PENDING", "PROCESSING")
+            and not force
+        ):
+            continue
+        if submission is not None and submission.judge_status == "PASSED":
+            member.participation_status = "COMPLETED"
+            member.upload_deadline_at = None
+        else:
+            member.participation_status = "TIMED_OUT"
+            member.excluded_at = now
+            member.exclusion_reason = "PHOTO_TIMEOUT"
+            member.upload_deadline_at = None
+        changed = True
+    return changed
+
+
+def _maybe_finish_shooting(session: MissionSession) -> bool:
+    if session.status not in ("SHOOTING", "UPLOADING"):
+        return False
+    if any(
+        member.participation_status not in TERMINAL_MEMBER_STATUSES
+        for member in session.members
+    ):
+        return False
+    completed_members = [
+        member for member in session.members if member.participation_status == "COMPLETED"
+    ]
+    if not completed_members:
+        session.status = "CANCELLED"
+        session.completed_at = datetime.now(timezone.utc)
+        return True
+    if len(completed_members) == 1:
+        session.winner_user_id = completed_members[0].user_id
+        session.status = "COMPLETED"
+        session.completed_at = datetime.now(timezone.utc)
+        session.schedule_mission.status = "COMPLETED"
+        session.schedule_mission.winner_user_id = session.winner_user_id
+        return True
+    _enter_commentary(session)
+    return True
+
+
+def apply_judgement_to_participant(
+    submission: MissionSubmission, judgement_status: str
+) -> datetime | None:
+    session = submission.session
+    member = _member(session, submission.user_id)
+    if member is None or member.participation_status != "PARTICIPATING":
+        return None
+    if judgement_status == "PASSED":
+        member.participation_status = "COMPLETED"
+        member.upload_deadline_at = None
+        _maybe_finish_shooting(session)
+        return None
+    deadline = datetime.now(timezone.utc) + RETAKE_DURATION
+    member.upload_deadline_at = deadline
+    member.exclusion_reason = None
+    return deadline
+
+
+def expire_session_participants(db: Session, session_id: int) -> MissionSession | None:
+    session = _load_session(db, session_id)
+    if session is None:
+        return None
+    changed = _expire_late_participants(session, datetime.now(timezone.utc))
+    if changed:
+        _maybe_finish_shooting(session)
+        db.commit()
+    return _load_session(db, session_id)
+
+
 def _all_members_commented(db: Session, session: MissionSession) -> bool:
-    member_count = len(session.members)
-    submission_count = len(session.submissions)
+    completed_user_ids = _completed_user_ids(session)
+    member_count = len(completed_user_ids)
+    eligible_submissions = _eligible_submissions(session)
+    submission_count = len(eligible_submissions)
     if member_count == 0 or submission_count == 0:
         return False
+    submission_ids = [item.id for item in eligible_submissions]
     comment_count = db.scalar(
         select(func.count(MissionSubmissionComment.id))
         .join(MissionSubmission, MissionSubmission.id == MissionSubmissionComment.submission_id)
-        .where(MissionSubmission.session_id == session.id)
+        .where(
+            MissionSubmissionComment.submission_id.in_(submission_ids),
+            MissionSubmissionComment.user_id.in_(completed_user_ids),
+        )
     )
     return comment_count == member_count * submission_count
 
@@ -181,7 +318,12 @@ def _finalize_voting_if_expired(db: Session, session: MissionSession) -> None:
         return
     if session.voting_expires_at > datetime.now(timezone.utc):
         return
-    candidates = [item for item in session.submissions if item.like_count > 0]
+    _finish_voting(session)
+    db.commit()
+
+
+def _finish_voting(session: MissionSession) -> None:
+    candidates = [item for item in _eligible_submissions(session) if item.like_count > 0]
     winner_submission = min(
         candidates,
         key=lambda item: (
@@ -193,18 +335,47 @@ def _finalize_voting_if_expired(db: Session, session: MissionSession) -> None:
     )
     session.winner_user_id = winner_submission.user_id if winner_submission else None
     session.status = "COMPLETED"
+    session.completed_at = datetime.now(timezone.utc)
     session.schedule_mission.status = "COMPLETED"
     session.schedule_mission.winner_user_id = session.winner_user_id
-    db.commit()
+
+
+def _maybe_finish_voting_when_all_voted(session: MissionSession) -> bool:
+    if session.status != "VOTING":
+        return False
+    voter_ids = _completed_user_ids(session)
+    voted_user_ids = {
+        like.user_id
+        for submission in _eligible_submissions(session)
+        for like in submission.likes
+        if like.user_id in voter_ids
+    }
+    if voter_ids and voted_user_ids == voter_ids:
+        _finish_voting(session)
+        return True
+    return False
+
+
+def finalize_voting_session(db: Session, session_id: int) -> MissionSession | None:
+    session = _load_session(db, session_id)
+    if session is None:
+        return None
+    _finalize_voting_if_expired(db, session)
+    return _load_session(db, session_id)
 
 
 def _record_expiration(db: Session, session: MissionSession) -> None:
+    changed = _expire_late_participants(session, datetime.now(timezone.utc))
+    if changed:
+        _maybe_finish_shooting(session)
+        db.commit()
     if (
         session.status in ACTIVE_MISSION_STATUSES
         and session.expires_at is not None
         and session.expires_at <= datetime.now(timezone.utc)
     ):
-        _enter_commentary(session)
+        _expire_late_participants(session, datetime.now(timezone.utc), force=True)
+        _maybe_finish_shooting(session)
         db.commit()
 
 
@@ -234,12 +405,16 @@ def _expire_sessions_for_schedule(db: Session, schedule_id: int) -> None:
         .where(
             ScheduleMission.schedule_id == schedule_id,
             MissionSession.status.in_(ACTIVE_MISSION_STATUSES),
+            MissionSession.status != "VOTING",
             MissionSession.expires_at <= now,
         )
     ).all()
     if expired_sessions:
         for session in expired_sessions:
-            _enter_commentary(session)
+            loaded = _load_session(db, session.id)
+            if loaded is not None:
+                _expire_late_participants(loaded, now, force=True)
+                _maybe_finish_shooting(loaded)
         db.commit()
 
 
@@ -255,15 +430,22 @@ def _ensure_mission_is_allowed(
         raise ActiveMissionSessionConflict(active_session)
 
 
-def _expected_session_member_count(db: Session, schedule_id: int) -> int:
+def _schedule_participant_ids(db: Session, schedule_id: int) -> list[int]:
     schedule = db.scalar(
         select(MissionSchedule)
         .where(MissionSchedule.id == schedule_id)
         .options(selectinload(MissionSchedule.members))
     )
     if schedule is None:
-        return 0
-    return 1 + sum(member.status == "ACCEPTED" for member in schedule.members)
+        return []
+    return [
+        schedule.creator_id,
+        *[
+            member.user_id
+            for member in schedule.members
+            if member.status == "ACCEPTED"
+        ],
+    ]
 
 
 def _refresh_session_progress_for_schedule(db: Session, schedule_id: int) -> None:
@@ -272,22 +454,34 @@ def _refresh_session_progress_for_schedule(db: Session, schedule_id: int) -> Non
         .join(ScheduleMission, ScheduleMission.id == MissionSession.schedule_mission_id)
         .where(
             ScheduleMission.schedule_id == schedule_id,
-            MissionSession.status.in_(("REVEALED", "VOTING")),
+            MissionSession.status.in_(("SHOOTING", "UPLOADING", "REVEALED", "VOTING")),
         )
     ).all()
     for session in sessions:
         loaded_session = _load_session(db, session.id)
         if loaded_session is None:
             continue
+        _expire_late_participants(loaded_session, datetime.now(timezone.utc))
+        _maybe_finish_shooting(loaded_session)
         _maybe_start_voting(db, loaded_session)
         _finalize_voting_if_expired(db, loaded_session)
     db.commit()
 
 
-def _add_session_member(db: Session, session: MissionSession, user_id: int) -> bool:
+def _add_session_member(
+    db: Session,
+    session: MissionSession,
+    user_id: int,
+    participation_status: str = "UNDECIDED",
+) -> bool:
     if any(member.user_id == user_id for member in session.members):
         return False
-    session.members.append(MissionSessionMember(user_id=user_id))
+    session.members.append(
+        MissionSessionMember(
+            user_id=user_id,
+            participation_status=participation_status,
+        )
+    )
     return True
 
 
@@ -311,12 +505,15 @@ def create_session(db: Session, schedule_id: int, schedule_mission_id: int, user
         .where(
             MissionSession.schedule_mission_id == schedule_mission.id,
             MissionSession.status.in_(OPEN_SESSION_STATUSES),
-            (MissionSession.expires_at.is_(None) | (MissionSession.expires_at > datetime.now(timezone.utc))),
         )
         .order_by(MissionSession.created_at.desc(), MissionSession.id.desc())
     )
     if existing is not None:
-        if _add_session_member(db, existing, user_id):
+        changed = False
+        if existing.participants_locked_at is None:
+            for participant_id in _schedule_participant_ids(db, schedule_id):
+                changed = _add_session_member(db, existing, participant_id) or changed
+        if changed:
             db.commit()
         return _load_session(db, existing.id)
     session = MissionSession(
@@ -326,7 +523,8 @@ def create_session(db: Session, schedule_id: int, schedule_mission_id: int, user
     )
     db.add(session)
     db.flush()
-    _add_session_member(db, session, user_id)
+    for participant_id in _schedule_participant_ids(db, schedule_id):
+        _add_session_member(db, session, participant_id)
     try:
         db.commit()
     except IntegrityError:
@@ -339,7 +537,6 @@ def create_session(db: Session, schedule_id: int, schedule_mission_id: int, user
             .where(
                 MissionSession.schedule_mission_id == schedule_mission.id,
                 MissionSession.status.in_(OPEN_SESSION_STATUSES),
-                (MissionSession.expires_at.is_(None) | (MissionSession.expires_at > datetime.now(timezone.utc))),
             )
             .order_by(MissionSession.created_at.desc(), MissionSession.id.desc())
         )
@@ -358,10 +555,6 @@ def get_latest_session_for_schedule_mission(
         select(MissionSession)
         .where(MissionSession.schedule_mission_id == schedule_mission.id)
         .where(MissionSession.status.in_(OPEN_SESSION_STATUSES))
-        .where(
-            MissionSession.expires_at.is_(None)
-            | (MissionSession.expires_at > datetime.now(timezone.utc))
-        )
         .order_by(MissionSession.created_at.desc(), MissionSession.id.desc())
     )
     if session is None:
@@ -404,6 +597,13 @@ def get_session_for_user(db: Session, session_id: int, user_id: int):
 
 
 def join_session(db: Session, session_id: int, user_id: int):
+    # Compatibility endpoint: the old join action now means "participate".
+    return set_participation(db, session_id, user_id, "PARTICIPATE")
+
+
+def set_participation(
+    db: Session, session_id: int, user_id: int, decision: str
+):
     session = _load_session(db, session_id)
     if session is None:
         return None
@@ -417,49 +617,96 @@ def join_session(db: Session, session_id: int, user_id: int):
     _ensure_mission_is_allowed(
         db, schedule.id, session.schedule_mission_id
     )
-    if _add_session_member(db, session, user_id):
-        db.commit()
+    if session.participants_locked_at is not None or session.status not in ("WAITING", "READY"):
+        raise ParticipationLocked("Participation choices are already locked.")
+    member = _member(session, user_id)
+    if member is None:
+        _add_session_member(db, session, user_id)
+        member = _member(session, user_id)
+    now = datetime.now(timezone.utc)
+    member.decision_at = now
+    member.ready_at = now if decision == "PARTICIPATE" else None
+    member.upload_deadline_at = None
+    if decision == "PARTICIPATE":
+        member.participation_status = "PARTICIPATING"
+        member.excluded_at = None
+        member.exclusion_reason = None
+    else:
+        member.participation_status = "SKIPPED"
+        member.excluded_at = now
+        member.exclusion_reason = "USER_SKIPPED"
+    db.commit()
     return _load_session(db, session_id)
 
 
 def mark_ready(db: Session, session_id: int, user_id: int):
-    session = _load_session(db, session_id)
-    if session is None:
-        return None
-    _ensure_session_not_expired(db, session)
-    member = next((item for item in session.members if item.user_id == user_id), None)
-    if member is None:
-        return None
-    _ensure_mission_is_allowed(
-        db, session.schedule_mission.schedule_id, session.schedule_mission_id
-    )
-    member.ready_at = datetime.now(timezone.utc)
-    if session.status == "WAITING":
-        session.status = "READY"
-    db.commit()
-    return _load_session(db, session_id)
+    # Compatibility endpoint: there is no separate personal-ready phase now.
+    return set_participation(db, session_id, user_id, "PARTICIPATE")
 
 
 def start_session(db: Session, session_id: int, user_id: int):
     session = _load_session(db, session_id)
-    if session is None or not any(member.user_id == user_id for member in session.members):
+    if session is None or session.created_by_user_id != user_id:
         return None
     _ensure_session_not_expired(db, session)
     _ensure_mission_is_allowed(
         db, session.schedule_mission.schedule_id, session.schedule_mission_id
     )
+    if session.participants_locked_at is not None:
+        if session.status in ("SHOOTING", "UPLOADING"):
+            return session
+        raise ParticipationLocked("This mission session has already started.")
+    participants = [
+        member
+        for member in session.members
+        if member.participation_status == "PARTICIPATING"
+    ]
+    if not participants:
+        raise NoParticipants("At least one participant must choose participate.")
+    now = datetime.now(timezone.utc)
+    shooting_deadline = now + SHOOTING_DURATION
+    for member in session.members:
+        if member.participation_status == "UNDECIDED":
+            member.participation_status = "LOCKED_OUT"
+            member.excluded_at = now
+            member.exclusion_reason = "NO_DECISION"
+        elif member.participation_status == "PARTICIPATING":
+            member.upload_deadline_at = shooting_deadline
     session.status = "SHOOTING"
-    session.started_at = datetime.now(timezone.utc)
-    session.expires_at = session.started_at + SESSION_DURATION
+    session.participants_locked_at = now
+    session.started_at = now
+    session.shooting_deadline_at = shooting_deadline
+    session.expires_at = now + SESSION_DURATION
     db.commit()
     return _load_session(db, session_id)
 
 
-def ensure_can_add_submission(db: Session, session_id: int, user_id: int) -> None:
+def ensure_can_add_submission(db: Session, session_id: int, user_id: int) -> bool:
     session = _load_session(db, session_id)
-    if session is None or not any(member.user_id == user_id for member in session.members):
-        return
+    if session is None:
+        return False
     _ensure_session_not_expired(db, session)
+    _expire_late_participants(session, datetime.now(timezone.utc))
+    _maybe_finish_shooting(session)
+    member = _member(session, user_id)
+    if (
+        member is None
+        or member.participation_status != "PARTICIPATING"
+        or session.status not in ("SHOOTING", "UPLOADING")
+    ):
+        db.commit()
+        raise ParticipationNotAllowed(
+            "Only a locked-in participant may upload during the shooting phase."
+        )
+    deadline = member.upload_deadline_at or session.shooting_deadline_at
+    if deadline is not None and deadline <= datetime.now(timezone.utc):
+        member.participation_status = "TIMED_OUT"
+        member.excluded_at = datetime.now(timezone.utc)
+        member.exclusion_reason = "PHOTO_TIMEOUT"
+        member.upload_deadline_at = None
+        _maybe_finish_shooting(session)
+        db.commit()
+        raise ParticipationNotAllowed("Your photo upload window has ended.")
     _ensure_mission_is_allowed(
         db, session.schedule_mission.schedule_id, session.schedule_mission_id
     )
@@ -468,13 +715,23 @@ def ensure_can_add_submission(db: Session, session_id: int, user_id: int) -> Non
     ))
     if submission is not None and submission.judge_status not in ("REJECTED", "ERROR"):
         raise SubmissionAlreadyExists(submission)
+    return True
 
 
 def add_submission(db: Session, session_id: int, user_id: int, storage_key: str, photo_url: str, captured_at):
     session = _load_session(db, session_id)
-    if session is None or not any(member.user_id == user_id for member in session.members):
+    if session is None:
         return None
     _ensure_session_not_expired(db, session)
+    member = _member(session, user_id)
+    if (
+        member is None
+        or member.participation_status != "PARTICIPATING"
+        or session.status not in ("SHOOTING", "UPLOADING")
+    ):
+        raise ParticipationNotAllowed(
+            "Only a locked-in participant may upload during the shooting phase."
+        )
     _ensure_mission_is_allowed(
         db, session.schedule_mission.schedule_id, session.schedule_mission_id
     )
@@ -493,24 +750,9 @@ def add_submission(db: Session, session_id: int, user_id: int, storage_key: str,
     submission.judge_model = None
     submission.judged_at = None
     submission.judge_error = None
+    member.upload_deadline_at = None
     session.status = "UPLOADING"
     db.flush()
-    member_count = len(session.members)
-    submission_count = db.scalar(
-        select(func.count(MissionSubmission.id)).where(MissionSubmission.session_id == session_id)
-    )
-    # A submission from the creator must not immediately start voting while
-    # accepted schedule participants are still joining this shared session.
-    expected_member_count = _expected_session_member_count(
-        db, session.schedule_mission.schedule_id
-    )
-    if (
-        member_count > 0
-        and member_count >= expected_member_count
-        and submission_count == member_count
-        and all(item.judge_status == "PASSED" for item in session.submissions)
-    ):
-        _enter_commentary(session)
     db.commit()
     return db.scalar(select(MissionSubmission).where(MissionSubmission.id == submission.id)
                      .options(selectinload(MissionSubmission.user)))
@@ -520,10 +762,9 @@ def reveal_session(db: Session, session_id: int, user_id: int):
     session = _load_session(db, session_id)
     if session is None or session.created_by_user_id != user_id:
         return None
-    _ensure_session_not_expired(db, session)
-    session.status = "REVEALED"
-    session.revealed_at = datetime.now(timezone.utc)
-    db.commit()
+    _record_expiration(db, session)
+    if session.status not in ("REVEALED", "VOTING", "COMPLETED"):
+        raise VotingNotReady("Commentary opens automatically after shooting finishes.")
     return _load_session(db, session_id)
 
 
@@ -535,7 +776,7 @@ def complete_session(db: Session, session_id: int, user_id: int):
     if session.status == "VOTING":
         _finalize_voting_if_expired(db, session)
         if session.status == "VOTING":
-            candidates = [item for item in session.submissions if item.like_count > 0]
+            candidates = [item for item in _eligible_submissions(session) if item.like_count > 0]
             winner_submission = min(
                 candidates,
                 key=lambda item: (
@@ -558,11 +799,13 @@ def add_submission_comment(
     db: Session, session_id: int, submission_id: int, user_id: int, content: str
 ):
     session = _load_session(db, session_id)
-    if session is None or not any(member.user_id == user_id for member in session.members):
+    if session is None or user_id not in _completed_user_ids(session):
         return None
     if session.status != "REVEALED":
         raise VotingNotReady("Comments are not open for this session.")
-    submission = next((item for item in session.submissions if item.id == submission_id), None)
+    submission = next(
+        (item for item in _eligible_submissions(session) if item.id == submission_id), None
+    )
     if submission is None:
         return None
     comment = MissionSubmissionComment(
@@ -595,10 +838,12 @@ def add_submission_comment(
 
 def like_submission(db: Session, session_id: int, submission_id: int, user_id: int):
     session = _load_session(db, session_id)
-    if session is None or not any(member.user_id == user_id for member in session.members):
+    if session is None or user_id not in _completed_user_ids(session):
         return None, "not_found"
     _ensure_voting_open(db, session)
-    submission = next((item for item in session.submissions if item.id == submission_id), None)
+    submission = next(
+        (item for item in _eligible_submissions(session) if item.id == submission_id), None
+    )
     if submission is None:
         return None, "not_found"
     if submission.user_id == user_id:
@@ -618,4 +863,9 @@ def like_submission(db: Session, session_id: int, submission_id: int, user_id: i
             )
         )
         db.commit()
+        refreshed_session = _load_session(db, session_id)
+        if refreshed_session is not None and _maybe_finish_voting_when_all_voted(
+            refreshed_session
+        ):
+            db.commit()
     return _load_submission(db, submission_id), None
