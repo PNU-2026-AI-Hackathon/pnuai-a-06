@@ -948,7 +948,7 @@ export default function ActiveTripScreen() {
 
         <View style={[styles.feedPanel, !hasSavedMissions && styles.emptyFeedPanel]}>
           <Text style={styles.dayLabel}>{tripDayLabel}</Text>
-          {isLoading ? (
+          {isLoading && !schedule ? (
             <View style={styles.stateBox}>
               <ActivityIndicator color="#409CB7" />
               <Text style={styles.stateText}>담긴 미션을 불러오는 중이에요.</Text>

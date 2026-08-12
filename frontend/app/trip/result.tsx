@@ -106,6 +106,17 @@ export default function MissionResultScreen() {
       return;
     }
 
+    if (scheduleId) {
+      router.replace({
+        pathname: '/trip/active',
+        params: {
+          scheduleId,
+          ...(currentSession?.id ? { sessionId: currentSession.id } : {}),
+        },
+      });
+      return;
+    }
+
     router.replace('/trip/hub');
   };
 

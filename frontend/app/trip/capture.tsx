@@ -10,7 +10,7 @@ import { MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
-import { connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
+import { completeMissionSession, connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
 const cameraBackIcon = require('../../assets/svg/camera/back.svg');
@@ -299,7 +299,7 @@ export default function MissionCaptureScreen() {
     };
   }, [scheduleId, scheduleMissionId]);
 
-  const finishPassedJudgement = useCallback((passedSessionId: string) => {
+  const finishPassedJudgement = useCallback(async (passedSessionId: string, passedSession?: MissionSession | null) => {
     if (isFinishingSoloMission.current) {
       return;
     }
@@ -307,8 +307,30 @@ export default function MissionCaptureScreen() {
     isFinishingSoloMission.current = true;
     setJudgementSessionId(null);
     setIsMissionComplete(true);
-    setUploadMessage('AI 판독이 완료됐어요. 댓글 화면으로 이동합니다.');
 
+    const isSoloMission = passedSession?.members.length === 1;
+
+    if (isSoloMission) {
+      setUploadMessage('AI 판독이 완료됐어요. 결과를 준비하고 있어요.');
+
+      try {
+        const completedSession = await completeMissionSession(passedSessionId);
+        setSession(completedSession);
+      } catch {
+        // The server may have completed the session automatically; result can still load the authoritative session.
+      }
+
+      router.replace({
+        pathname: '/trip/result',
+        params: {
+          ...(scheduleId ? { scheduleId } : {}),
+          sessionId: passedSessionId,
+        },
+      });
+      return;
+    }
+
+    setUploadMessage('AI 판독이 완료됐어요. 댓글 화면으로 이동합니다.');
     router.replace({
       pathname: '/trip/review',
       params: {
@@ -349,7 +371,7 @@ export default function MissionCaptureScreen() {
       setJudgementSessionId(null);
 
       if (nextJudgeStatus === 'PASSED') {
-        void finishPassedJudgement(nextSession.id);
+        void finishPassedJudgement(nextSession.id, nextSession);
         return;
       }
 
@@ -573,7 +595,7 @@ export default function MissionCaptureScreen() {
       setJudgeReason(uploadedSubmission.judgeReason ?? null);
 
       if (nextJudgeStatus === 'PASSED') {
-        void finishPassedJudgement(uploadSessionId);
+        void finishPassedJudgement(uploadSessionId, uploadSession);
         return;
       }
 

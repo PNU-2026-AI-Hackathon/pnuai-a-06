@@ -68,6 +68,7 @@ export default function MainScreen() {
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
   const [magazinePhotoUrls, setMagazinePhotoUrls] = useState<string[]>([]);
+  const [magazineScheduleId, setMagazineScheduleId] = useState<string | null>(null);
   const [isMagazineLoading, setIsMagazineLoading] = useState(true);
   const [hasLoadedMagazine, setHasLoadedMagazine] = useState(false);
 
@@ -119,6 +120,7 @@ export default function MainScreen() {
 
           if (!latestClosedSchedule) {
             if (isActive) {
+              setMagazineScheduleId(null);
               setMagazinePhotoUrls([]);
             }
             return;
@@ -136,10 +138,12 @@ export default function MainScreen() {
           await Promise.all(photoUrls.map((photoUrl) => Image.prefetch(photoUrl, 'memory-disk'))).catch(() => undefined);
 
           if (isActive) {
+            setMagazineScheduleId(latestClosedSchedule.scheduleId);
             setMagazinePhotoUrls(photoUrls);
           }
         } catch {
           if (isActive) {
+            setMagazineScheduleId(null);
             setMagazinePhotoUrls([]);
           }
         } finally {
@@ -179,8 +183,17 @@ export default function MainScreen() {
 
       {hasLoadedMagazine ? (
         <Pressable
-          disabled={isMagazineLoading}
-          onPress={() => router.push('/magazine/detail')}
+          disabled={isMagazineLoading || !magazineScheduleId}
+          onPress={() => {
+            if (!magazineScheduleId) {
+              return;
+            }
+
+            router.push({
+              pathname: '/magazine/detail',
+              params: { scheduleId: magazineScheduleId },
+            });
+          }}
           style={[styles.magazineCard, isSingleMagazine && styles.singleMagazineFrame]}>
         {isSingleMagazine ? (
           <View style={styles.singleMagazineInner}>

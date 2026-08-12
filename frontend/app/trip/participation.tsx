@@ -54,6 +54,7 @@ export default function MissionParticipationScreen() {
   const [message, setMessage] = useState('');
   const hasNavigated = useRef(false);
   const leaderParticipationRequested = useRef(false);
+  const soloStartRequested = useRef(false);
 
   const myMember = useMemo(
     () => session?.members.find((member) => member.userId === currentUserId) ?? null,
@@ -98,10 +99,50 @@ export default function MissionParticipationScreen() {
       !sessionId
       || !isMissionLeader
       || !myMember
-      || !['WAITING', 'READY'].includes(session?.status ?? '')
-      || isParticipating(myMember.participationStatus)
-      || leaderParticipationRequested.current
+      || !session
+      || !['WAITING', 'READY'].includes(session.status)
     ) {
+      return;
+    }
+
+    const isSoloMission = session.members.length === 1;
+
+    if (isSoloMission) {
+      if (soloStartRequested.current) {
+        return;
+      }
+
+      soloStartRequested.current = true;
+      setIsSubmitting(true);
+      setMessage('');
+
+      void (async () => {
+        try {
+          let nextSession = session;
+
+          if (!isParticipating(myMember.participationStatus)) {
+            nextSession = await chooseMissionParticipation(sessionId, 'PARTICIPATE');
+            applySession(nextSession);
+          }
+
+          if (['WAITING', 'READY'].includes(nextSession.status)) {
+            nextSession = await startMissionSession(sessionId);
+            applySession(nextSession);
+          }
+
+          navigateToCapture(nextSession);
+        } catch (error) {
+          soloStartRequested.current = false;
+          setMessage(error instanceof MissionSessionApiError ? error.message : '1인 미션을 시작하지 못했어요.');
+        } finally {
+          setIsSubmitting(false);
+        }
+      })();
+
+      return;
+    }
+
+    if (isParticipating(myMember.participationStatus) || leaderParticipationRequested.current) {
       return;
     }
 
@@ -119,7 +160,7 @@ export default function MissionParticipationScreen() {
       .finally(() => {
         setIsSubmitting(false);
       });
-  }, [applySession, isMissionLeader, myMember, session?.status, sessionId]);
+  }, [applySession, isMissionLeader, myMember, navigateToCapture, session, sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -230,8 +271,11 @@ export default function MissionParticipationScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {isLoading ? (
-        <View style={styles.centerState}><ActivityIndicator color="#409CB7" /></View>
+      {isLoading || (session?.members.length === 1 && !message) ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator color="#409CB7" />
+          {session?.members.length === 1 ? <Text style={styles.stateText}>촬영 화면을 준비하고 있어요.</Text> : null}
+        </View>
       ) : (
         <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSafeInset + 32, paddingHorizontal: horizontalPadding }]} showsVerticalScrollIndicator={false}>
           <Text style={styles.title}>{session?.missionTitle ?? '미션'}</Text>
@@ -306,6 +350,7 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 42 },
   headerTitle: { color: '#26363D', flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   centerState: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+  stateText: { color: '#8A9194', fontSize: 13, marginTop: 12 },
   content: { paddingTop: 48 },
   title: { color: '#26363D', fontSize: 27, fontWeight: '600', textAlign: 'center' },
   description: { color: '#8A9194', fontSize: 13, marginTop: 9, textAlign: 'center' },
