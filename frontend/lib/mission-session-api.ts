@@ -18,7 +18,9 @@ type ApiMissionSessionUser = {
 
 type ApiMissionSessionMember = {
   joined_at?: string;
+  participation_status?: MissionParticipationStatus | null;
   ready_at?: string | null;
+  upload_deadline_at?: string | null;
   user?: ApiMissionSessionUser;
   user_id?: number | string;
 };
@@ -70,7 +72,8 @@ type ApiMissionSession = {
   winner_user_id?: number | string | null;
 };
 
-export type MissionSessionStatus = 'WAITING' | 'READY' | 'SHOOTING' | 'UPLOADING' | 'VOTING' | 'REVEALED' | 'COMPLETED';
+export type MissionParticipationStatus = 'UNDECIDED' | 'PARTICIPATING' | 'SKIPPED' | 'LOCKED_OUT' | 'TIMED_OUT' | 'COMPLETED';
+export type MissionSessionStatus = 'WAITING' | 'READY' | 'SHOOTING' | 'UPLOADING' | 'REVEALED' | 'VOTING' | 'COMPLETED' | 'CANCELLED';
 export type MissionJudgementStatus = 'PENDING' | 'PROCESSING' | 'PASSED' | 'REJECTED' | 'REVIEW' | 'ERROR';
 export type MissionSubmission = {
   comments: {
@@ -99,9 +102,13 @@ export type MissionSession = {
   id: string;
   members: {
     joinedAt?: string;
+    participationStatus?: MissionParticipationStatus | null;
     readyAt?: string | null;
+    uploadDeadlineAt?: string | null;
     userId: string;
     nickname?: string | null;
+    profileImageUrl?: string | null;
+    profileEmoji?: string | null;
   }[];
   commentEndsAt?: string | null;
   missionTitle: string;
@@ -296,7 +303,7 @@ function mergeSubmissionSnapshots(current: MissionSubmission, next: MissionSubmi
   };
 }
 
-const missionSessionStatusOrder: MissionSessionStatus[] = ['WAITING', 'READY', 'SHOOTING', 'UPLOADING', 'VOTING', 'REVEALED', 'COMPLETED'];
+const missionSessionStatusOrder: MissionSessionStatus[] = ['WAITING', 'READY', 'SHOOTING', 'UPLOADING', 'REVEALED', 'VOTING', 'COMPLETED', 'CANCELLED'];
 
 function getMissionSessionStatusRank(status: MissionSessionStatus) {
   return missionSessionStatusOrder.indexOf(status);
@@ -315,7 +322,9 @@ export function mergeMissionSessions(current: MissionSession | null | undefined,
       ...previous,
       ...member,
       joinedAt: member.joinedAt ?? previous?.joinedAt,
+      participationStatus: member.participationStatus ?? previous?.participationStatus ?? null,
       readyAt: member.readyAt ?? previous?.readyAt ?? null,
+      uploadDeadlineAt: member.uploadDeadlineAt ?? previous?.uploadDeadlineAt ?? null,
     });
   });
 
@@ -353,8 +362,12 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
     id: String(sessionId),
     members: (data.members ?? []).map((member) => ({
       joinedAt: member.joined_at,
+      participationStatus: member.participation_status ?? null,
       nickname: member.user?.nickname,
+      profileEmoji: member.user?.profile_emoji,
+      profileImageUrl: member.user?.profile_image_url ? normalizePhotoUrl(member.user.profile_image_url) : null,
       readyAt: member.ready_at,
+      uploadDeadlineAt: member.upload_deadline_at,
       userId: String(member.user_id ?? member.user?.id ?? ''),
     })),
     missionTitle: data.mission?.title ?? '미션',
@@ -374,6 +387,13 @@ function getWebSocketUrl(sessionId: string) {
   const wsBaseUrl = API_BASE_URL.replace(/^http/, 'ws');
 
   return `${wsBaseUrl}/mission-sessions/${encodeURIComponent(sessionId)}/ws?token=${encodeURIComponent(token)}`;
+}
+
+function getScheduleWebSocketUrl(scheduleId: string) {
+  const token = getAccessToken();
+  const wsBaseUrl = API_BASE_URL.replace(/^http/, 'ws');
+
+  return `${wsBaseUrl}/schedules/${encodeURIComponent(scheduleId)}/mission-sessions/ws?token=${encodeURIComponent(token)}`;
 }
 
 export function connectMissionSessionSocket(
@@ -404,6 +424,33 @@ export function connectMissionSessionSocket(
   return socket;
 }
 
+export function connectScheduleMissionSessionSocket(
+  scheduleId: string,
+  handlers: {
+    onError?: () => void;
+    onMessage: (message: { session?: MissionSession; type?: string }) => void;
+  }
+) {
+  const socket = new WebSocket(getScheduleWebSocketUrl(scheduleId));
+
+  socket.onmessage = (event) => {
+    try {
+      const message = JSON.parse(String(event.data)) as { payload?: { session?: ApiMissionSession }; type?: string };
+      handlers.onMessage({
+        session: message.payload?.session ? normalizeSession(message.payload.session) : undefined,
+        type: message.type,
+      });
+    } catch {
+      // Ignore malformed socket payloads and recover through the normal schedule polling.
+    }
+  };
+
+  socket.onerror = () => {
+    handlers.onError?.();
+  };
+
+  return socket;
+}
 export async function createMissionSession(scheduleId: string, scheduleMissionId: string) {
   const data = await requestJson<ApiMissionSession>(`/schedules/${encodeURIComponent(scheduleId)}/missions/${encodeURIComponent(scheduleMissionId)}/sessions`, 'POST');
   return normalizeSession(data);
@@ -441,6 +488,11 @@ export async function joinMissionSession(sessionId: string) {
 
 export async function readyMissionSession(sessionId: string) {
   const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/ready`, 'POST');
+  return normalizeSession(data);
+}
+
+export async function chooseMissionParticipation(sessionId: string, decision: 'PARTICIPATE' | 'PASS') {
+  const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/participation`, 'POST', { decision });
   return normalizeSession(data);
 }
 

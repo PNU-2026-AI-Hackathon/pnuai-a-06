@@ -9,8 +9,8 @@ import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } fro
 import { MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { getAuthItem, MISSION_COMPLETION_PENDING_KEY, setAuthItem } from '@/lib/auth-storage';
-import { completeMissionSession, connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, joinMissionSession, revealMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
+import { getAuthItem } from '@/lib/auth-storage';
+import { connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
 const cameraBackIcon = require('../../assets/svg/camera/back.svg');
@@ -129,7 +129,7 @@ export default function MissionCaptureScreen() {
   const [judgementDotCount, setJudgementDotCount] = useState(1);
   const [session, setSession] = useState<MissionSession | null>(null);
   const [mission, setMission] = useState<TripScheduleMission | null>(null);
-  const [scheduleParticipantCount, setScheduleParticipantCount] = useState<number | null>(null);
+
   const [isMissionLoading, setIsMissionLoading] = useState(false);
   const [missionError, setMissionError] = useState('');
   const [now, setNow] = useState(() => Date.now());
@@ -148,6 +148,11 @@ export default function MissionCaptureScreen() {
   const isUploadExpired = uploadRemainingMs !== null && uploadRemainingMs <= 0;
   const isWaitingForJudgement = isWaitingJudgementStatus(judgeStatus);
   const needsRetakeAfterJudgement = isRetryableJudgementStatus(judgeStatus);
+  const myMember = session?.members.find((member) => member.userId === getAuthItem('user_id'));
+  const canShoot = Boolean(
+    !session
+      || (['SHOOTING', 'UPLOADING'].includes(session.status) && myMember?.participationStatus === 'PARTICIPATING'),
+  );
 
   useEffect(() => {
     if (!isWaitingForJudgement) {
@@ -204,6 +209,55 @@ export default function MissionCaptureScreen() {
   }, [scheduleId, scheduleMissionId, sessionId]);
 
   useEffect(() => {
+    if (!sessionId || judgementSessionId) {
+      return;
+    }
+
+    const applyTimeoutSession = (nextSession: MissionSession) => {
+      setSession(nextSession);
+      const myMember = nextSession.members.find((member) => member.userId === getAuthItem('user_id'));
+      const hasTimedOut = myMember?.participationStatus === 'TIMED_OUT';
+      const isCancelled = nextSession.status === 'CANCELLED';
+
+      if (isCancelled) {
+        router.replace({
+          pathname: '/trip/active',
+          ...(scheduleId ? { params: { scheduleId } } : {}),
+        });
+        return;
+      }
+
+      if (hasTimedOut && ['REVEALED', 'VOTING', 'COMPLETED'].includes(nextSession.status)) {
+        router.replace({
+          pathname: '/trip/review',
+          params: {
+            ...(scheduleId ? { scheduleId } : {}),
+            sessionId: nextSession.id,
+          },
+        });
+      }
+    };
+
+    const socket = connectMissionSessionSocket(sessionId, {
+      onError: () => {
+        void getMissionSession(sessionId).then(applyTimeoutSession).catch(() => undefined);
+      },
+      onMessage: ({ session: nextSession }) => {
+        if (nextSession) {
+          applyTimeoutSession(nextSession);
+        }
+      },
+    });
+    const timer = setInterval(() => {
+      void getMissionSession(sessionId).then(applyTimeoutSession).catch(() => undefined);
+    }, 1500);
+
+    return () => {
+      clearInterval(timer);
+      socket.close();
+    };
+  }, [judgementSessionId, scheduleId, sessionId]);
+  useEffect(() => {
     if (!scheduleId || !scheduleMissionId) {
       setMission(null);
       setMissionError('미션 정보가 없습니다.');
@@ -223,7 +277,7 @@ export default function MissionCaptureScreen() {
 
         if (isActive) {
           setMission(nextMission);
-          setScheduleParticipantCount(nextSchedule.participants.length || 1);
+
           setMissionError(nextMission ? '' : '미션 정보를 찾지 못했어요.');
         }
       } catch (error) {
@@ -245,27 +299,7 @@ export default function MissionCaptureScreen() {
     };
   }, [scheduleId, scheduleMissionId]);
 
-  const finishPassedJudgement = useCallback(async (passedSessionId: string) => {
-    let participantCount = scheduleParticipantCount;
-
-    if (participantCount === null && scheduleId) {
-      try {
-        const latestSchedule = await getTripSchedule(scheduleId);
-        participantCount = latestSchedule.participants.length || 1;
-        setScheduleParticipantCount(participantCount);
-      } catch {
-        participantCount = null;
-      }
-    }
-
-    if (participantCount !== 1) {
-      setAuthItem(MISSION_COMPLETION_PENDING_KEY, JSON.stringify({ scheduleId, sessionId: passedSessionId }));
-      setIsMissionComplete(true);
-      setUploadMessage('AI 확인이 완료됐어요.');
-      setReturnCountdown(3);
-      return;
-    }
-
+  const finishPassedJudgement = useCallback((passedSessionId: string) => {
     if (isFinishingSoloMission.current) {
       return;
     }
@@ -273,34 +307,16 @@ export default function MissionCaptureScreen() {
     isFinishingSoloMission.current = true;
     setJudgementSessionId(null);
     setIsMissionComplete(true);
-    setUploadMessage('미션 결과를 준비하고 있어요.');
-    setReturnCountdown(null);
+    setUploadMessage('AI 판독이 완료됐어요. 댓글 화면으로 이동합니다.');
 
-    try {
-      let completedSession = await getMissionSession(passedSessionId);
-
-      if (completedSession.status !== 'REVEALED' && completedSession.status !== 'COMPLETED') {
-        completedSession = await revealMissionSession(passedSessionId);
-      }
-
-      if (completedSession.status !== 'COMPLETED') {
-        completedSession = await completeMissionSession(passedSessionId);
-      }
-
-      router.replace({
-        pathname: '/trip/result',
-        params: {
-          ...(scheduleId ? { scheduleId } : {}),
-          sessionId: completedSession.id,
-        },
-      });
-    } catch (error) {
-      isFinishingSoloMission.current = false;
-      setIsMissionComplete(false);
-      setUploadMessage(error instanceof Error ? error.message : '미션 결과를 준비하지 못했어요.');
-    }
-  }, [scheduleId, scheduleParticipantCount]);
-
+    router.replace({
+      pathname: '/trip/review',
+      params: {
+        ...(scheduleId ? { scheduleId } : {}),
+        sessionId: passedSessionId,
+      },
+    });
+  }, [scheduleId]);
   useEffect(() => {
     if (!judgementSessionId) {
       return;
@@ -524,13 +540,7 @@ export default function MissionCaptureScreen() {
     }
 
     const latestSession = await getLatestMissionSession(scheduleId, scheduleMissionId);
-
-    try {
-      const joinedSession = await joinMissionSession(latestSession.id);
-      return joinedSession.id;
-    } catch {
-      return latestSession.id;
-    }
+    return latestSession.id;
   };
 
   const handleComplete = async () => {
@@ -610,6 +620,18 @@ export default function MissionCaptureScreen() {
       <View style={styles.stateScreen}>
         <StatusBar hidden />
         <ActivityIndicator color="#ffffff" />
+      </View>
+    );
+  }
+
+  if (session && !canShoot) {
+    return (
+      <View style={styles.stateScreen}>
+        <StatusBar hidden />
+        <Text style={styles.permissionTitle}>이번 미션의 촬영 참여자가 아니에요.</Text>
+        <ScalePressable accessibilityLabel="돌아가기" onPress={() => router.back()} pressedScale={0.96} style={styles.permissionButton}>
+          <Text style={styles.permissionButtonText}>돌아가기</Text>
+        </ScalePressable>
       </View>
     );
   }

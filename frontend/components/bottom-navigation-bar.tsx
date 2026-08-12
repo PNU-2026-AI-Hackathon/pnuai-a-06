@@ -8,7 +8,7 @@ import { getAuthItem } from '@/lib/auth-storage';
 import { getActiveMissionSession, type MissionSession } from '@/lib/mission-session-api';
 import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
 
-const hiddenPathnames = ['/', '/login', '/auth/callback', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result', '/trip/edit'];
+const hiddenPathnames = ['/', '/login', '/auth/callback', '/trip/participation', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result', '/trip/edit'];
 
 type FeatherIconName = React.ComponentProps<typeof Feather>['name'];
 
@@ -92,9 +92,12 @@ type ActiveMissionTarget = {
 };
 
 function toActiveMissionTarget(scheduleId: string, session: MissionSession): ActiveMissionTarget | null {
-  const isFinished = session.completedAt || ['VOTING', 'REVEALED', 'COMPLETED'].includes(session.status);
+  const currentUserId = getAuthItem('user_id');
+  const myMember = session.members.find((member) => member.userId === currentUserId);
+  const isFinished = session.completedAt || ['VOTING', 'REVEALED', 'COMPLETED', 'CANCELLED'].includes(session.status);
+  const canShoot = ['SHOOTING', 'UPLOADING'].includes(session.status) && myMember?.participationStatus === 'PARTICIPATING';
 
-  if (!session.scheduleMissionId || !session.id || isFinished) {
+  if (!session.scheduleMissionId || !session.id || isFinished || !canShoot) {
     return null;
   }
 

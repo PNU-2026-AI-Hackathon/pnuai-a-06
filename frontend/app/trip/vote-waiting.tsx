@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { completeMissionSession, getMissionSession, getPassedMissionSubmissions } from '@/lib/mission-session-api';
-import { getTripSchedule } from '@/lib/trip-schedule-api';
+
 
 const pinkEffect = require('../../assets/svg/effect/pink_llipse.svg');
 const yellowEffect = require('../../assets/svg/effect/yellow_ellipse.svg');
@@ -57,14 +57,9 @@ export default function VoteWaitingScreen() {
     void (async () => {
       try {
         const session = await getMissionSession(sessionId);
-        let count = session.members.length;
-        if (scheduleId) {
-          try {
-            const schedule = await getTripSchedule(scheduleId);
-            const peopleCount = Number(schedule.peopleCount);
-            count = Math.max(count, schedule.participants.length, Number.isFinite(peopleCount) ? peopleCount : 0);
-          } catch { /* 세션 멤버 수를 fallback으로 사용한다. */ }
-        }
+        const completedMemberCount = session.members.filter((member) => member.participationStatus === 'COMPLETED').length;
+        let count = completedMemberCount || session.members.length;
+
         if (active) setRequiredVoterCount(count);
       } catch { /* 폴링에서 다시 확인한다. */ }
     })();
@@ -76,20 +71,9 @@ export default function VoteWaitingScreen() {
     const refresh = async () => {
       try {
         const session = await getMissionSession(sessionId);
-        let voterCount = Math.max(requiredVoterCount, session.members.length);
+        const completedMemberCount = session.members.filter((member) => member.participationStatus === 'COMPLETED').length;
+        let voterCount = Math.max(requiredVoterCount, completedMemberCount || session.members.length);
 
-        if (scheduleId && voterCount <= session.members.length) {
-          try {
-            const schedule = await getTripSchedule(scheduleId);
-            const peopleCount = Number(schedule.peopleCount);
-            voterCount = Math.max(voterCount, schedule.participants.length, Number.isFinite(peopleCount) ? peopleCount : 0);
-            if (voterCount !== requiredVoterCount) {
-              setRequiredVoterCount(voterCount);
-            }
-          } catch {
-            // 세션 멤버 수로 계속 투표 완료 여부를 확인한다.
-          }
-        }
 
         const votes = getPassedMissionSubmissions(session).reduce((sum, submission) => sum + submission.likeCount, 0);
         if (session.status === 'COMPLETED') return startResultCountdown();
