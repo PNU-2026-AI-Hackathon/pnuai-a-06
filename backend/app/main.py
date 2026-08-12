@@ -17,6 +17,8 @@ from app.routers.schedules import (
     schedules_router,
 )
 from app.routers.mission_sessions import router as mission_sessions_router
+from app.routers.magazines import router as magazines_router
+from app.services.mission_session_timeouts import restore_pending_timeouts
 
 settings = get_settings()
 logger = logging.getLogger("app.requests")
@@ -104,6 +106,10 @@ app = FastAPI(
             ),
         },
         {"name": "mission sessions", "description": "Authenticated team mission execution and photo sharing APIs."},
+        {
+            "name": "magazines",
+            "description": "Magazine-ready data assembled from completed schedule missions.",
+        },
     ],
 )
 
@@ -153,7 +159,13 @@ app.include_router(schedule_missions_router)
 app.include_router(schedule_invitations_router)
 app.include_router(invitations_router)
 app.include_router(mission_sessions_router)
+app.include_router(magazines_router)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.on_event("startup")
+async def restore_mission_session_deadlines():
+    restore_pending_timeouts()
 
 
 @app.get("/")

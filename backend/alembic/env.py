@@ -13,6 +13,7 @@ from app.models.schedules import (  # noqa: F401
     MissionSubmissionLike, MissionSubmissionComment,
 )
 from app.models.users import User  # noqa: F401
+from app.models.magazines import ScheduleMagazine  # noqa: F401
 
 config = context.config
 
