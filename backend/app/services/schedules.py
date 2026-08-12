@@ -248,6 +248,7 @@ def update_user_schedule_order(
     # reorder such as [B, A] cannot collide with A/B's old positions.
     for item in existing.values():
         item.position = -(item.position + 1)
+    db.flush()
     for position, schedule_id in enumerate(ordered_ids):
         item = existing.get(schedule_id)
         if item is None:

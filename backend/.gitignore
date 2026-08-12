@@ -11,3 +11,11 @@ app/static/**
 !app/static/mission-photos/.gitkeep
 !app/static/profile-images/
 !app/static/profile-images/.gitkeep
+!app/static/frame/
+!app/static/frame/**
+!app/static/fonts/
+app/static/fonts/*
+!app/static/fonts/.gitkeep
+!app/static/magazines/
+app/static/magazines/*
+!app/static/magazines/.gitkeep

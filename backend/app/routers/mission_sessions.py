@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -8,29 +8,68 @@ from app.auth.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.users import User
 from app.schemas.mission_sessions import (
-    MissionSessionResponse, MissionSubmissionCommentCreateRequest,
+    MissionParticipationRequest, MissionSessionResponse, MissionSubmissionCommentCreateRequest,
     MissionSubmissionCommentResponse, MissionSubmissionResponse,
 )
 from app.services.mission_sessions import (
     ActiveMissionSessionConflict,
     MissionSessionExpired,
+    NoParticipants,
+    ParticipationLocked,
+    ParticipationNotAllowed,
     SubmissionCommentAlreadyExists,
     SubmissionAlreadyExists,
     VotingNotReady,
     VotingSessionExpired,
     add_submission, complete_session, create_session, get_session_for_user,
     get_active_session_for_schedule, get_latest_session_for_schedule_mission,
-    ensure_can_add_submission, join_session, mark_ready,
+    can_access_schedule, ensure_can_add_submission, join_session, mark_ready,
     reveal_session, start_session, add_submission_comment, like_submission,
+    set_participation,
 )
 from app.services.storage import LocalStorageService
 from app.core.security import decode_access_token
 from app.db.session import SessionLocal
 from app.models.schedules import MissionSession
 from app.services.mission_session_ws import manager as mission_session_ws
+from app.services.mission_session_timeouts import (
+    schedule_participant_timeout,
+    schedule_voting_timeout,
+)
+from app.services.mission_judgement import judge_submission
+from app.services.schedule_mission_ws import manager as schedule_mission_ws
 
 router = APIRouter(tags=["mission sessions"])
 storage = LocalStorageService()
+
+
+async def _broadcast_session(session, event_type: str = "session_updated") -> None:
+    await mission_session_ws.broadcast_session(session, event_type)
+    await schedule_mission_ws.broadcast_session(
+        session.schedule_mission.schedule_id, session, event_type
+    )
+
+
+@router.websocket("/schedules/{schedule_id}/mission-sessions/ws")
+async def schedule_mission_socket(schedule_id: int, websocket: WebSocket, token: str):
+    user_id = decode_access_token(token)
+    db = SessionLocal()
+    try:
+        user = db.get(User, int(user_id)) if user_id and user_id.isdigit() else None
+        if user is None or not can_access_schedule(db, schedule_id, user.id):
+            await websocket.close(code=1008, reason="Invalid authentication or schedule.")
+            return
+        await schedule_mission_ws.connect(schedule_id, websocket)
+        active_session = get_active_session_for_schedule(db, schedule_id, user.id)
+        await schedule_mission_ws.send_snapshot(websocket, schedule_id, active_session)
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+    finally:
+        await schedule_mission_ws.disconnect(schedule_id, websocket)
+        db.close()
 
 
 @router.websocket("/mission-sessions/{session_id}/ws")
@@ -47,7 +86,7 @@ async def mission_session_socket(session_id: int, websocket: WebSocket, token: s
             return
         accessible_session = get_session_for_user(db, session_id, user.id)
         if accessible_session is None:
-            await websocket.close(code=1008, reason="You are not a session participant.")
+            await websocket.close(code=1008, reason="You cannot access this mission session.")
             return
         await mission_session_ws.connect(session_id, websocket)
         await mission_session_ws.send_session(websocket, accessible_session)
@@ -116,7 +155,7 @@ async def create_mission_session(schedule_id: int, schedule_mission_id: int, cur
     except ActiveMissionSessionConflict as error:
         _active_session_conflict(error)
     if result is None: _not_found()
-    await mission_session_ws.broadcast_session(result)
+    await _broadcast_session(result, "mission_session_created")
     return result
 
 
@@ -137,8 +176,38 @@ async def join_mission_session(session_id: int, current_user: User = Depends(get
         _session_expired()
     except VotingSessionExpired:
         _voting_expired()
+    except ParticipationLocked as error:
+        raise HTTPException(status_code=409, detail=str(error))
     if result is None: _not_found()
-    await mission_session_ws.broadcast_session(result)
+    await _broadcast_session(result, "participation_updated")
+    return result
+
+
+@router.post(
+    "/mission-sessions/{session_id}/participation",
+    response_model=MissionSessionResponse,
+)
+async def choose_mission_participation(
+    session_id: int,
+    payload: MissionParticipationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        result = set_participation(
+            db, session_id, current_user.id, payload.decision.value
+        )
+    except ActiveMissionSessionConflict as error:
+        _active_session_conflict(error)
+    except ParticipationLocked as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    except MissionSessionExpired:
+        _session_expired()
+    except VotingSessionExpired:
+        _voting_expired()
+    if result is None:
+        _not_found()
+    await _broadcast_session(result, "participation_updated")
     return result
 
 
@@ -152,8 +221,10 @@ async def ready_mission_session(session_id: int, current_user: User = Depends(ge
         _session_expired()
     except VotingSessionExpired:
         _voting_expired()
+    except ParticipationLocked as error:
+        raise HTTPException(status_code=409, detail=str(error))
     if result is None: _not_found()
-    await mission_session_ws.broadcast_session(result)
+    await _broadcast_session(result, "participation_updated")
     return result
 
 
@@ -167,18 +238,25 @@ async def start_mission_session(session_id: int, current_user: User = Depends(ge
         _session_expired()
     except VotingSessionExpired:
         _voting_expired()
+    except ParticipationLocked as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    except NoParticipants as error:
+        raise HTTPException(status_code=409, detail=str(error))
     if result is None: _not_found()
-    await mission_session_ws.broadcast_session(result)
+    if result.shooting_deadline_at is not None:
+        schedule_participant_timeout(result.id, result.shooting_deadline_at)
+    await _broadcast_session(result, "session_started")
     return result
 
 
 @router.post("/mission-sessions/{session_id}/photo", response_model=MissionSubmissionResponse)
-async def upload_mission_photo(session_id: int, photo: UploadFile = File(...), captured_at: datetime | None = None,
+async def upload_mission_photo(session_id: int, background_tasks: BackgroundTasks, photo: UploadFile = File(...), captured_at: datetime | None = None,
                                current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if photo.content_type is None or not photo.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="An image file is required.")
     try:
-        ensure_can_add_submission(db, session_id, current_user.id)
+        if not ensure_can_add_submission(db, session_id, current_user.id):
+            _not_found()
     except SubmissionAlreadyExists as error:
         raise HTTPException(
             status_code=409,
@@ -193,6 +271,8 @@ async def upload_mission_photo(session_id: int, photo: UploadFile = File(...), c
         _session_expired()
     except VotingSessionExpired:
         _voting_expired()
+    except ParticipationNotAllowed as error:
+        raise HTTPException(status_code=409, detail=str(error))
     key = f"submissions/{session_id}/{current_user.id}.jpg"
     await storage.save(photo, key)
     try:
@@ -211,12 +291,15 @@ async def upload_mission_photo(session_id: int, photo: UploadFile = File(...), c
         _session_expired()
     except VotingSessionExpired:
         _voting_expired()
+    except ParticipationNotAllowed as error:
+        raise HTTPException(status_code=409, detail=str(error))
     if result is None: _not_found()
     session_state = get_session_for_user(db, session_id, current_user.id)
     if session_state is not None:
-        await mission_session_ws.broadcast_session(session_state)
+        await _broadcast_session(session_state, "photo_uploaded")
         if session_state.status == "VOTING":
-            await mission_session_ws.broadcast_session(session_state, "voting_started")
+            await _broadcast_session(session_state, "voting_started")
+    background_tasks.add_task(judge_submission, result.id)
     return result
 
 
@@ -228,8 +311,10 @@ async def reveal_mission_session(session_id: int, current_user: User = Depends(g
         _session_expired()
     except VotingSessionExpired:
         _voting_expired()
+    except VotingNotReady as error:
+        raise HTTPException(status_code=409, detail=str(error))
     if result is None: _not_found()
-    await mission_session_ws.broadcast_session(result)
+    await _broadcast_session(result)
     return result
 
 
@@ -242,7 +327,7 @@ async def finish_mission_session(session_id: int, current_user: User = Depends(g
     except VotingSessionExpired:
         _voting_expired()
     if result is None: _not_found()
-    await mission_session_ws.broadcast_session(result, "session_completed")
+    await _broadcast_session(result, "session_completed")
     return result
 
 
@@ -277,9 +362,11 @@ async def comment_on_submission(
         _not_found()
     session = get_session_for_user(db, session_id, current_user.id)
     if session is not None:
-        await mission_session_ws.broadcast_session(session, "comment_added")
+        await _broadcast_session(session, "comment_added")
         if session.status == "VOTING":
-            await mission_session_ws.broadcast_session(session, "voting_started")
+            if session.voting_expires_at is not None:
+                schedule_voting_timeout(session.id, session.voting_expires_at)
+            await _broadcast_session(session, "voting_started")
     return result
 
 
@@ -303,5 +390,6 @@ async def like_mission_submission(
         _not_found()
     session = get_session_for_user(db, session_id, current_user.id)
     if session is not None:
-        await mission_session_ws.broadcast_session(session, "like_updated")
+        event_type = "session_completed" if session.status == "COMPLETED" else "like_updated"
+        await _broadcast_session(session, event_type)
     return result

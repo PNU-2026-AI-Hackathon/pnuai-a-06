@@ -15,6 +15,34 @@ class MissionSessionStatus(str, Enum):
     VOTING = "VOTING"
     REVEALED = "REVEALED"
     COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class MissionParticipationDecision(str, Enum):
+    PARTICIPATE = "PARTICIPATE"
+    PASS = "PASS"
+
+
+class MissionParticipationStatus(str, Enum):
+    UNDECIDED = "UNDECIDED"
+    PARTICIPATING = "PARTICIPATING"
+    SKIPPED = "SKIPPED"
+    LOCKED_OUT = "LOCKED_OUT"
+    TIMED_OUT = "TIMED_OUT"
+    COMPLETED = "COMPLETED"
+
+
+class MissionParticipationRequest(BaseModel):
+    decision: MissionParticipationDecision
+
+
+class MissionJudgementStatus(str, Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    PASSED = "PASSED"
+    REJECTED = "REJECTED"
+    REVIEW = "REVIEW"
+    ERROR = "ERROR"
 
 
 class MissionSessionCreateResponse(BaseModel):
@@ -30,6 +58,11 @@ class MissionSessionMemberResponse(BaseModel):
 
     user_id: int
     ready_at: datetime | None
+    participation_status: MissionParticipationStatus
+    decision_at: datetime | None
+    excluded_at: datetime | None
+    exclusion_reason: str | None
+    upload_deadline_at: datetime | None
     joined_at: datetime
     user: ScheduleUserResponse
 
@@ -43,6 +76,11 @@ class MissionSubmissionResponse(BaseModel):
     captured_at: datetime | None
     uploaded_at: datetime
     like_count: int
+    judge_status: MissionJudgementStatus
+    similarity_score: float | None
+    judge_reason: str | None
+    judge_model: str | None
+    judged_at: datetime | None
     comments: list["MissionSubmissionCommentResponse"]
     user: ScheduleUserResponse
 
@@ -70,6 +108,8 @@ class MissionSessionResponse(BaseModel):
     status: MissionSessionStatus
     created_by_user_id: int
     started_at: datetime | None
+    participants_locked_at: datetime | None
+    shooting_deadline_at: datetime | None
     revealed_at: datetime | None
     completed_at: datetime | None
     expires_at: datetime | None

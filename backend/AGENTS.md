@@ -6,6 +6,7 @@
 - Python environment is conda env `pnuai`.
 - Install dependencies with `pip install -r requirements.txt` inside that env.
 - Run migrations with `alembic upgrade head`.
+- Current Alembic head is `20260812_0034`; it includes mission judgement/session state and schedule magazine persistence with a global generation-number sequence.
 - Run API externally on port 7020 with `uvicorn app.main:app --host 0.0.0.0 --port 7020 --reload`.
 - Current long-running dev server convention is tmux session `backend-7020`:
   `tmux attach -t backend-7020`
@@ -32,7 +33,7 @@
 - District data belongs to individual `missions` only.
 - Sprint 2 mission data is DB-seeded as 12 missions: each theme has 2 basic, 1 rare, and 1 side mission.
 - Mission responses include `district_code`, `district_label`, and `place_label`; basket/theme responses must not include district tags.
-- Current district codes include `BUSANJIN`, `DONGNAE`, `GANGSEO`, `GEUMJEONG`, `GIJANG`, `HAEUNDAE`, `JUNG`, `NAM`, `SAHA`, `YEONJE`.
+- Current district codes include `BUK`, `BUSANJIN`, `DONGNAE`, `GANGSEO`, `GEUMJEONG`, `GIJANG`, `HAEUNDAE`, `JUNG`, `NAM`, `SAHA`, `SEO`, `YEONJE`.
 - The primary mission browsing API is `GET /missions`, filterable by `district_code`, `theme`, and `type`.
 - `GET /districts` supports the first district-based browsing screen.
 - `GET /mission-sets` and `GET /mission-sets/{id}` are basket/theme-oriented APIs.
@@ -42,6 +43,8 @@
 - `target_photo_id` is the mission code, for example `SEA_B01`.
 - Keep `target_photo_id` and `target_photo_url` nullable because some local/dev DBs may not have images yet.
 - Basic mission photos currently exist and return `200 image/jpeg`: `MTN_B01`, `MTN_B02`, `SEA_B01`, `SEA_B02`, `CITY_B01`, `CITY_B02`.
+- Mission execution now uses schedule-scoped mission sessions with participant decisions, photo submission, asynchronous visual judgement, comments, likes, voting, and WebSocket updates.
+- Completed schedule missions with passed submission photos can be rendered into a server-generated magazine image.
 
 ## Current Mission Data
 
@@ -50,16 +53,16 @@ Mission district tags and place labels currently reflect the latest DB seed/upda
 ```text
 MTN_B01   MOUNTAIN  BASIC  이제 부산은 제 겁니다              NAM       남구      황령산 봉수대
 MTN_B02   MOUNTAIN  BASIC  템플스테이                        BUSANJIN  부산진구  삼광사
-MTN_R01   MOUNTAIN  RARE   피톤치드 힐링                     DONGNAE   동래구    금강공원
+MTN_R01   MOUNTAIN  RARE   피톤치드 힐링                     BUK       북구      백양산
 MTN_S01   MOUNTAIN  SIDE   주모 한 잔 추가요                 GEUMJEONG 금정구    금정산성
 SEA_B01   SEA       BASIC  서핑 좋아하세요?                  HAEUNDAE  해운대구  송정
-SEA_B02   SEA       BASIC  둘이서 떠나요                     GIJANG    기장군    일광
-SEA_R01   SEA       RARE   바다에 왔으면 옷이 젖어야 하는 법 HAEUNDAE  해운대구  해운대 해수욕장
-SEA_S01   SEA       SIDE   와사비 폭탄                       SAHA      사하구    다대포
-CITY_B01  CITY      BASIC  카멜레온 게임                     JUNG      중구      국제시장
-CITY_B02  CITY      BASIC  사이버펑크 부산                   YEONJE    연제구    부산시청
+SEA_B02   SEA       BASIC  둘이서 떠나요                     SEO       서구      송도
+SEA_R01   SEA       RARE   바다에 왔으면 옷이 젖어야 하는 법 SAHA      사하구    다대포 해수욕장
+SEA_S01   SEA       SIDE   친구야 선물이야                   JUNG      중구      자갈치시장
+CITY_B01  CITY      BASIC  카멜레온 게임                     BUK       북구      구포시장
+CITY_B02  CITY      BASIC  사이버펑크 부산                   NAM       남구      부산항대교, 문현금융단지
 CITY_R01  CITY      RARE   서울숲 아니고 부산숲              GANGSEO   강서구    을숙도
-CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  JUNG      중구      부산역
+CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   동래구    동래시장
 ```
 
 ## Code Organization
@@ -84,7 +87,84 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  JUNG      �
   - `GET /schedules/{schedule_id}/missions`: selected schedule's added missions.
   - `POST /schedules/{schedule_id}/missions` with `{ "mission_id": 1 }`: add a mission to that schedule.
 - Legacy user-level baskets/cart-items APIs were removed; mission selection is schedule-scoped.
-- Mission completion/submission judging is not implemented yet. Add a separate submission API when photo upload/completion rules are decided.
+- Each mission may have structured `judgement_rules`; these are the primary criteria for visual submission judgement.
+
+## Mission Session API
+
+- Mission execution is schedule-scoped and only one mission session may be active in a schedule at a time.
+- Session lifecycle values are `WAITING`, `READY`, `SHOOTING`, `UPLOADING`, `VOTING`, `REVEALED`, `COMPLETED`, and `CANCELLED`.
+- Participation choices are `PARTICIPATE` and `PASS`; participant state is tracked separately for every session member.
+- Main HTTP endpoints:
+  - `GET /schedules/{schedule_id}/missions/{schedule_mission_id}/session`: latest attempt for one scheduled mission.
+  - `GET /schedules/{schedule_id}/active-mission-session`: active session for the schedule.
+  - `POST /schedules/{schedule_id}/missions/{schedule_mission_id}/sessions`: create an attempt.
+  - `GET /mission-sessions/{session_id}`: read session state.
+  - `POST /mission-sessions/{session_id}/join`
+  - `POST /mission-sessions/{session_id}/participation`
+  - `POST /mission-sessions/{session_id}/ready`
+  - `POST /mission-sessions/{session_id}/start`
+  - `POST /mission-sessions/{session_id}/photo`: upload one participant photo as multipart form data.
+  - `POST /mission-sessions/{session_id}/reveal`
+  - `POST /mission-sessions/{session_id}/complete`
+  - `POST /mission-sessions/{session_id}/submissions/{submission_id}/comments`
+  - `POST /mission-sessions/{session_id}/submissions/{submission_id}/like`
+- Real-time endpoints accept the access token as the `token` query parameter:
+  - `WS /schedules/{schedule_id}/mission-sessions/ws`
+  - `WS /mission-sessions/{session_id}/ws`
+- Uploaded photos are stored under `app/static/submissions/<session-id>/<user-id>.jpg` and served through `/static/...`.
+- A participant can submit only one photo per session and cannot like their own submission.
+- Submission judgement statuses are `PENDING`, `PROCESSING`, `PASSED`, `REJECTED`, `REVIEW`, and `ERROR`.
+- Photo upload starts `judge_submission` as a background task. The judge compares the mission target image and submitted image through the OpenAI Responses API, applies the mission's `judgement_rules`, and persists score, reason, model, and timestamp.
+- Current automatic pass rule requires the model decision to be `PASS` and the score to meet `MISSION_JUDGEMENT_PASS_SCORE`; all other completed judgements become `REJECTED`.
+- Missing OpenAI configuration, target image, submission file, or request failure produces `ERROR` and is broadcast to connected clients.
+
+## Magazine API
+
+- Magazine routes require authentication except `GET /magazine-templates`. Schedule access is limited to the creator and accepted members.
+- `GET /magazine-templates`: discover every valid frame under `app/static/frame/*/manifest.json`.
+- `GET /schedules/{schedule_id}/magazine/candidates?template_key=handwriting-2025-v1`: list completed missions that have at least one passed photo and report whether frontend selection is required.
+- `GET /schedules/{schedule_id}/magazine/draft`: inspect the schedule, participants, completed mission pages, winner data, photos, comments, and summary used as render input.
+- `POST /schedules/{schedule_id}/magazine`: generate or reuse a magazine. Request body:
+
+```json
+{
+  "template_key": "handwriting-2025-v1",
+  "force": false,
+  "schedule_mission_ids": [1, 2, 3]
+}
+```
+
+- `GET /schedules/{schedule_id}/magazine?template_key=handwriting-2025-v1`: return the latest generated record and its `image_urls`.
+- `handwriting-2025-v1` has six mission slots. When renderable candidates exceed six, the frontend must first call the candidates endpoint and send at most six ordered `schedule_mission_ids`.
+- Omitting ids when selection is required returns `409` with `MAGAZINE_MISSION_SELECTION_REQUIRED`, `max_selectable`, and candidate ids. Invalid or excessive selections return `422`.
+- Fewer than six selected/renderable missions leave the unused frame slots blank; the output canvas is not cropped.
+- Each rendered mission uses the winning passed photo when available, otherwise the first passed photo, plus mission title and description.
+- Rendered metadata includes the schedule title, date range, creator and accepted member names, and `#<generation_number>`.
+- `generation_number` comes from the server-wide PostgreSQL sequence `magazine_generation_number_seq`, not a per-user or per-schedule count.
+- A rendered photo includes all comments when there are at most three. More than three are sampled deterministically using the generation number and submission id. Comment authors are not rendered.
+- The frame's comment icon is shown only when the selected photo has at least one comment; it is removed with the empty comment area otherwise.
+- Identical source data and template version reuse the current `READY` record unless `force` is true. A real regeneration receives a new global generation number.
+- The current renderer accepts only local `/static/...` source photos and writes WebP files to `app/static/magazines/<schedule-id>/<template-key>/page-<n>.webp`.
+- Generated WebP files are runtime artifacts and are ignored by git. `image_urls` is the storage-facing API contract so local storage can later be replaced by S3.
+- Generation requires at least one completed mission with a passed local photo; otherwise it returns `409`.
+
+## Magazine Frames
+
+- Frame layout is data-driven:
+
+```text
+app/static/frame/<template-key>/
+  frame.svg
+  manifest.json
+```
+
+- A manifest defines the key, version, canvas dimensions, render scale, capacity, font, accent color, and photo/content/comment/icon slots.
+- Adding a valid frame directory automatically exposes it through `GET /magazine-templates`; no new router is needed.
+- Increment the manifest `version` whenever a frame or slot layout changes so stale generated images are regenerated.
+- The current `handwriting-2025-v1` frame renders a 360 x 2112 SVG at scale 2, producing a 720 x 4224 WebP.
+- Rendering uses CairoSVG and Pillow; keep both dependencies installed from `requirements.txt`.
+- It requires `app/static/fonts/KyoboHandwriting2025lyb.ttf` (Kyobo Handwriting 2025). Font binaries are intentionally ignored and must be installed on each runtime host because redistribution is restricted.
+- See `app/static/frame/README.md` for the frame package and frontend selection contract.
 
 ## Schedule API
 
@@ -126,6 +206,12 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  JUNG      �
 - `KAKAO_REST_API_KEY`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`: Kakao login support.
 - `FRONTEND_REDIRECT_URI`: auth callback redirect target.
 - `CORS_ORIGINS`: comma-separated allowed frontend origins.
+- `OPENAI_API_KEY`: API key used by asynchronous mission photo judgement.
+- `OPENAI_VISION_MODEL`: Responses API vision model; defaults to `gpt-5.4-mini`.
+- `OPENAI_VISION_TIMEOUT_SECONDS`: mission judgement request timeout; defaults to 60 seconds.
+- `MISSION_JUDGEMENT_PASS_SCORE`: minimum score for an automatic pass; defaults to 70.
+- `MISSION_JUDGEMENT_REVIEW_SCORE`: reserved review threshold configuration; defaults to 50.
+- `MISSION_ADMIN_PASSWORD`: optional password used by the local mission administration tool.
 - `SCHEDULE_INVITE_BASE_URL`: frontend app/deep-link base used when creating schedule share invitation URLs.
   - Expo route example: `exp://192.168.x.x:8081/--/trip/invite`
   - Backend appends `?inviteToken=<token>` unless the value contains `{inviteToken}`.

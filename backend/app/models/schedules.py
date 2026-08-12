@@ -7,6 +7,8 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
+    Float,
     UniqueConstraint,
     func,
 )
@@ -257,6 +259,12 @@ class MissionSession(Base):
     )
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="WAITING")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    participants_locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    shooting_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     revealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -301,6 +309,15 @@ class MissionSessionMember(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    participation_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="UNDECIDED", server_default="UNDECIDED", index=True
+    )
+    decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exclusion_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    upload_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -328,6 +345,14 @@ class MissionSubmission(Base):
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    judge_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="PENDING", server_default="PENDING", index=True
+    )
+    similarity_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    judge_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    judge_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    judged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    judge_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped[MissionSession] = relationship(back_populates="submissions")
     user: Mapped[User] = relationship()
