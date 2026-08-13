@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jjigeukka Developer GPS Admin</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { max-width: 980px; margin: 32px auto; padding: 0 20px 60px; color: #18202a; background: #f7f8fa; }
+    h1, h2 { margin-top: 0; } p { color: #687386; line-height: 1.6; }
+    nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+    nav a { padding: 9px 13px; border-radius: 999px; color: #475569; background: #e8edf4; text-decoration: none; font-size: 14px; font-weight: 700; }
+    nav a.active { color: white; background: #7c3aed; }
+    .warning { margin-bottom: 18px; padding: 14px 16px; border: 1px solid #fed7aa; border-radius: 12px; color: #9a3412; background: #fff7ed; font-weight: 700; }
+    .panel { background: white; padding: 22px; border-radius: 16px; box-shadow: 0 4px 20px #18202a12; }
+    .layout { display: grid; grid-template-columns: minmax(320px, .9fr) minmax(360px, 1.1fr); gap: 18px; align-items: start; }
+    form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+    .wide { grid-column: 1 / -1; }
+    input { width: 100%; border: 1px solid #d8dee8; border-radius: 8px; padding: 10px; font: inherit; }
+    input:focus { border-color: #7c3aed; outline: 3px solid #7c3aed18; }
+    .checkbox { display: flex; align-items: center; gap: 8px; }
+    .checkbox input { width: auto; }
+    button { border: 0; border-radius: 8px; padding: 11px 14px; color: white; background: #7c3aed; font-weight: 700; cursor: pointer; }
+    button.secondary { color: #334155; background: #e2e8f0; }
+    button.danger { color: #b91c1c; background: #fee2e2; }
+    .actions, .master-actions { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
+    .actions button:first-child { flex: 1; }
+    .master-actions { margin-bottom: 14px; }
+    .hint { font-size: 12px; font-weight: 400; color: #8792a2; }
+    .summary { margin-bottom: 14px; color: #475569; font-weight: 700; }
+    .locations { display: grid; gap: 10px; }
+    .location { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 12px; }
+    .location.inactive { opacity: .58; background: #f8fafc; }
+    .location strong { display: block; margin-bottom: 5px; }
+    .coordinates { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #475569; }
+    .location-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: start; justify-content: end; }
+    .location-actions button, .location-actions a { padding: 7px 9px; border-radius: 7px; font-size: 12px; text-decoration: none; font-weight: 700; }
+    .map-link { color: #1d4ed8; background: #dbeafe; }
+    .badge { display: inline-block; margin-top: 6px; padding: 3px 8px; border-radius: 999px; color: #166534; background: #dcfce7; font-size: 12px; font-weight: 800; }
+    .badge.off { color: #475569; background: #e2e8f0; }
+    .empty { padding: 24px; border: 1px dashed #cbd5e1; border-radius: 12px; color: #64748b; text-align: center; }
+    #message { min-height: 24px; margin: 14px 0; font-weight: 700; }
+    #login-form { max-width: 460px; }
+    @media (max-width: 780px) { .layout { grid-template-columns: 1fr; } }
+    @media (max-width: 520px) { form { grid-template-columns: 1fr; } .wide { grid-column: auto; } .location { grid-template-columns: 1fr; } .location-actions { justify-content: start; } }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">미션 등록</a>
+    <a href="/locations">GPS 위치 관리</a>
+    <a href="/developer-locations" class="active">개발 테스트 위치</a>
+  </nav>
+
+  <section id="login-panel">
+    <h1>관리자 로그인</h1>
+    <p>개발 테스트 위치를 관리하려면 관리자 비밀번호가 필요합니다.</p>
+    <form id="login-form" class="panel">
+      <label class="wide">비밀번호<input name="password" type="password" autocomplete="current-password" required /></label>
+      <button class="wide" type="submit">접속</button>
+    </form>
+  </section>
+
+  <section id="admin-panel" hidden>
+    <h1>전체 미션 개발 테스트 위치</h1>
+    <div class="warning">활성화된 좌표는 모든 GPS 미션에서 실제 장소와 동일하게 통과됩니다. 테스트가 끝나면 전체 비활성화를 눌러주세요.</div>
+    <div class="layout">
+      <section class="panel">
+        <h2 id="form-title">테스트 위치 추가</h2>
+        <form id="location-form">
+          <input id="location-id" type="hidden" />
+          <label class="wide">장소 이름
+            <input name="label" id="location-label" placeholder="개발자 집 / 학교" required />
+          </label>
+          <label class="wide">좌표 한 번에 붙여넣기
+            <input id="coordinate-paste" placeholder="129.199456, 35.178123" />
+            <span class="hint">지도 앱에서 복사한 경도, 위도 순서입니다.</span>
+          </label>
+          <label>경도 (Longitude)
+            <input name="longitude" id="longitude" type="number" min="-180" max="180" step="any" required />
+          </label>
+          <label>위도 (Latitude)
+            <input name="latitude" id="latitude" type="number" min="-90" max="90" step="any" required />
+          </label>
+          <label class="wide">허용 반경 (미터)
+            <input name="allowed_radius_m" id="allowed-radius" type="number" min="1" max="10000" value="300" required />
+          </label>
+          <label class="wide checkbox"><input id="is-active" type="checkbox" checked /> 등록 즉시 전체 미션에 적용</label>
+          <div class="actions">
+            <button type="submit" id="submit-button">테스트 위치 등록</button>
+            <button type="button" id="cancel-edit" class="secondary" hidden>수정 취소</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>등록된 공통 위치</h2>
+        <div class="master-actions">
+          <button type="button" id="enable-all">전체 활성화</button>
+          <button type="button" id="disable-all" class="secondary">전체 비활성화</button>
+        </div>
+        <div id="summary" class="summary"></div>
+        <div id="locations" class="locations"></div>
+      </section>
+    </div>
+    <button id="logout" type="button" class="secondary" style="margin-top:14px">로그아웃</button>
+  </section>
+
+  <div id="message"></div>
+
+  <script>
+    const loginPanel = document.querySelector('#login-panel');
+    const adminPanel = document.querySelector('#admin-panel');
+    const loginForm = document.querySelector('#login-form');
+    const locationForm = document.querySelector('#location-form');
+    const locationsElement = document.querySelector('#locations');
+    const summary = document.querySelector('#summary');
+    const message = document.querySelector('#message');
+    const locationId = document.querySelector('#location-id');
+    const locationLabel = document.querySelector('#location-label');
+    const longitude = document.querySelector('#longitude');
+    const latitude = document.querySelector('#latitude');
+    const allowedRadius = document.querySelector('#allowed-radius');
+    const isActive = document.querySelector('#is-active');
+    const coordinatePaste = document.querySelector('#coordinate-paste');
+    const cancelEdit = document.querySelector('#cancel-edit');
+    const submitButton = document.querySelector('#submit-button');
+    const formTitle = document.querySelector('#form-title');
+    let locations = [];
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+      })[character]);
+    }
+
+    function setMessage(text, success = false) {
+      message.textContent = text;
+      message.style.color = success ? '#15803d' : '#b91c1c';
+    }
+
+    async function request(url, options = {}) {
+      const response = await fetch(url, options);
+      let body = {};
+      try { body = await response.json(); } catch (_) {}
+      if (!response.ok) throw new Error(body.detail || '요청을 처리하지 못했습니다.');
+      return body;
+    }
+
+    function resetForm() {
+      locationForm.reset();
+      locationId.value = '';
+      allowedRadius.value = '300';
+      isActive.checked = true;
+      coordinatePaste.value = '';
+      formTitle.textContent = '테스트 위치 추가';
+      submitButton.textContent = '테스트 위치 등록';
+      cancelEdit.hidden = true;
+    }
+
+    function render() {
+      const activeCount = locations.filter(item => item.is_active).length;
+      summary.textContent = `전체 ${locations.length}개 · 현재 모든 GPS 미션에 적용 중 ${activeCount}개`;
+      if (!locations.length) {
+        locationsElement.innerHTML = '<div class="empty">등록된 테스트 위치가 없습니다.</div>';
+        return;
+      }
+      locationsElement.innerHTML = locations.map(item => `
+        <article class="location${item.is_active ? '' : ' inactive'}">
+          <div>
+            <strong>${escapeHtml(item.label)}</strong>
+            <div class="coordinates">${item.longitude}, ${item.latitude}</div>
+            <div class="hint">허용 반경 ${item.allowed_radius_m.toLocaleString()}m</div>
+            <span class="badge${item.is_active ? '' : ' off'}">${item.is_active ? '전체 미션 적용 중' : '비활성'}</span>
+          </div>
+          <div class="location-actions">
+            <a class="map-link" href="https://www.google.com/maps?q=${encodeURIComponent(item.latitude + ',' + item.longitude)}" target="_blank" rel="noopener noreferrer">지도</a>
+            <button type="button" class="secondary" data-toggle="${item.id}">${item.is_active ? '끄기' : '켜기'}</button>
+            <button type="button" class="secondary" data-edit="${item.id}">수정</button>
+            <button type="button" class="danger" data-delete="${item.id}">삭제</button>
+          </div>
+        </article>`).join('');
+    }
+
+    async function loadLocations() {
+      const body = await request('/api/developer-locations');
+      locations = body.locations;
+      render();
+    }
+
+    function beginEdit(item) {
+      locationId.value = item.id;
+      locationLabel.value = item.label;
+      longitude.value = item.longitude;
+      latitude.value = item.latitude;
+      allowedRadius.value = item.allowed_radius_m;
+      isActive.checked = item.is_active;
+      formTitle.textContent = '테스트 위치 수정';
+      submitButton.textContent = '수정 저장';
+      cancelEdit.hidden = false;
+      locationForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function parseCoordinates() {
+      const numbers = coordinatePaste.value.match(/-?\d+(?:\.\d+)?/g) || [];
+      if (numbers.length < 2) return;
+      longitude.value = numbers[0];
+      latitude.value = numbers[1];
+    }
+
+    function showAdmin() {
+      loginPanel.hidden = true;
+      adminPanel.hidden = false;
+      loadLocations().catch(error => setMessage(error.message));
+    }
+
+    loginForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      try {
+        await request('/api/login', { method: 'POST', body: new FormData(loginForm) });
+        setMessage('', true);
+        showAdmin();
+      } catch (error) { setMessage(error.message); }
+    });
+
+    locationForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const editingId = locationId.value;
+      const formData = new FormData(locationForm);
+      formData.set('is_active', String(isActive.checked));
+      try {
+        const body = await request(
+          editingId ? `/api/developer-locations/${editingId}` : '/api/developer-locations',
+          { method: editingId ? 'PUT' : 'POST', body: formData },
+        );
+        setMessage(body.message, true);
+        resetForm();
+        await loadLocations();
+      } catch (error) { setMessage(error.message); }
+    });
+
+    locationsElement.addEventListener('click', async event => {
+      const item = locations.find(location => String(location.id) === (event.target.dataset.toggle || event.target.dataset.edit || event.target.dataset.delete));
+      if (!item) return;
+      if (event.target.dataset.edit) return beginEdit(item);
+      try {
+        if (event.target.dataset.toggle) {
+          const formData = new FormData();
+          formData.set('is_active', String(!item.is_active));
+          const body = await request(`/api/developer-locations/${item.id}/active`, { method: 'PATCH', body: formData });
+          setMessage(body.message, true);
+        } else if (event.target.dataset.delete && confirm(`'${item.label}' 테스트 위치를 완전히 삭제할까요?`)) {
+          const body = await request(`/api/developer-locations/${item.id}`, { method: 'DELETE' });
+          setMessage(body.message, true);
+        } else return;
+        await loadLocations();
+      } catch (error) { setMessage(error.message); }
+    });
+
+    async function setAllActive(value) {
+      const formData = new FormData();
+      formData.set('is_active', String(value));
+      try {
+        const body = await request('/api/developer-locations/active', { method: 'POST', body: formData });
+        setMessage(body.message, true);
+        await loadLocations();
+      } catch (error) { setMessage(error.message); }
+    }
+
+    coordinatePaste.addEventListener('input', parseCoordinates);
+    cancelEdit.addEventListener('click', resetForm);
+    document.querySelector('#enable-all').addEventListener('click', () => setAllActive(true));
+    document.querySelector('#disable-all').addEventListener('click', () => setAllActive(false));
+    document.querySelector('#logout').addEventListener('click', async () => {
+      await fetch('/api/logout', { method: 'POST' });
+      location.reload();
+    });
+    fetch('/api/developer-locations').then(response => { if (response.ok) showAdmin(); });
+  </script>
+</body>
+</html>

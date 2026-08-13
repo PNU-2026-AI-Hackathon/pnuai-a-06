@@ -1,7 +1,10 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     JSON,
@@ -81,3 +84,102 @@ class Mission(Base):
     )
 
     mission_set: Mapped[MissionSet] = relationship(back_populates="missions")
+    locations: Mapped[list["MissionLocation"]] = relationship(
+        back_populates="mission",
+        cascade="all, delete-orphan",
+        order_by="MissionLocation.id",
+    )
+
+
+class MissionLocation(Base):
+    __tablename__ = "mission_locations"
+    __table_args__ = (
+        CheckConstraint(
+            "latitude >= -90 AND latitude <= 90",
+            name="ck_mission_locations_latitude",
+        ),
+        CheckConstraint(
+            "longitude >= -180 AND longitude <= 180",
+            name="ck_mission_locations_longitude",
+        ),
+        CheckConstraint(
+            "allowed_radius_m > 0",
+            name="ck_mission_locations_allowed_radius",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    mission_id: Mapped[int] = mapped_column(
+        ForeignKey("missions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    label: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    allowed_radius_m: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=300,
+        server_default="300",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    mission: Mapped[Mission] = relationship(back_populates="locations")
+
+
+class MissionDeveloperLocation(Base):
+    __tablename__ = "mission_developer_locations"
+    __table_args__ = (
+        CheckConstraint(
+            "latitude >= -90 AND latitude <= 90",
+            name="ck_mission_developer_locations_latitude",
+        ),
+        CheckConstraint(
+            "longitude >= -180 AND longitude <= 180",
+            name="ck_mission_developer_locations_longitude",
+        ),
+        CheckConstraint(
+            "allowed_radius_m > 0",
+            name="ck_mission_developer_locations_allowed_radius",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    label: Mapped[str] = mapped_column(String(150), nullable=False)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    allowed_radius_m: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=300,
+        server_default="300",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

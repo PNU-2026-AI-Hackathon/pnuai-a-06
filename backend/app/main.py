@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -24,12 +25,39 @@ settings = get_settings()
 logger = logging.getLogger("app.requests")
 LOG_DIR = Path("logs")
 REQUEST_LOG_FILE = LOG_DIR / "backend.log"
+SENSITIVE_QUERY_PATTERN = re.compile(
+    r"([?&](?:token|access_token)=)[^&\s\"]+",
+    flags=re.IGNORECASE,
+)
+
+
+def _redact_sensitive_query(value):
+    if isinstance(value, str):
+        return SENSITIVE_QUERY_PATTERN.sub(r"\1[REDACTED]", value)
+    if isinstance(value, tuple):
+        return tuple(_redact_sensitive_query(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _redact_sensitive_query(item) for key, item in value.items()}
+    return value
+
+
+class SensitiveQueryFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _redact_sensitive_query(record.msg)
+        record.args = _redact_sensitive_query(record.args)
+        return True
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 LOG_DIR.mkdir(exist_ok=True)
+
+sensitive_query_filter = SensitiveQueryFilter()
+for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    logging.getLogger(logger_name).addFilter(sensitive_query_filter)
+for handler in logging.getLogger().handlers:
+    handler.addFilter(sensitive_query_filter)
 
 if not any(
     isinstance(handler, RotatingFileHandler)

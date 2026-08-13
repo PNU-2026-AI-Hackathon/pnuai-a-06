@@ -6,12 +6,15 @@
 - Python environment is conda env `pnuai`.
 - Install dependencies with `pip install -r requirements.txt` inside that env.
 - Run migrations with `alembic upgrade head`.
-- Current Alembic head is `20260812_0034`; it includes mission judgement/session state and schedule magazine persistence with a global generation-number sequence.
+- Current Alembic head is `20260813_0036`; it includes mission judgement/session state, schedule magazine persistence with a global generation-number sequence, GPS checks for mission participation, and global developer test locations.
 - Run API externally on port 7020 with `uvicorn app.main:app --host 0.0.0.0 --port 7020 --reload`.
 - Current long-running dev server convention is tmux session `backend-7020`:
   `tmux attach -t backend-7020`
   `tmux capture-pane -t backend-7020 -p -S -50`
 - API docs should be checked at `http://<server-host>:7020/docs`.
+- The local mission administration UI runs separately on port 8197:
+  `uvicorn mission_admin.server:app --host 0.0.0.0 --port 8197 --reload`
+- Mission creation is at `http://<server-host>:8197/`; GPS location management is at `http://<server-host>:8197/locations`; global developer test locations are at `http://<server-host>:8197/developer-locations`. All pages use the same administrator session.
 - Default database URL is `postgresql+psycopg://postgres:postgres@localhost:5432/jjigeukka`.
 - If `alembic upgrade head` fails with `connection refused`, PostgreSQL is not listening on `localhost:5432`.
 - Local dev DB uses installed PostgreSQL binaries and workspace `.pgdata`:
@@ -19,6 +22,7 @@
   `/usr/lib/postgresql/15/bin/pg_ctl -D .pgdata -l logs/postgres.log -o "-p 5432 -k /tmp" start`
   `createdb -h 127.0.0.1 -p 5432 -U postgres jjigeukka`
 - Request logs are written to stdout and `logs/backend.log` with timestamps, method, path, status, client IP, and duration.
+- Uvicorn WebSocket logs redact `token` and `access_token` query values. Never remove the sensitive-query logging filter while WebSocket authentication uses a query parameter.
 - Runtime logs are ignored by git through `logs/` and `*.log`.
 
 ## Current Product Direction
@@ -44,6 +48,7 @@
 - Keep `target_photo_id` and `target_photo_url` nullable because some local/dev DBs may not have images yet.
 - Basic mission photos currently exist and return `200 image/jpeg`: `MTN_B01`, `MTN_B02`, `SEA_B01`, `SEA_B02`, `CITY_B01`, `CITY_B02`.
 - Mission execution now uses schedule-scoped mission sessions with participant decisions, photo submission, asynchronous visual judgement, comments, likes, voting, and WebSocket updates.
+- Missions may have multiple allowed GPS points in `mission_locations`; each point has its own label and allowed radius.
 - Completed schedule missions with passed submission photos can be rendered into a server-generated magazine image.
 
 ## Current Mission Data
@@ -88,19 +93,28 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   �
   - `POST /schedules/{schedule_id}/missions` with `{ "mission_id": 1 }`: add a mission to that schedule.
 - Legacy user-level baskets/cart-items APIs were removed; mission selection is schedule-scoped.
 - Each mission may have structured `judgement_rules`; these are the primary criteria for visual submission judgement.
+- Mission responses include `locations`. An empty list means exact GPS points have not been configured yet.
 
 ## Mission Session API
 
 - Mission execution is schedule-scoped and only one mission session may be active in a schedule at a time.
 - Session lifecycle values are `WAITING`, `READY`, `SHOOTING`, `UPLOADING`, `VOTING`, `REVEALED`, `COMPLETED`, and `CANCELLED`.
 - Participation choices are `PARTICIPATE` and `PASS`; participant state is tracked separately for every session member.
+- GPS is checked when a user chooses `PARTICIPATE`, before the leader starts and locks the session. The leader's create-session action is the UI-level mission start; `POST /mission-sessions/{session_id}/start` begins shooting after participation choices are complete.
+- Location enforcement applies only to missions whose `verification_type` is `GPS_PHOTO`. `PHOTO`, `FREE_PHOTO`, and `PASS` receive `NOT_REQUIRED`.
+- A `GPS_PHOTO` mission with no `mission_locations` rows temporarily permits participation with `NOT_CONFIGURED`, so exact coordinates can be populated later without blocking development.
+- Configured GPS missions require latitude, longitude, device accuracy, and a timezone-aware measurement timestamp. The backend validates freshness and accuracy, calculates great-circle distance, and accepts any configured point whose radius contains the user.
+- Failed location checks keep the member `UNDECIDED` so the client can refresh GPS and retry. Exact participant coordinates are stored internally but omitted from API responses.
+- The port-8197 GPS admin page lists every mission and supports adding, editing, and deleting multiple allowed locations. Adding the first location automatically changes that mission's `verification_type` to `GPS_PHOTO`; deleting all locations leaves the type unchanged and therefore returns to the temporary `NOT_CONFIGURED` behavior.
+- GPS admin coordinate paste fields use map-app order: longitude first, latitude second.
+- Global developer locations are stored separately in `mission_developer_locations` and are never exposed in public mission responses. Every active developer location is accepted by every `GPS_PHOTO` mission in addition to that mission's normal locations. The port-8197 developer-location page supports add, edit, delete, individual activation, and activate/deactivate-all controls. Disable all developer locations after testing.
 - Main HTTP endpoints:
   - `GET /schedules/{schedule_id}/missions/{schedule_mission_id}/session`: latest attempt for one scheduled mission.
   - `GET /schedules/{schedule_id}/active-mission-session`: active session for the schedule.
   - `POST /schedules/{schedule_id}/missions/{schedule_mission_id}/sessions`: create an attempt.
   - `GET /mission-sessions/{session_id}`: read session state.
   - `POST /mission-sessions/{session_id}/join`
-  - `POST /mission-sessions/{session_id}/participation`
+  - `POST /mission-sessions/{session_id}/participation` with `decision` and, for configured `GPS_PHOTO` participation, `latitude`, `longitude`, `accuracy_m`, and `measured_at`.
   - `POST /mission-sessions/{session_id}/ready`
   - `POST /mission-sessions/{session_id}/start`
   - `POST /mission-sessions/{session_id}/photo`: upload one participant photo as multipart form data.
@@ -111,12 +125,15 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   �
 - Real-time endpoints accept the access token as the `token` query parameter:
   - `WS /schedules/{schedule_id}/mission-sessions/ws`
   - `WS /mission-sessions/{session_id}/ws`
+- A schedule list screen must not call the per-mission latest-session endpoint for every mission. Read `GET /schedules` once, use `GET /schedules/{schedule_id}/active-mission-session` for the selected schedule, and then receive updates over one WebSocket. Treat a session `404` as an empty state and never retry it in a tight loop.
+- WebSocket handlers release their authentication/snapshot DB session before entering the long receive loop. Keep this invariant so idle sockets never reserve pooled DB connections.
 - Uploaded photos are stored under `app/static/submissions/<session-id>/<user-id>.jpg` and served through `/static/...`.
 - A participant can submit only one photo per session and cannot like their own submission.
 - Submission judgement statuses are `PENDING`, `PROCESSING`, `PASSED`, `REJECTED`, `REVIEW`, and `ERROR`.
 - Photo upload starts `judge_submission` as a background task. The judge compares the mission target image and submitted image through the OpenAI Responses API, applies the mission's `judgement_rules`, and persists score, reason, model, and timestamp.
 - Current automatic pass rule requires the model decision to be `PASS` and the score to meet `MISSION_JUDGEMENT_PASS_SCORE`; all other completed judgements become `REJECTED`.
 - Missing OpenAI configuration, target image, submission file, or request failure produces `ERROR` and is broadcast to connected clients.
+- Location rejection returns `409` with one of `MISSION_LOCATION_REQUIRED`, `MISSION_LOCATION_TIMESTAMP_INVALID`, `MISSION_LOCATION_STALE`, `MISSION_LOCATION_INACCURATE`, or `MISSION_LOCATION_OUT_OF_RANGE` in `detail.code`.
 
 ## Magazine API
 
@@ -202,6 +219,9 @@ app/static/frame/<template-key>/
 ## Environment Variables
 
 - `DATABASE_URL`: SQLAlchemy/PostgreSQL connection URL.
+- `DATABASE_POOL_SIZE`: persistent SQLAlchemy connection-pool size; defaults to 10.
+- `DATABASE_MAX_OVERFLOW`: temporary connections allowed above the pool size; defaults to 10.
+- `DATABASE_POOL_TIMEOUT_SECONDS`: maximum wait for a pooled connection; defaults to 10 seconds.
 - `JWT_SECRET_KEY`: JWT signing secret.
 - `KAKAO_REST_API_KEY`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`: Kakao login support.
 - `FRONTEND_REDIRECT_URI`: auth callback redirect target.
@@ -211,6 +231,9 @@ app/static/frame/<template-key>/
 - `OPENAI_VISION_TIMEOUT_SECONDS`: mission judgement request timeout; defaults to 60 seconds.
 - `MISSION_JUDGEMENT_PASS_SCORE`: minimum score for an automatic pass; defaults to 70.
 - `MISSION_JUDGEMENT_REVIEW_SCORE`: reserved review threshold configuration; defaults to 50.
+- `MISSION_LOCATION_MAX_ACCURACY_M`: worst accepted device-reported GPS accuracy; defaults to 100 meters.
+- `MISSION_LOCATION_MAX_AGE_SECONDS`: maximum age of a location measurement; defaults to 120 seconds.
+- `MISSION_LOCATION_FUTURE_TOLERANCE_SECONDS`: tolerated client/server clock skew; defaults to 30 seconds.
 - `MISSION_ADMIN_PASSWORD`: optional password used by the local mission administration tool.
 - `SCHEDULE_INVITE_BASE_URL`: frontend app/deep-link base used when creating schedule share invitation URLs.
   - Expo route example: `exp://192.168.x.x:8081/--/trip/invite`

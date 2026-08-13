@@ -13,6 +13,7 @@ from app.schemas.mission_sessions import (
 )
 from app.services.mission_sessions import (
     ActiveMissionSessionConflict,
+    MissionLocationValidationError,
     MissionSessionExpired,
     NoParticipants,
     ParticipationLocked,
@@ -59,17 +60,21 @@ async def schedule_mission_socket(schedule_id: int, websocket: WebSocket, token:
         if user is None or not can_access_schedule(db, schedule_id, user.id):
             await websocket.close(code=1008, reason="Invalid authentication or schedule.")
             return
-        await schedule_mission_ws.connect(schedule_id, websocket)
         active_session = get_active_session_for_schedule(db, schedule_id, user.id)
+    finally:
+        # A WebSocket can remain open for hours. Never reserve a pooled DB
+        # connection for the lifetime of the socket after its snapshot is built.
+        db.close()
+
+    await schedule_mission_ws.connect(schedule_id, websocket)
+    try:
         await schedule_mission_ws.send_snapshot(websocket, schedule_id, active_session)
-        try:
-            while True:
-                await websocket.receive_text()
-        except WebSocketDisconnect:
-            pass
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
     finally:
         await schedule_mission_ws.disconnect(schedule_id, websocket)
-        db.close()
 
 
 @router.websocket("/mission-sessions/{session_id}/ws")
@@ -88,16 +93,18 @@ async def mission_session_socket(session_id: int, websocket: WebSocket, token: s
         if accessible_session is None:
             await websocket.close(code=1008, reason="You cannot access this mission session.")
             return
-        await mission_session_ws.connect(session_id, websocket)
+    finally:
+        db.close()
+
+    await mission_session_ws.connect(session_id, websocket)
+    try:
         await mission_session_ws.send_session(websocket, accessible_session)
-        try:
-            while True:
-                await websocket.receive_text()
-        except WebSocketDisconnect:
-            pass
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
     finally:
         await mission_session_ws.disconnect(session_id, websocket)
-        db.close()
 
 
 def _not_found():
@@ -121,6 +128,21 @@ def _session_expired():
 
 def _voting_expired():
     raise HTTPException(status_code=410, detail="Voting has ended for this mission session.")
+
+
+def _location_validation_error(error: MissionLocationValidationError):
+    detail = {
+        "code": error.code,
+        "message": str(error),
+        "distance_m": error.distance_m,
+        "allowed_radius_m": error.allowed_radius_m,
+        "accuracy_m": error.accuracy_m,
+        "max_accuracy_m": error.max_accuracy_m,
+    }
+    raise HTTPException(
+        status_code=409,
+        detail={key: value for key, value in detail.items() if value is not None},
+    ) from error
 
 
 @router.get("/schedules/{schedule_id}/missions/{schedule_mission_id}/session", response_model=MissionSessionResponse)
@@ -178,6 +200,8 @@ async def join_mission_session(session_id: int, current_user: User = Depends(get
         _voting_expired()
     except ParticipationLocked as error:
         raise HTTPException(status_code=409, detail=str(error))
+    except MissionLocationValidationError as error:
+        _location_validation_error(error)
     if result is None: _not_found()
     await _broadcast_session(result, "participation_updated")
     return result
@@ -195,12 +219,21 @@ async def choose_mission_participation(
 ):
     try:
         result = set_participation(
-            db, session_id, current_user.id, payload.decision.value
+            db,
+            session_id,
+            current_user.id,
+            payload.decision.value,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy_m=payload.accuracy_m,
+            measured_at=payload.measured_at,
         )
     except ActiveMissionSessionConflict as error:
         _active_session_conflict(error)
     except ParticipationLocked as error:
         raise HTTPException(status_code=409, detail=str(error))
+    except MissionLocationValidationError as error:
+        _location_validation_error(error)
     except MissionSessionExpired:
         _session_expired()
     except VotingSessionExpired:
@@ -223,6 +256,8 @@ async def ready_mission_session(session_id: int, current_user: User = Depends(ge
         _voting_expired()
     except ParticipationLocked as error:
         raise HTTPException(status_code=409, detail=str(error))
+    except MissionLocationValidationError as error:
+        _location_validation_error(error)
     if result is None: _not_found()
     await _broadcast_session(result, "participation_updated")
     return result

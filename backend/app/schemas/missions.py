@@ -22,6 +22,16 @@ class VerificationType(str, Enum):
     FREE_PHOTO = "FREE_PHOTO"
 
 
+class MissionLocationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    label: str | None
+    latitude: float
+    longitude: float
+    allowed_radius_m: int
+
+
 class MissionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -43,7 +53,10 @@ class MissionResponse(BaseModel):
         description="Text explaining when the mission unlocks. Null means no lock."
     )
     verification_type: VerificationType = Field(
-        description="How the mission should be verified later. Current API does not judge completion."
+        description=(
+            "Mission verification mode. GPS_PHOTO requires a successful location check "
+            "when the user chooses to participate."
+        )
     )
     target_keyword: str | None = Field(
         description="Optional external search keyword. Currently unused because photos are manual."
@@ -59,6 +72,13 @@ class MissionResponse(BaseModel):
     )
     judgement_rules: dict | None = Field(
         description="Structured visual criteria used by the mission photo judge."
+    )
+    locations: list[MissionLocationResponse] = Field(
+        default_factory=list,
+        description=(
+            "Allowed GPS participation locations; "
+            "an empty list means that no target coordinate is configured yet."
+        ),
     )
     reward_item_name: str = Field(description="Reward item name displayed after mission progress.")
     reward_item_icon: str = Field(description="Temporary reward item icon.")

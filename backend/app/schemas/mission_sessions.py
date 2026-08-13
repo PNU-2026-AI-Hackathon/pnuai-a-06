@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.schedules import ScheduleUserResponse
 from app.schemas.missions import MissionResponse
@@ -32,8 +32,39 @@ class MissionParticipationStatus(str, Enum):
     COMPLETED = "COMPLETED"
 
 
+class MissionLocationCheckStatus(str, Enum):
+    NOT_CHECKED = "NOT_CHECKED"
+    NOT_REQUIRED = "NOT_REQUIRED"
+    NOT_CONFIGURED = "NOT_CONFIGURED"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+
+
 class MissionParticipationRequest(BaseModel):
     decision: MissionParticipationDecision
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    accuracy_m: float | None = Field(default=None, gt=0)
+    measured_at: datetime | None = Field(
+        default=None,
+        description="Timezone-aware device location measurement time.",
+    )
+
+    @model_validator(mode="after")
+    def validate_complete_location(self):
+        location_values = (
+            self.latitude,
+            self.longitude,
+            self.accuracy_m,
+            self.measured_at,
+        )
+        if any(value is not None for value in location_values) and not all(
+            value is not None for value in location_values
+        ):
+            raise ValueError(
+                "latitude, longitude, accuracy_m, and measured_at must be provided together."
+            )
+        return self
 
 
 class MissionJudgementStatus(str, Enum):
@@ -62,6 +93,12 @@ class MissionSessionMemberResponse(BaseModel):
     decision_at: datetime | None
     excluded_at: datetime | None
     exclusion_reason: str | None
+    location_check_status: MissionLocationCheckStatus
+    location_id: int | None
+    location_accuracy_m: float | None
+    location_distance_m: float | None
+    location_measured_at: datetime | None
+    location_checked_at: datetime | None
     upload_deadline_at: datetime | None
     joined_at: datetime
     user: ScheduleUserResponse
