@@ -315,6 +315,28 @@ class MissionSessionMember(Base):
     decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     excluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     exclusion_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    location_check_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="NOT_CHECKED",
+        server_default="NOT_CHECKED",
+        index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mission_locations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    location_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_measured_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    location_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     upload_deadline_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
