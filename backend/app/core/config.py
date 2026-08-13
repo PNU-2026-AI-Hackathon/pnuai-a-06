@@ -11,6 +11,13 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://postgres:postgres@localhost:5432/jjigeukka",
         alias="DATABASE_URL",
     )
+    database_pool_size: int = Field(default=10, ge=1, alias="DATABASE_POOL_SIZE")
+    database_max_overflow: int = Field(default=10, ge=0, alias="DATABASE_MAX_OVERFLOW")
+    database_pool_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        alias="DATABASE_POOL_TIMEOUT_SECONDS",
+    )
 
     kakao_rest_api_key: str = Field(default="", alias="KAKAO_REST_API_KEY")
     kakao_client_secret: str = Field(default="", alias="KAKAO_CLIENT_SECRET")

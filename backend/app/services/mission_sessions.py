@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import math
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -126,16 +126,23 @@ def _load_session(db: Session, session_id: int) -> MissionSession | None:
 
 
 def _accessible_schedule_mission(db: Session, schedule_id: int, user_id: int, schedule_mission_id: int):
-    schedule = db.scalar(
-        select(MissionSchedule)
-        .where(MissionSchedule.id == schedule_id)
-        .options(selectinload(MissionSchedule.members))
+    accepted_member = (
+        select(ScheduleMember.id)
+        .where(
+            ScheduleMember.schedule_id == schedule_id,
+            ScheduleMember.user_id == user_id,
+            ScheduleMember.status == "ACCEPTED",
+        )
+        .exists()
     )
-    if schedule is None or not _can_participate(schedule, user_id):
-        return None
     return db.scalar(
         select(ScheduleMission)
-        .where(ScheduleMission.id == schedule_mission_id, ScheduleMission.schedule_id == schedule_id)
+        .join(MissionSchedule, MissionSchedule.id == ScheduleMission.schedule_id)
+        .where(
+            ScheduleMission.id == schedule_mission_id,
+            ScheduleMission.schedule_id == schedule_id,
+            or_(MissionSchedule.creator_id == user_id, accepted_member),
+        )
     )
 
 
@@ -716,24 +723,42 @@ def _schedule_participant_ids(db: Session, schedule_id: int) -> list[int]:
     ]
 
 
+def _refresh_loaded_session_progress(db: Session, session: MissionSession) -> bool:
+    now = datetime.now(timezone.utc)
+    changed = _expire_late_participants(session, now)
+    changed = _maybe_finish_shooting(session) or changed
+    changed = _maybe_start_voting(db, session) or changed
+    if (
+        session.status == "VOTING"
+        and session.voting_expires_at is not None
+        and session.voting_expires_at <= now
+    ):
+        _finish_voting(session)
+        changed = True
+    if changed:
+        db.commit()
+    return changed
+
+
+def _refresh_session_progress(db: Session, session_id: int) -> MissionSession | None:
+    session = _load_session(db, session_id)
+    if session is None:
+        return None
+    changed = _refresh_loaded_session_progress(db, session)
+    return _load_session(db, session_id) if changed else session
+
+
 def _refresh_session_progress_for_schedule(db: Session, schedule_id: int) -> None:
-    sessions = db.scalars(
-        select(MissionSession)
+    session_ids = db.scalars(
+        select(MissionSession.id)
         .join(ScheduleMission, ScheduleMission.id == MissionSession.schedule_mission_id)
         .where(
             ScheduleMission.schedule_id == schedule_id,
             MissionSession.status.in_(("SHOOTING", "UPLOADING", "REVEALED", "VOTING")),
         )
     ).all()
-    for session in sessions:
-        loaded_session = _load_session(db, session.id)
-        if loaded_session is None:
-            continue
-        _expire_late_participants(loaded_session, datetime.now(timezone.utc))
-        _maybe_finish_shooting(loaded_session)
-        _maybe_start_voting(db, loaded_session)
-        _finalize_voting_if_expired(db, loaded_session)
-    db.commit()
+    for session_id in session_ids:
+        _refresh_session_progress(db, session_id)
 
 
 def _add_session_member(
@@ -818,23 +843,16 @@ def get_latest_session_for_schedule_mission(
     schedule_mission = _accessible_schedule_mission(db, schedule_id, user_id, schedule_mission_id)
     if schedule_mission is None:
         return None
-    _refresh_session_progress_for_schedule(db, schedule_id)
     session = db.scalar(
         select(MissionSession)
         .where(MissionSession.schedule_mission_id == schedule_mission.id)
-        .where(MissionSession.status.in_(OPEN_SESSION_STATUSES))
-        .order_by(MissionSession.created_at.desc(), MissionSession.id.desc())
-    )
-    if session is None:
-        session = db.scalar(
-            select(MissionSession)
-            .where(MissionSession.schedule_mission_id == schedule_mission.id)
-            .order_by(MissionSession.created_at.desc(), MissionSession.id.desc())
+        .order_by(
+            MissionSession.status.in_(OPEN_SESSION_STATUSES).desc(),
+            MissionSession.created_at.desc(),
+            MissionSession.id.desc(),
         )
-    if session is not None:
-        _finalize_voting_if_expired(db, session)
-        _record_expiration(db, session)
-    return _load_session(db, session.id) if session is not None else None
+    )
+    return _refresh_session_progress(db, session.id) if session is not None else None
 
 
 def get_active_session_for_schedule(db: Session, schedule_id: int, user_id: int):
@@ -845,9 +863,13 @@ def get_active_session_for_schedule(db: Session, schedule_id: int, user_id: int)
     )
     if schedule is None or not _can_participate(schedule, user_id):
         return None
-    _refresh_session_progress_for_schedule(db, schedule_id)
     session = _active_session_for_schedule(db, schedule_id)
-    return _load_session(db, session.id) if session is not None else None
+    if session is None:
+        return None
+    refreshed = _refresh_session_progress(db, session.id)
+    if refreshed is None or refreshed.status not in ACTIVE_MISSION_STATUSES:
+        return None
+    return refreshed
 
 
 def get_session_for_user(db: Session, session_id: int, user_id: int):
