@@ -13,6 +13,7 @@ import {
   getMissionSession,
   MissionSessionApiError,
   startMissionSession,
+  type MissionParticipationLocation,
   type MissionParticipationStatus,
   type MissionSession,
 } from '@/lib/mission-session-api';
@@ -42,10 +43,69 @@ function isParticipating(status: MissionParticipationStatus | null | undefined) 
   return status === 'PARTICIPATING' || status === 'COMPLETED';
 }
 
+function getParticipationErrorMessage(error: unknown) {
+  if (error instanceof MissionSessionApiError) {
+    switch (error.code) {
+      case 'MISSION_LOCATION_REQUIRED':
+        return '위치 권한을 허용하고 현재 위치를 다시 확인해 주세요.';
+      case 'MISSION_LOCATION_TIMESTAMP_INVALID':
+        return '현재 위치 시간을 확인하지 못했어요. 다시 시도해 주세요.';
+      case 'MISSION_LOCATION_STALE':
+        return '위치 정보가 오래됐어요. 현재 위치를 다시 측정해 주세요.';
+      case 'MISSION_LOCATION_INACCURATE':
+        return '현재 위치의 정확도가 낮아요. 야외에서 잠시 후 다시 시도해 주세요.';
+      case 'MISSION_LOCATION_OUT_OF_RANGE':
+        return '미션 장소 근처에서만 참여할 수 있어요.';
+      default:
+        return error.message;
+    }
+  }
+
+  return error instanceof Error ? error.message : '참여 상태를 바꾸지 못했어요.';
+}
+
+async function getCurrentParticipationLocation(): Promise<MissionParticipationLocation> {
+  let Location: typeof import('expo-location');
+  try {
+    Location = await import('expo-location');
+  } catch {
+    throw new Error('위치 기능을 사용할 수 없어요. 앱을 최신 개발 빌드로 다시 설치해 주세요.');
+  }
+
+  const permission = await Location.requestForegroundPermissionsAsync();
+  if (permission.status !== 'granted') {
+    throw new Error('미션 참여를 위해 위치 권한이 필요해요.');
+  }
+
+  let location: import('expo-location').LocationObject;
+  try {
+    location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+  } catch {
+    throw new Error('현재 위치를 가져오지 못했어요. 위치 서비스를 켜고 다시 시도해 주세요.');
+  }
+  const { accuracy, latitude, longitude } = location.coords;
+  if (
+    !Number.isFinite(latitude)
+    || !Number.isFinite(longitude)
+    || typeof accuracy !== 'number'
+    || !Number.isFinite(accuracy)
+  ) {
+    throw new Error('현재 위치의 정확도를 확인하지 못했어요. 다시 시도해 주세요.');
+  }
+
+  return {
+    accuracy_m: accuracy,
+    latitude,
+    longitude,
+    measured_at: new Date(location.timestamp).toISOString(),
+  };
+}
+
 export default function MissionParticipationScreen() {
-  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[]; verificationType?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
   const sessionId = getParamValue(params.sessionId);
+  const routeVerificationType = getParamValue(params.verificationType);
   const currentUserId = getAuthItem('user_id');
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [session, setSession] = useState<MissionSession | null>(null);
@@ -63,6 +123,7 @@ export default function MissionParticipationScreen() {
   const isMissionLeader = Boolean(session?.createdByUserId && currentUserId && session.createdByUserId === currentUserId);
   const participatingCount = session?.members.filter((member) => isParticipating(member.participationStatus)).length ?? 0;
   const canChangeParticipation = Boolean(!isMissionLeader && session && ['WAITING', 'READY'].includes(session.status) && myMember && myMember.participationStatus !== 'LOCKED_OUT');
+  const requiresGps = (session?.verificationType ?? routeVerificationType)?.toUpperCase() === 'GPS_PHOTO';
 
   const navigateToCapture = useCallback((nextSession: MissionSession) => {
     const nextMember = nextSession.members.find((member) => member.userId === currentUserId);
@@ -121,7 +182,8 @@ export default function MissionParticipationScreen() {
           let nextSession = session;
 
           if (!isParticipating(myMember.participationStatus)) {
-            nextSession = await chooseMissionParticipation(sessionId, 'PARTICIPATE');
+            const location = requiresGps ? await getCurrentParticipationLocation() : undefined;
+            nextSession = await chooseMissionParticipation(sessionId, 'PARTICIPATE', location);
             applySession(nextSession);
           }
 
@@ -133,7 +195,7 @@ export default function MissionParticipationScreen() {
           navigateToCapture(nextSession);
         } catch (error) {
           soloStartRequested.current = false;
-          setMessage(error instanceof MissionSessionApiError ? error.message : '1인 미션을 시작하지 못했어요.');
+          setMessage(getParticipationErrorMessage(error));
         } finally {
           setIsSubmitting(false);
         }
@@ -150,17 +212,21 @@ export default function MissionParticipationScreen() {
     setIsSubmitting(true);
     setMessage('');
 
-    void chooseMissionParticipation(sessionId, 'PARTICIPATE')
+    void (async () => {
+      const location = requiresGps ? await getCurrentParticipationLocation() : undefined;
+      return chooseMissionParticipation(sessionId, 'PARTICIPATE', location);
+    })()
       .then((nextSession) => {
         applySession(nextSession);
       })
       .catch((error) => {
-        setMessage(error instanceof MissionSessionApiError ? error.message : '미션장 자동 참여 처리에 실패했어요.');
+        leaderParticipationRequested.current = false;
+        setMessage(getParticipationErrorMessage(error));
       })
       .finally(() => {
         setIsSubmitting(false);
       });
-  }, [applySession, isMissionLeader, myMember, navigateToCapture, session, sessionId]);
+  }, [applySession, isMissionLeader, myMember, navigateToCapture, requiresGps, session, sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -226,10 +292,13 @@ export default function MissionParticipationScreen() {
     try {
       setIsSubmitting(true);
       setMessage('');
-      const nextSession = await chooseMissionParticipation(sessionId, decision);
+      const location = decision === 'PARTICIPATE' && requiresGps
+        ? await getCurrentParticipationLocation()
+        : undefined;
+      const nextSession = await chooseMissionParticipation(sessionId, decision, location);
       applySession(nextSession);
     } catch (error) {
-      setMessage(error instanceof MissionSessionApiError ? error.message : '참여 상태를 바꾸지 못했어요.');
+      setMessage(getParticipationErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }

@@ -508,12 +508,16 @@ export default function ActiveTripScreen() {
       }
 
       rememberFeedSession(nextSession);
+      const scheduleMission = schedule?.missions.find((mission) => mission.scheduleMissionId === nextSession.scheduleMissionId);
       router.replace({
         pathname: '/trip/participation',
         params: {
           scheduleId,
           scheduleMissionId: nextSession.scheduleMissionId,
           sessionId: nextSession.id,
+          ...(nextSession.verificationType || scheduleMission?.verificationType
+            ? { verificationType: nextSession.verificationType ?? scheduleMission?.verificationType ?? '' }
+            : {}),
         },
       });
     };
@@ -536,7 +540,7 @@ export default function ActiveTripScreen() {
     return () => {
       socket.close();
     };
-  }, [rememberFeedSession, scheduleId]);
+  }, [rememberFeedSession, schedule, scheduleId]);
 
   useFocusEffect(
     useCallback(() => {

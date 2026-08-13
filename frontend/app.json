@@ -36,6 +36,12 @@
         }
       ],
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "B-Cut에서 미션 참여 위치를 확인하기 위해 현재 위치 접근 권한이 필요합니다."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",

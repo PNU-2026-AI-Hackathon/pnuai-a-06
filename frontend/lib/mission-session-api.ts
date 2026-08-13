@@ -7,6 +7,7 @@ type ApiMission = {
   id?: number | string;
   target_photo_url?: string | null;
   title?: string;
+  verification_type?: string | null;
 };
 
 type ApiMissionSessionUser = {
@@ -119,15 +120,18 @@ export type MissionSession = {
   startedAt?: string | null;
   status: MissionSessionStatus;
   submissions: MissionSubmission[];
+  verificationType?: string | null;
   winnerUserId?: string | null;
 };
 
 export class MissionSessionApiError extends Error {
+  code?: string;
   status: number;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'MissionSessionApiError';
+    this.code = code;
     this.status = status;
   }
 }
@@ -157,6 +161,13 @@ function getErrorMessage(data: unknown, fallback: string) {
     const container = data as Record<string, unknown>;
     const message = container.detail ?? container.message;
 
+    if (message !== null && typeof message === 'object' && !Array.isArray(message)) {
+      const detail = message as Record<string, unknown>;
+      if (typeof detail.message === 'string' && detail.message.trim()) {
+        return detail.message;
+      }
+    }
+
     if (Array.isArray(message)) {
       return message.map((item) => (typeof item === 'object' && item !== null && 'msg' in item ? String(item.msg) : String(item))).join('\n');
     }
@@ -167,6 +178,21 @@ function getErrorMessage(data: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function getErrorCode(data: unknown) {
+  if (data === null || typeof data !== 'object') {
+    return undefined;
+  }
+
+  const container = data as Record<string, unknown>;
+  const detail = container.detail;
+  if (detail !== null && typeof detail === 'object' && !Array.isArray(detail)) {
+    const code = (detail as Record<string, unknown>).code;
+    return typeof code === 'string' ? code : undefined;
+  }
+
+  return typeof container.code === 'string' ? container.code : undefined;
 }
 
 function getAccessToken() {
@@ -201,7 +227,7 @@ async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
   const data = parseJsonOrText(text);
 
   if (!res.ok) {
-    throw new MissionSessionApiError(getErrorMessage(data, fallbackMessage), res.status);
+    throw new MissionSessionApiError(getErrorMessage(data, fallbackMessage), res.status, getErrorCode(data));
   }
 
   if (typeof data === 'string') {
@@ -378,6 +404,7 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
     startedAt: data.started_at,
     status: data.status ?? 'WAITING',
     submissions: (data.submissions ?? []).map(normalizeSubmission).filter((submission) => submission.photoUrl),
+    verificationType: data.mission?.verification_type ?? null,
     winnerUserId: data.winner_user_id === null || data.winner_user_id === undefined ? null : String(data.winner_user_id),
   };
 }
@@ -491,8 +518,24 @@ export async function readyMissionSession(sessionId: string) {
   return normalizeSession(data);
 }
 
-export async function chooseMissionParticipation(sessionId: string, decision: 'PARTICIPATE' | 'PASS') {
-  const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/participation`, 'POST', { decision });
+export type MissionParticipationLocation = {
+  accuracy_m: number;
+  latitude: number;
+  longitude: number;
+  measured_at: string;
+};
+
+export async function chooseMissionParticipation(
+  sessionId: string,
+  decision: 'PARTICIPATE' | 'PASS',
+  location?: MissionParticipationLocation,
+) {
+  const body: Record<string, string | number> = { decision };
+  if (decision === 'PARTICIPATE' && location) {
+    Object.assign(body, location);
+  }
+
+  const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/participation`, 'POST', body);
   return normalizeSession(data);
 }
 

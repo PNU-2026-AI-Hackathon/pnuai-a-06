@@ -30,6 +30,7 @@ type ApiMission = {
   theme?: string;
   title?: string;
   type?: string;
+  verification_type?: string | null;
 };
 
 type ApiScheduleMission = {
@@ -140,6 +141,7 @@ export type TripScheduleMission = {
   theme?: string | null;
   title: string;
   type?: string | null;
+  verificationType?: string | null;
 };
 
 export type TripScheduleUser = {
@@ -285,6 +287,7 @@ function normalizeScheduleMission(data: ApiScheduleMission): TripScheduleMission
     theme: data.mission?.theme ?? null,
     title: data.mission?.title ?? '미션명',
     type: data.mission?.type ?? null,
+    verificationType: data.mission?.verification_type ?? null,
   };
 }
 
