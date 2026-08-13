@@ -273,7 +273,7 @@ export default function TripHubScreen() {
     if (isClosedSchedule(schedule)) {
       router.push({
         pathname: '/trip/result',
-        params: { scheduleId: schedule.scheduleId },
+        params: { scheduleId: schedule.scheduleId, returnTo: 'hub' },
       });
       return;
     }

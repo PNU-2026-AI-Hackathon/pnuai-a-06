@@ -18,9 +18,14 @@ function getParamValue(value: string | string[] | undefined) {
 }
 
 export default function MissionResultScreen() {
-  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    scheduleId?: string | string[];
+    sessionId?: string | string[];
+    returnTo?: string | string[];
+  }>();
   const scheduleId = getParamValue(params.scheduleId);
   const sessionId = getParamValue(params.sessionId);
+  const returnTo = getParamValue(params.returnTo);
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [session, setSession] = useState<MissionSession | null>(null);
   const [resultSessions, setResultSessions] = useState<MissionSession[]>([]);
@@ -103,6 +108,11 @@ export default function MissionResultScreen() {
   const goTrip = () => {
     if (currentResultIndex < resultSessions.length - 1) {
       setCurrentResultIndex((index) => index + 1);
+      return;
+    }
+
+    if (returnTo === 'hub') {
+      router.replace('/trip/hub');
       return;
     }
 
