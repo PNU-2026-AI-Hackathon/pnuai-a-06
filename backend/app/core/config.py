@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     openai_vision_timeout_seconds: float = Field(default=60.0, alias="OPENAI_VISION_TIMEOUT_SECONDS")
     mission_judgement_pass_score: float = Field(default=70.0, alias="MISSION_JUDGEMENT_PASS_SCORE")
     mission_judgement_review_score: float = Field(default=50.0, alias="MISSION_JUDGEMENT_REVIEW_SCORE")
+    mission_location_max_accuracy_m: float = Field(
+        default=100.0, alias="MISSION_LOCATION_MAX_ACCURACY_M"
+    )
+    mission_location_max_age_seconds: int = Field(
+        default=120, alias="MISSION_LOCATION_MAX_AGE_SECONDS"
+    )
+    mission_location_future_tolerance_seconds: int = Field(
+        default=30, alias="MISSION_LOCATION_FUTURE_TOLERANCE_SECONDS"
+    )
     mission_admin_password: str = Field(default="", alias="MISSION_ADMIN_PASSWORD")
 
     jwt_secret_key: str = Field(

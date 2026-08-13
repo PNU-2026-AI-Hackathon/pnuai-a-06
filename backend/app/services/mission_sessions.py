@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta, timezone
+import math
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import get_settings
+from app.models.missions import Mission, MissionDeveloperLocation
 from app.models.schedules import (
     MissionSession,
     MissionSessionMember,
@@ -32,6 +35,7 @@ SHOOTING_DURATION = timedelta(seconds=60)
 RETAKE_DURATION = timedelta(seconds=60)
 VOTING_DURATION = timedelta(minutes=10)
 TERMINAL_MEMBER_STATUSES = ("SKIPPED", "LOCKED_OUT", "TIMED_OUT", "COMPLETED")
+EARTH_RADIUS_M = 6_371_008.8
 
 
 class ActiveMissionSessionConflict(Exception):
@@ -72,6 +76,25 @@ class ParticipationNotAllowed(Exception):
     pass
 
 
+class MissionLocationValidationError(Exception):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        distance_m: float | None = None,
+        allowed_radius_m: int | None = None,
+        accuracy_m: float | None = None,
+        max_accuracy_m: float | None = None,
+    ):
+        self.code = code
+        self.distance_m = distance_m
+        self.allowed_radius_m = allowed_radius_m
+        self.accuracy_m = accuracy_m
+        self.max_accuracy_m = max_accuracy_m
+        super().__init__(message)
+
+
 class NoParticipants(Exception):
     pass
 
@@ -82,6 +105,9 @@ def _load_session(db: Session, session_id: int) -> MissionSession | None:
         .where(MissionSession.id == session_id)
         .options(
             selectinload(MissionSession.schedule_mission).selectinload(ScheduleMission.mission),
+            selectinload(MissionSession.schedule_mission)
+            .selectinload(ScheduleMission.mission)
+            .selectinload(Mission.locations),
             selectinload(MissionSession.members).selectinload(MissionSessionMember.user),
             selectinload(MissionSession.submissions).selectinload(MissionSubmission.user),
             selectinload(MissionSession.submissions).selectinload(MissionSubmission.likes),
@@ -131,6 +157,248 @@ def can_access_schedule(db: Session, schedule_id: int, user_id: int) -> bool:
 
 def _member(session: MissionSession, user_id: int) -> MissionSessionMember | None:
     return next((item for item in session.members if item.user_id == user_id), None)
+
+
+def _distance_m(
+    latitude_a: float,
+    longitude_a: float,
+    latitude_b: float,
+    longitude_b: float,
+) -> float:
+    """Return the great-circle distance between two WGS84 coordinates."""
+    lat_a = math.radians(latitude_a)
+    lat_b = math.radians(latitude_b)
+    delta_lat = lat_b - lat_a
+    delta_lon = math.radians(longitude_b - longitude_a)
+    haversine = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat_a) * math.cos(lat_b) * math.sin(delta_lon / 2) ** 2
+    )
+    haversine = min(1.0, max(0.0, haversine))
+    return EARTH_RADIUS_M * 2 * math.atan2(
+        math.sqrt(haversine), math.sqrt(1 - haversine)
+    )
+
+
+def _active_developer_locations(db: Session) -> list[MissionDeveloperLocation]:
+    return list(
+        db.scalars(
+            select(MissionDeveloperLocation)
+            .where(MissionDeveloperLocation.is_active.is_(True))
+            .order_by(MissionDeveloperLocation.id)
+        ).all()
+    )
+
+
+def _clear_member_location(member: MissionSessionMember, status: str) -> None:
+    member.location_check_status = status
+    member.location_id = None
+    member.location_latitude = None
+    member.location_longitude = None
+    member.location_accuracy_m = None
+    member.location_distance_m = None
+    member.location_measured_at = None
+    member.location_checked_at = None
+
+
+def _record_location_attempt(
+    member: MissionSessionMember,
+    *,
+    status: str,
+    checked_at: datetime,
+    latitude: float | None,
+    longitude: float | None,
+    accuracy_m: float | None,
+    measured_at: datetime | None,
+    location_id: int | None = None,
+    distance_m: float | None = None,
+) -> None:
+    member.location_check_status = status
+    member.location_id = location_id
+    member.location_latitude = latitude
+    member.location_longitude = longitude
+    member.location_accuracy_m = accuracy_m
+    member.location_distance_m = distance_m
+    member.location_measured_at = measured_at
+    member.location_checked_at = checked_at
+
+
+def _fail_location_check(
+    db: Session,
+    member: MissionSessionMember,
+    error: MissionLocationValidationError,
+    *,
+    checked_at: datetime,
+    latitude: float | None,
+    longitude: float | None,
+    accuracy_m: float | None,
+    measured_at: datetime | None,
+    location_id: int | None = None,
+) -> None:
+    member.participation_status = "UNDECIDED"
+    member.decision_at = None
+    member.ready_at = None
+    member.excluded_at = None
+    member.exclusion_reason = None
+    member.upload_deadline_at = None
+    _record_location_attempt(
+        member,
+        status="FAILED",
+        checked_at=checked_at,
+        latitude=latitude,
+        longitude=longitude,
+        accuracy_m=accuracy_m,
+        measured_at=measured_at,
+        location_id=location_id,
+        distance_m=error.distance_m,
+    )
+    db.commit()
+    raise error
+
+
+def _check_participation_location(
+    db: Session,
+    session: MissionSession,
+    member: MissionSessionMember,
+    *,
+    latitude: float | None,
+    longitude: float | None,
+    accuracy_m: float | None,
+    measured_at: datetime | None,
+) -> None:
+    mission = session.schedule_mission.mission
+    if mission.verification_type != "GPS_PHOTO":
+        _clear_member_location(member, "NOT_REQUIRED")
+        return
+
+    locations = [(location, False) for location in mission.locations]
+    locations.extend(
+        (location, True) for location in _active_developer_locations(db)
+    )
+    if not locations:
+        _clear_member_location(member, "NOT_CONFIGURED")
+        return
+
+    now = datetime.now(timezone.utc)
+    if None in (latitude, longitude, accuracy_m, measured_at):
+        _fail_location_check(
+            db,
+            member,
+            MissionLocationValidationError(
+                "MISSION_LOCATION_REQUIRED",
+                "Current location is required to participate in this mission.",
+            ),
+            checked_at=now,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_m=accuracy_m,
+            measured_at=measured_at,
+        )
+
+    assert latitude is not None
+    assert longitude is not None
+    assert accuracy_m is not None
+    assert measured_at is not None
+    if measured_at.tzinfo is None or measured_at.utcoffset() is None:
+        _fail_location_check(
+            db,
+            member,
+            MissionLocationValidationError(
+                "MISSION_LOCATION_TIMESTAMP_INVALID",
+                "Location measured_at must include a timezone offset.",
+            ),
+            checked_at=now,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_m=accuracy_m,
+            measured_at=measured_at,
+        )
+
+    settings = get_settings()
+    measured_at = measured_at.astimezone(timezone.utc)
+    age_seconds = (now - measured_at).total_seconds()
+    if (
+        age_seconds > settings.mission_location_max_age_seconds
+        or age_seconds < -settings.mission_location_future_tolerance_seconds
+    ):
+        _fail_location_check(
+            db,
+            member,
+            MissionLocationValidationError(
+                "MISSION_LOCATION_STALE",
+                "Measure the current location again before participating.",
+            ),
+            checked_at=now,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_m=accuracy_m,
+            measured_at=measured_at,
+        )
+    if accuracy_m > settings.mission_location_max_accuracy_m:
+        _fail_location_check(
+            db,
+            member,
+            MissionLocationValidationError(
+                "MISSION_LOCATION_INACCURATE",
+                "Location accuracy is too low. Move outdoors and try again.",
+                accuracy_m=accuracy_m,
+                max_accuracy_m=settings.mission_location_max_accuracy_m,
+            ),
+            checked_at=now,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_m=accuracy_m,
+            measured_at=measured_at,
+        )
+
+    distances = [
+        (
+            _distance_m(latitude, longitude, target.latitude, target.longitude),
+            target,
+            is_developer_location,
+        )
+        for target, is_developer_location in locations
+    ]
+    matching_locations = [
+        item for item in distances if item[0] <= item[1].allowed_radius_m
+    ]
+    distance, nearest, nearest_is_developer_location = min(
+        matching_locations or distances,
+        key=lambda item: item[0],
+    )
+    matched_location_id = None if nearest_is_developer_location else nearest.id
+    if not matching_locations:
+        error = MissionLocationValidationError(
+            "MISSION_LOCATION_OUT_OF_RANGE",
+            "You are too far from the mission location.",
+            distance_m=round(distance, 1),
+            allowed_radius_m=nearest.allowed_radius_m,
+            accuracy_m=accuracy_m,
+            max_accuracy_m=settings.mission_location_max_accuracy_m,
+        )
+        _fail_location_check(
+            db,
+            member,
+            error,
+            checked_at=now,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_m=accuracy_m,
+            measured_at=measured_at,
+            location_id=matched_location_id,
+        )
+
+    _record_location_attempt(
+        member,
+        status="PASSED",
+        checked_at=now,
+        latitude=latitude,
+        longitude=longitude,
+        accuracy_m=accuracy_m,
+        measured_at=measured_at,
+        location_id=matched_location_id,
+        distance_m=round(distance, 1),
+    )
 
 
 def _completed_user_ids(session: MissionSession) -> set[int]:
@@ -598,11 +866,23 @@ def get_session_for_user(db: Session, session_id: int, user_id: int):
 
 def join_session(db: Session, session_id: int, user_id: int):
     # Compatibility endpoint: the old join action now means "participate".
+    session = _load_session(db, session_id)
+    member = _member(session, user_id) if session is not None else None
+    if member is not None and member.participation_status == "PARTICIPATING":
+        return session
     return set_participation(db, session_id, user_id, "PARTICIPATE")
 
 
 def set_participation(
-    db: Session, session_id: int, user_id: int, decision: str
+    db: Session,
+    session_id: int,
+    user_id: int,
+    decision: str,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    accuracy_m: float | None = None,
+    measured_at: datetime | None = None,
 ):
     session = _load_session(db, session_id)
     if session is None:
@@ -624,6 +904,18 @@ def set_participation(
         _add_session_member(db, session, user_id)
         member = _member(session, user_id)
     now = datetime.now(timezone.utc)
+    if decision == "PARTICIPATE":
+        _check_participation_location(
+            db,
+            session,
+            member,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_m=accuracy_m,
+            measured_at=measured_at,
+        )
+    else:
+        _clear_member_location(member, "NOT_REQUIRED")
     member.decision_at = now
     member.ready_at = now if decision == "PARTICIPATE" else None
     member.upload_deadline_at = None
@@ -641,6 +933,10 @@ def set_participation(
 
 def mark_ready(db: Session, session_id: int, user_id: int):
     # Compatibility endpoint: there is no separate personal-ready phase now.
+    session = _load_session(db, session_id)
+    member = _member(session, user_id) if session is not None else None
+    if member is not None and member.participation_status == "PARTICIPATING":
+        return session
     return set_participation(db, session_id, user_id, "PARTICIPATE")
 
 
