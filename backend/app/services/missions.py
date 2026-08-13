@@ -37,7 +37,7 @@ def list_missions(
     theme: Theme | None = None,
     mission_type: MissionType | None = None,
 ) -> list[Mission]:
-    stmt = select(Mission)
+    stmt = select(Mission).options(selectinload(Mission.locations))
     if district_code:
         stmt = stmt.where(Mission.district_code == district_code)
     if theme:
@@ -49,7 +49,11 @@ def list_missions(
 
 
 def get_mission_by_code(db: Session, mission_code: str) -> Mission | None:
-    stmt = select(Mission).where(Mission.code == mission_code)
+    stmt = (
+        select(Mission)
+        .where(Mission.code == mission_code)
+        .options(selectinload(Mission.locations))
+    )
     return db.scalar(stmt)
 
 
@@ -57,7 +61,9 @@ def get_mission_set(db: Session, mission_set_id: int) -> MissionSet | None:
     stmt = (
         select(MissionSet)
         .where(MissionSet.id == mission_set_id)
-        .options(selectinload(MissionSet.missions))
+        .options(
+            selectinload(MissionSet.missions).selectinload(Mission.locations)
+        )
     )
     mission_set = db.scalar(stmt)
     if mission_set is not None:
