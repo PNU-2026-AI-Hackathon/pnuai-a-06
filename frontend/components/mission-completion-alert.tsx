@@ -2,7 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { router, usePathname } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { getAuthItem, MISSION_COMPLETION_PENDING_KEY, setAuthItem } from '@/lib/auth-storage';

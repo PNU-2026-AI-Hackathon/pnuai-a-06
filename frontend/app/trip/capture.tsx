@@ -4,7 +4,8 @@ import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, PanResponder, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';

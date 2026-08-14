@@ -164,6 +164,11 @@ export function loginWithEmail(email: string, password: string) {
   return postJson<AuthTokens>('/auth/email/login', { email, password });
 }
 
+export function loginWithKakaoAccessToken(kakaoAccessToken: string) {
+  // 카카오 SDK 토큰을 서비스 access/refresh token으로 교환
+  return postJson<AuthTokens>('/auth/kakao/token', { kakao_access_token: kakaoAccessToken });
+}
+
 export function refreshAuthToken(refreshToken: string) {
   // refresh token으로 access token 갱신
   return postJson<AuthTokens>('/auth/token/refresh', { refresh_token: refreshToken });

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
+import { login as loginWithKakao } from '@react-native-seoul/kakao-login';
 import { Image } from 'expo-image';
-import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -11,14 +11,19 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 
+import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { API_BASE_URL, loginWithEmail, registerWithEmail, saveAuthTokens, verifyEmail } from '@/lib/auth-api';
+import {
+  loginWithEmail,
+  loginWithKakaoAccessToken,
+  registerWithEmail,
+  saveAuthTokens,
+  verifyEmail,
+} from '@/lib/auth-api';
 import { getLoginErrorMessage, getRegisterErrorMessage, getRequestErrorMessage } from '@/lib/auth-error';
 import { getPasswordMatchState, isValidEmail, isValidPassword } from '@/lib/auth-validation';
 
@@ -139,12 +144,16 @@ export default function LoginScreen() {
 
   const handleKakaoLogin = async () => {
     try {
-      const callbackUrl = Linking.createURL('auth/kakao/callback');
-      await Linking.openURL(
-        `${API_BASE_URL}/auth/kakao/login?frontend_redirect_uri=${encodeURIComponent(callbackUrl)}`,
-      );
-    } catch {
-      setMessage('카카오 로그인을 시작할 수 없습니다.');
+      setIsSubmitting(true);
+      resetMessage();
+      const kakaoToken = await loginWithKakao();
+      const serviceTokens = await loginWithKakaoAccessToken(kakaoToken.accessToken);
+      await saveAuthTokens(serviceTokens, true);
+      router.replace('/main');
+    } catch (error) {
+      setMessage(getLoginErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 

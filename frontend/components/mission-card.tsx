@@ -1,6 +1,7 @@
 import { Image, type ImageSource } from 'expo-image';
 import { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 const missionLevelFrames = [
   require('../assets/svg/mission_level/standard_frame.svg'),
@@ -130,7 +131,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     minHeight: 22,
     textAlign: 'center',
-    width: '75%',
+    width: '85%',
   },
   iconBox: {
     alignItems: 'center',
@@ -139,8 +140,8 @@ const styles = StyleSheet.create({
     width: '68%',
   },
   iconImage: {
-    height: '95%',
-    width: '95%',
+    height: '90%',
+    width: '90%',
   },
   rewardIcon: {
     fontSize: 64,

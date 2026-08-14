@@ -1,9 +1,11 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
+import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, getCachedMissions, type MissionItem } from '@/lib/mission-api';
 import { getLatestMissionSession, isMissionSessionNotFoundError, type MissionSession } from '@/lib/mission-session-api';
@@ -150,6 +152,7 @@ function getScheduleDateOptions(schedule: TripSchedule) {
   return dates;
 }
 export default function MissionDetailScreen() {
+  const { language } = useLanguage();
   const { bottomActionInset, bottomSafeInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
   const params = useLocalSearchParams<{ district?: string; districtCode?: string; missionCode?: string; scheduleId?: string; theme?: string }>();
   const focusedDistrict = getParamValue(params.district) ?? '금정구';
@@ -231,7 +234,7 @@ export default function MissionDetailScreen() {
     return () => {
       isActive = false;
     };
-  }, [selectedTheme]);
+  }, [language, selectedTheme]);
 
   useEffect(() => {
     if (!targetScheduleId) {
@@ -257,7 +260,7 @@ export default function MissionDetailScreen() {
     return () => {
       isActive = false;
     };
-  }, [targetScheduleId]);
+  }, [language, targetScheduleId]);
   useEffect(() => {
     if (!targetScheduleId || !targetSchedule) {
       setTargetSessions({});

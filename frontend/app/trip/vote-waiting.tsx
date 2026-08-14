@@ -1,7 +1,8 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { completeMissionSession, getMissionSession, getPassedMissionSubmissions } from '@/lib/mission-session-api';
 

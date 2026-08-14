@@ -2,7 +2,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { TopBar } from '@/components/top-bar';

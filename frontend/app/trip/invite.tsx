@@ -3,7 +3,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { FlowButton, FlowScreen } from '@/components/flow-screen';
 import { TopBar } from '@/components/top-bar';

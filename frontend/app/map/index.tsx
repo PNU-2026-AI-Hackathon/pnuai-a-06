@@ -1,10 +1,12 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, PanResponder, Pressable, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { getMissionCardLevel, MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, type MissionItem } from '@/lib/mission-api';
 
@@ -128,6 +130,7 @@ export default function BusanMapScreen() {
     topInset,
     width,
   } = useResponsiveLayout();
+  const { language } = useLanguage();
   const [isMissionDeckOpen, setIsMissionDeckOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<CategoryValue>('MOUNTAIN');
   const [themeDistricts, setThemeDistricts] = useState(DEFAULT_THEME_DISTRICTS);
@@ -200,7 +203,7 @@ export default function BusanMapScreen() {
     return () => {
       isActive = false;
     };
-  }, [selectedMissionTheme]);
+  }, [language, selectedMissionTheme]);
 
   useEffect(() => {
     setSelectedMapPiece(null);

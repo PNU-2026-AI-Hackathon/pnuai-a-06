@@ -5,7 +5,8 @@ import { Image } from 'expo-image';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 import { Rect, Svg } from 'react-native-svg';
 
 import { getMissionCardLevel } from '@/components/mission-card';

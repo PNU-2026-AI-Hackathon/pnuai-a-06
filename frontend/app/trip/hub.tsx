@@ -2,9 +2,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, PanResponder, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
+import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
 import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, updateTripScheduleOrder, type TripSchedule } from '@/lib/trip-schedule-api';
@@ -211,6 +213,7 @@ function ScheduleCard({ dragPreviewOffset, isDragging, deletingScheduleId, isEdi
 
 export default function TripHubScreen() {
   const { bottomActionInset, horizontalPadding, topInset } = useResponsiveLayout();
+  const { language } = useLanguage();
   const [schedules, setSchedules] = useState<TripSchedule[]>(() => pinInProgressSchedules(getCachedTripSchedules()));
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
@@ -265,7 +268,9 @@ export default function TripHubScreen() {
     return () => {
       isActive = false;
     };
-  }, []);
+    // Re-fetch localized schedule fields whenever the app language changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
 
   useFocusEffect(refreshSchedules);
 

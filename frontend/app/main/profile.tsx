@@ -2,7 +2,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
@@ -58,7 +59,7 @@ export default function ProfileScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <View key={language} style={styles.container}>
       <View
         style={[
           styles.profileSection,

@@ -1,5 +1,6 @@
 import { Image, type ImageSource } from 'expo-image';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { getProfileImageUrl } from '@/lib/auth-api';
 

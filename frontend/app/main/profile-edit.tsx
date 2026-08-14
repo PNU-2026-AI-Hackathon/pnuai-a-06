@@ -12,14 +12,14 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 
 import { BOTTOM_NAVIGATION_RESERVED_HEIGHT } from '@/components/bottom-navigation-bar';
+import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
 import { ProfileAvatar, profileIconOptions, type ProfileIconKey } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMe, updateMe, updateProfileEmoji, uploadProfileImage } from '@/lib/auth-api';
 
@@ -36,6 +36,7 @@ function getErrorMessage(error: unknown) {
 }
 
 export default function ProfileEditScreen() {
+  const { language } = useLanguage();
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
   const sheetProgress = useRef(new Animated.Value(0)).current;
   const [initialNickname, setInitialNickname] = useState('');
@@ -255,7 +256,7 @@ export default function ProfileEditScreen() {
   });
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.keyboardView}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} key={language} style={styles.keyboardView}>
       <View
         style={[
           styles.container,
