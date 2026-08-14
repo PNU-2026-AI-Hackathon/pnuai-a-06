@@ -1,4 +1,5 @@
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
+import { getLanguageHeaders } from '@/lib/language';
 
 const API_BASE_URL = 'http://211.213.193.67:7020';
 
@@ -135,7 +136,9 @@ export async function fetchMissions(params: { districtCode?: string; theme?: str
   }
 
   const suffix = query.toString() ? `?${query.toString()}` : '';
-  const data = await readMissionResponse<unknown>(await fetch(`${API_BASE_URL}/missions${suffix}`));
+  const data = await readMissionResponse<unknown>(await fetch(`${API_BASE_URL}/missions${suffix}`, {
+    headers: getLanguageHeaders(),
+  }));
 
   return getListPayload(data).map(toMissionItem);
 }

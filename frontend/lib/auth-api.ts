@@ -4,6 +4,7 @@ import {
   setAuthItem,
   setPersistentAuthItem,
 } from '@/lib/auth-storage';
+import { getLanguageHeaders } from '@/lib/language';
 
 export const API_BASE_URL = 'http://211.213.193.67:7020';
 
@@ -66,6 +67,7 @@ async function postJson<T>(path: string, body: Record<string, string>): Promise<
     body: JSON.stringify(body),
     headers: {
       'Content-Type': 'application/json',
+      ...getLanguageHeaders(),
     },
     method: 'POST',
   });
@@ -85,6 +87,7 @@ async function patchJson<T>(path: string, body: Record<string, string>): Promise
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      ...getLanguageHeaders(),
     },
     method: 'PATCH',
   });
@@ -103,6 +106,7 @@ async function postMultipart<T>(path: string, formData: FormData): Promise<T> {
     body: formData,
     headers: {
       Authorization: `Bearer ${token}`,
+      ...getLanguageHeaders(),
     },
     method: 'POST',
   });
@@ -190,6 +194,7 @@ export async function fetchMe(): Promise<AuthUser> {
   const res = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: {
       Authorization: `Bearer ${token}`,
+      ...getLanguageHeaders(),
     },
   });
 

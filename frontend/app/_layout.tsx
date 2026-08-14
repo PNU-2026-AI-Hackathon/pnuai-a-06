@@ -9,6 +9,7 @@ import 'react-native-reanimated';
 import { BottomNavigationBar } from '@/components/bottom-navigation-bar';
 import { MissionCompletionAlert } from '@/components/mission-completion-alert';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { LanguageProvider } from '@/hooks/use-language';
 import { saveAuthTokens } from '@/lib/auth-api';
 function getKakaoInviteToken(url: string) {
   try {
@@ -88,23 +89,25 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <View style={styles.root}>
-        <View style={styles.stackArea}>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="main" />
-            <Stack.Screen name="tutorial" />
-            <Stack.Screen name="magazine" />
-            <Stack.Screen name="map" />
-            <Stack.Screen name="mission" />
-            <Stack.Screen name="trip" />
-            <Stack.Screen name="collection" />
-          </Stack>
+      <LanguageProvider>
+        <View style={styles.root}>
+          <View style={styles.stackArea}>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="index" />
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="main" />
+              <Stack.Screen name="tutorial" />
+              <Stack.Screen name="magazine" />
+              <Stack.Screen name="map" />
+              <Stack.Screen name="mission" />
+              <Stack.Screen name="trip" />
+              <Stack.Screen name="collection" />
+            </Stack>
+          </View>
+          <BottomNavigationBar />
+          <MissionCompletionAlert />
         </View>
-        <BottomNavigationBar />
-        <MissionCompletionAlert />
-      </View>
+      </LanguageProvider>
       <StatusBar style="auto" />
     </ThemeProvider>
   );

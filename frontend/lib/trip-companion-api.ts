@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '@/lib/auth-api';
 import { getAuthItem } from '@/lib/auth-storage';
+import { getLanguageHeaders } from '@/lib/language';
 
 function getToken() {
   const token = getAuthItem('access_token');
@@ -20,7 +21,7 @@ function getErrorMessage(data: unknown) {
 
 export async function removeTripCompanion(scheduleId: string, userId: string) {
   const response = await fetch(`${API_BASE_URL}/schedules/${encodeURIComponent(scheduleId)}/members/${encodeURIComponent(userId)}`, {
-    headers: { Authorization: `Bearer ${getToken()}` },
+    headers: { Authorization: `Bearer ${getToken()}`, ...getLanguageHeaders() },
     method: 'DELETE',
   });
   const text = await response.text();

@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '@/lib/auth-api';
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
+import { getLanguageHeaders } from '@/lib/language';
 
 type ScheduleInput = {
   endDate: string;
@@ -243,6 +244,7 @@ async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' 
     headers: {
       Authorization: `Bearer ${token}`,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...getLanguageHeaders(),
     },
     method,
   });

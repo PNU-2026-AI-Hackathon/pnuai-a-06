@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '@/lib/auth-api';
 import { getAuthItem } from '@/lib/auth-storage';
+import { getCurrentLanguage, getLanguageHeaders } from '@/lib/language';
 
 type ApiMission = {
   code?: string;
@@ -247,6 +248,7 @@ async function requestJson<T>(path: string, method: 'GET' | 'POST', body?: Recor
       headers: {
         Authorization: `Bearer ${token}`,
         ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...getLanguageHeaders(),
       },
       method,
       signal: controller.signal,
@@ -413,14 +415,14 @@ function getWebSocketUrl(sessionId: string) {
   const token = getAccessToken();
   const wsBaseUrl = API_BASE_URL.replace(/^http/, 'ws');
 
-  return `${wsBaseUrl}/mission-sessions/${encodeURIComponent(sessionId)}/ws?token=${encodeURIComponent(token)}`;
+  return `${wsBaseUrl}/mission-sessions/${encodeURIComponent(sessionId)}/ws?token=${encodeURIComponent(token)}&lang=${encodeURIComponent(getCurrentLanguage())}`;
 }
 
 function getScheduleWebSocketUrl(scheduleId: string) {
   const token = getAccessToken();
   const wsBaseUrl = API_BASE_URL.replace(/^http/, 'ws');
 
-  return `${wsBaseUrl}/schedules/${encodeURIComponent(scheduleId)}/mission-sessions/ws?token=${encodeURIComponent(token)}`;
+  return `${wsBaseUrl}/schedules/${encodeURIComponent(scheduleId)}/mission-sessions/ws?token=${encodeURIComponent(token)}&lang=${encodeURIComponent(getCurrentLanguage())}`;
 }
 
 export function connectMissionSessionSocket(
@@ -580,7 +582,7 @@ export async function uploadMissionSessionPhoto(sessionId: string, photoUri: str
   try {
     const res = await fetch(`${API_BASE_URL}/mission-sessions/${encodeURIComponent(sessionId)}/photo`, {
       body: formData,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...getLanguageHeaders() },
       method: 'POST',
       signal: controller.signal,
     });

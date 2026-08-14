@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '@/lib/auth-api';
 import { getAuthItem } from '@/lib/auth-storage';
+import { getLanguageHeaders } from '@/lib/language';
 
 export type TripInvite = {
   roomId: string;
@@ -81,7 +82,7 @@ async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
 async function requestJson<T>(path: string, method: 'GET' | 'POST' | 'PATCH', body?: Record<string, string>) {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     body: body ? JSON.stringify(body) : undefined,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: { ...getLanguageHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     method,
   });
 
@@ -100,6 +101,7 @@ async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' 
     headers: {
       Authorization: `Bearer ${token}`,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...getLanguageHeaders(),
     },
     method,
   });

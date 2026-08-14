@@ -2,12 +2,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMe } from '@/lib/auth-api';
+import type { AppLanguage } from '@/lib/language';
 
 type MenuItem = {
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
@@ -22,9 +24,12 @@ const menuItems: MenuItem[] = [
 
 export default function ProfileScreen() {
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
+  const { language, setLanguage } = useLanguage();
   const [nickname, setNickname] = useState('사용자');
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
+  const [isLanguageModalVisible, setIsLanguageModalVisible] = useState(false);
+  const [isSavingLanguage, setIsSavingLanguage] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -67,7 +72,7 @@ export default function ProfileScreen() {
             <MaterialCommunityIcons color="#141820" name="chevron-left" size={36} />
           </ScalePressable>
           <Text style={styles.headerTitle}>프로필 편집</Text>
-          <ScalePressable accessibilityLabel="설정" onPress={() => {}} pressedScale={0.9} style={styles.iconButton}>
+          <ScalePressable accessibilityLabel="설정" onPress={() => setIsLanguageModalVisible(true)} pressedScale={0.9} style={styles.iconButton}>
             <MaterialCommunityIcons color="#141820" name="cog-outline" size={25} />
           </ScalePressable>
         </View>
@@ -82,6 +87,56 @@ export default function ProfileScreen() {
           <Text style={styles.username}>{nickname}</Text>
         </View>
       </View>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setIsLanguageModalVisible(false)}
+        transparent
+        visible={isLanguageModalVisible}>
+        <Pressable onPress={() => setIsLanguageModalVisible(false)} style={styles.modalBackdrop}>
+          <Pressable onPress={(event) => event.stopPropagation()} style={styles.languageModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>언어 설정</Text>
+              <Pressable accessibilityLabel="언어 설정 닫기" onPress={() => setIsLanguageModalVisible(false)} style={styles.modalCloseButton}>
+                <MaterialCommunityIcons color="#4E5259" name="close" size={24} />
+              </Pressable>
+            </View>
+            <Text style={styles.modalDescription}>매거진 생성 및 조회에 사용할 언어를 선택해주세요.</Text>
+            {([
+              { key: 'ko', label: '한국어' },
+              { key: 'en', label: 'English' },
+            ] as { key: AppLanguage; label: string }[]).map((option) => {
+              const isSelected = language === option.key;
+
+              return (
+                <Pressable
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: isSelected, disabled: isSavingLanguage }}
+                  disabled={isSavingLanguage}
+                  key={option.key}
+                  onPress={async () => {
+                    if (isSelected) {
+                      setIsLanguageModalVisible(false);
+                      return;
+                    }
+
+                    setIsSavingLanguage(true);
+                    try {
+                      await setLanguage(option.key);
+                      setIsLanguageModalVisible(false);
+                    } finally {
+                      setIsSavingLanguage(false);
+                    }
+                  }}
+                  style={[styles.languageOption, isSelected && styles.selectedLanguageOption]}>
+                  <Text style={[styles.languageOptionText, isSelected && styles.selectedLanguageOptionText]}>{option.label}</Text>
+                  {isSelected ? <MaterialCommunityIcons color="#409CB7" name="check" size={23} /> : null}
+                </Pressable>
+              );
+            })}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <View
         style={[
@@ -201,5 +256,65 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     letterSpacing: 0,
+  },
+  modalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 22, 31, 0.38)',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  languageModal: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 24,
+    width: '100%',
+  },
+  modalHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalTitle: {
+    color: '#10161F',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  modalCloseButton: {
+    alignItems: 'center',
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  modalDescription: {
+    color: '#6E767B',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
+    marginTop: 8,
+  },
+  languageOption: {
+    alignItems: 'center',
+    borderColor: '#E2E7E9',
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    minHeight: 54,
+    paddingHorizontal: 16,
+  },
+  selectedLanguageOption: {
+    backgroundColor: '#F0FAFC',
+    borderColor: '#409CB7',
+  },
+  languageOptionText: {
+    color: '#252B30',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  selectedLanguageOptionText: {
+    color: '#287D95',
+    fontWeight: '700',
   },
 });
