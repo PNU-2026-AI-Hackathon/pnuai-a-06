@@ -1,4 +1,9 @@
-import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
+import {
+  deletePersistentAuthItem,
+  getAuthItem,
+  setAuthItem,
+  setPersistentAuthItem,
+} from '@/lib/auth-storage';
 
 export const API_BASE_URL = 'http://211.213.193.67:7020';
 
@@ -8,7 +13,7 @@ type ProfileImageUploadInput = {
   type: string;
   uri: string;
 };
-type AuthTokens = {
+export type AuthTokens = {
   access_token?: string;
   refresh_token?: string;
   token?: string;
@@ -105,7 +110,7 @@ async function postMultipart<T>(path: string, formData: FormData): Promise<T> {
   return readAuthResponse<T>(res);
 }
 
-export function saveAuthTokens(data: AuthTokens) {
+export async function saveAuthTokens(data: AuthTokens, persist = false) {
   const accessToken = data.access_token ?? data.token;
 
   if (!accessToken) {
@@ -121,6 +126,23 @@ export function saveAuthTokens(data: AuthTokens) {
   if (data.user_id !== undefined) {
     setAuthItem('user_id', String(data.user_id));
   }
+
+  if (persist && data.refresh_token) {
+    await Promise.all([
+      setPersistentAuthItem('access_token', accessToken),
+      setPersistentAuthItem('refresh_token', data.refresh_token),
+      setPersistentAuthItem('auto_login', 'true'),
+      data.user_id === undefined ? Promise.resolve() : setPersistentAuthItem('user_id', String(data.user_id)),
+    ]);
+    return;
+  }
+
+  await Promise.all([
+    deletePersistentAuthItem('access_token'),
+    deletePersistentAuthItem('refresh_token'),
+    deletePersistentAuthItem('auto_login'),
+    deletePersistentAuthItem('user_id'),
+  ]);
 }
 
 export function registerWithEmail(email: string, password: string, name: string) {

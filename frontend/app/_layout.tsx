@@ -9,6 +9,7 @@ import 'react-native-reanimated';
 import { BottomNavigationBar } from '@/components/bottom-navigation-bar';
 import { MissionCompletionAlert } from '@/components/mission-completion-alert';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { saveAuthTokens } from '@/lib/auth-api';
 function getKakaoInviteToken(url: string) {
   try {
     const parsedUrl = new URL(url);
@@ -44,14 +45,40 @@ function openKakaoInvite(url: string | null) {
   });
 }
 
+async function openKakaoAuth(url: string | null) {
+  if (!url) {
+    return;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    const accessToken = parsedUrl.searchParams.get('token');
+
+    if (!accessToken) {
+      return;
+    }
+
+    const userId = parsedUrl.searchParams.get('user_id');
+    await saveAuthTokens({
+      access_token: accessToken,
+      user_id: userId ?? undefined,
+    });
+    router.replace('/main');
+  } catch {
+    // Ignore unrelated deep links and malformed OAuth callback URLs.
+  }
+}
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
     Linking.getInitialURL().then(openKakaoInvite);
+    Linking.getInitialURL().then((url) => void openKakaoAuth(url));
 
     const subscription = Linking.addEventListener('url', ({ url }) => {
       openKakaoInvite(url);
+      void openKakaoAuth(url);
     });
 
     return () => {

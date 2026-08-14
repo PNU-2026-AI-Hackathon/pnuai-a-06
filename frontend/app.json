@@ -59,7 +59,8 @@
           "cameraPermission": "B-Cut에서 프로필 사진을 촬영하기 위해 카메라 접근 권한이 필요합니다.",
           "photosPermission": "B-Cut에서 프로필 사진을 선택하기 위해 사진 접근 권한이 필요합니다."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -175,7 +175,14 @@ export default function MainScreen() {
         },
       ]}>
       <View style={[styles.header, { paddingTop: topInset }]}>
-        <Image source={splashText} style={styles.logoText} contentFit="contain" />
+        <Pressable
+          accessibilityLabel="찌그까 로그인 화면으로 이동"
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={() => router.replace('/login')}
+          style={styles.logoButton}>
+          <Image source={splashText} style={styles.logoText} contentFit="contain" />
+        </Pressable>
         <Pressable accessibilityLabel="프로필" onPress={() => router.push('/main/profile')} style={styles.profileButton}>
           <ProfileAvatar profileImageUrl={profileImageUrl} profileEmoji={profileEmoji} size={56} />
         </Pressable>
@@ -258,6 +265,10 @@ const styles = StyleSheet.create({
   logoText: {
     height: 23,
     width: 72,
+  },
+  logoButton: {
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   profileButton: {
     borderRadius: 999,
