@@ -8,6 +8,7 @@ const LANGUAGE_STORAGE_KEY = 'app_language';
 
 const translations: Record<string, string> = {
   '가입된 이메일이 없습니다.': 'This email is not registered.',
+  '계정 탈퇴': 'Delete account',
   '개 미션으로 매거진 만들기': ' missions',
   '삭제': 'Delete',
   '날짜 미정': 'Date not set',
@@ -258,6 +259,9 @@ const translations: Record<string, string> = {
   '촬영 화면을 준비하고 있어요.': 'Preparing the camera screen.',
   '매거진 저장/공유': 'Save/share magazine',
   '튜토리얼 완료하고 메인으로': 'Finish tutorial and go to home',
+  '첫 번째 매거진을 기다리고 있어요': 'Waiting for your first magazine',
+  '여행을 완료하면 이곳에서 매거진을 확인할 수 있어요.': 'Complete a trip to view your magazine here.',
+  '미션 리스트': 'Mission list',
 };
 
 let currentLanguage: AppLanguage = DEFAULT_LANGUAGE;

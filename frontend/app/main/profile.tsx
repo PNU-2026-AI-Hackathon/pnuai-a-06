@@ -2,14 +2,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 
 import { prefetchProfileIcons, ProfileAvatar } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { fetchMe } from '@/lib/auth-api';
+import { clearAuthSession, deleteCurrentAccount, fetchMe } from '@/lib/auth-api';
 import type { AppLanguage } from '@/lib/language';
 
 type MenuItem = {
@@ -31,6 +31,51 @@ export default function ProfileScreen() {
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
   const [isLanguageModalVisible, setIsLanguageModalVisible] = useState(false);
   const [isSavingLanguage, setIsSavingLanguage] = useState(false);
+  const [isAccountActionInProgress, setIsAccountActionInProgress] = useState(false);
+
+  const handleLogout = () => {
+    Alert.alert('로그아웃', '현재 기기에서 로그아웃할까요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '로그아웃',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setIsAccountActionInProgress(true);
+            try {
+              await clearAuthSession();
+              router.replace('/login');
+            } finally {
+              setIsAccountActionInProgress(false);
+            }
+          })();
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert('계정 탈퇴', '계정을 탈퇴하면 프로필과 서비스 이용 정보가 삭제됩니다. 계속할까요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '탈퇴하기',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setIsAccountActionInProgress(true);
+            try {
+              await deleteCurrentAccount();
+              router.replace('/login');
+            } catch (error) {
+              Alert.alert('탈퇴 실패', error instanceof Error ? error.message : '계정 탈퇴에 실패했습니다.');
+            } finally {
+              setIsAccountActionInProgress(false);
+            }
+          })();
+        },
+      },
+    ]);
+  };
 
   useEffect(() => {
     void prefetchProfileIcons();
@@ -63,7 +108,11 @@ export default function ProfileScreen() {
   );
 
   return (
-    <View key={language} style={styles.container}>
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      key={language}
+      showsVerticalScrollIndicator={false}
+      style={styles.container}>
       <View
         style={[
           styles.profileSection,
@@ -147,13 +196,13 @@ export default function ProfileScreen() {
         style={[
           styles.menuSection,
           {
-            paddingBottom: bottomActionInset,
+            paddingBottom: 30,
             paddingHorizontal: horizontalPadding,
           },
         ]}>
         <View style={[styles.menuCard, { maxWidth: contentMaxWidth }]}>
           {menuItems.map((item) => (
-            <ScalePressable accessibilityRole="button" key={item.label} onPress={() => {}} pressedScale={0.98} style={styles.menuRow}>
+            <ScalePressable accessibilityRole="button" disabled={isAccountActionInProgress} key={item.label} onPress={() => {}} pressedScale={0.98} style={styles.menuRow}>
               <View style={styles.menuLeft}>
                 <MaterialCommunityIcons color="#10161F" name={item.icon} size={25} />
                 <Text style={styles.menuText}>{item.label}</Text>
@@ -161,9 +210,34 @@ export default function ProfileScreen() {
               <MaterialCommunityIcons color="#10161F" name="chevron-right" size={30} />
             </ScalePressable>
           ))}
+          <View style={styles.menuDivider} />
+          <ScalePressable
+            accessibilityRole="button"
+            disabled={isAccountActionInProgress}
+            onPress={handleLogout}
+            pressedScale={0.98}
+            style={styles.menuRow}>
+            <View style={styles.menuLeft}>
+              <MaterialCommunityIcons color="#10161F" name="logout-variant" size={25} />
+              <Text style={styles.menuText}>로그아웃</Text>
+            </View>
+            <MaterialCommunityIcons color="#10161F" name="chevron-right" size={30} />
+          </ScalePressable>
+          <ScalePressable
+            accessibilityRole="button"
+            disabled={isAccountActionInProgress}
+            onPress={handleDeleteAccount}
+            pressedScale={0.98}
+            style={styles.menuRow}>
+            <View style={styles.menuLeft}>
+              <MaterialCommunityIcons color="#C74444" name="account-remove-outline" size={25} />
+              <Text style={styles.deleteAccountText}>계정 탈퇴</Text>
+            </View>
+            <MaterialCommunityIcons color="#C74444" name="chevron-right" size={30} />
+          </ScalePressable>
         </View>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -171,6 +245,9 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: '#F2F8FB',
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   profileSection: {
     alignItems: 'center',
@@ -234,15 +311,13 @@ const styles = StyleSheet.create({
   },
   menuSection: {
     alignItems: 'center',
-    flex: 1,
     paddingTop: 27,
   },
   menuCard: {
     backgroundColor: '#ffffff',
     borderRadius: 20,
-    minHeight: 530,
     paddingHorizontal: 34,
-    paddingTop: 20,
+    paddingVertical: 20,
     width: '100%',
   },
   menuRow: {
@@ -258,6 +333,17 @@ const styles = StyleSheet.create({
   },
   menuText: {
     color: '#10161F',
+    fontSize: 16,
+    fontWeight: '500',
+    letterSpacing: 0,
+  },
+  menuDivider: {
+    backgroundColor: '#E7ECEE',
+    height: 1,
+    marginVertical: 8,
+  },
+  deleteAccountText: {
+    color: '#C74444',
     fontSize: 16,
     fontWeight: '500',
     letterSpacing: 0,

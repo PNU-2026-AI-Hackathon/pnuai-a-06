@@ -39,6 +39,15 @@ export type AuthUser = {
 
 let refreshPromise: Promise<AuthTokens> | null = null;
 
+export async function clearAuthSession() {
+  await Promise.all([
+    deletePersistentAuthItem('access_token'),
+    deletePersistentAuthItem('refresh_token'),
+    deletePersistentAuthItem('auto_login'),
+    deletePersistentAuthItem('user_id'),
+  ]);
+}
+
 export function getProfileImageUrl(profileImageUrl: string | null | undefined) {
   if (!profileImageUrl) {
     return null;
@@ -209,12 +218,7 @@ export async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit 
   try {
     await refreshCurrentSession();
   } catch {
-    await Promise.all([
-      deletePersistentAuthItem('access_token'),
-      deletePersistentAuthItem('refresh_token'),
-      deletePersistentAuthItem('auto_login'),
-      deletePersistentAuthItem('user_id'),
-    ]);
+    await clearAuthSession();
     return response;
   }
 
@@ -263,6 +267,18 @@ export function refreshAuthToken(refreshToken: string) {
 
 export function updateMe(nickname: string) {
   return patchJson<AuthUser>('/auth/me', { nickname });
+}
+
+export async function deleteCurrentAccount() {
+  const res = await fetchWithAuth(`${API_BASE_URL}/auth/me`, {
+    headers: {
+      ...getLanguageHeaders(),
+    },
+    method: 'DELETE',
+  });
+
+  await readAuthResponse<Record<string, never>>(res);
+  await clearAuthSession();
 }
 
 export function updateProfileEmoji(profileEmoji: string) {
