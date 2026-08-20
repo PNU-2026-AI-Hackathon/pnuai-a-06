@@ -22,11 +22,15 @@ import {
   getActiveMissionSession,
   getLatestMissionSession,
   getMissionSession,
+  chooseMissionParticipation,
+  MissionSessionApiError,
 
   mergeMissionSessions,
   isMissionSessionNotFoundError,
   type MissionSession,
+  type MissionParticipationLocation,
 } from '@/lib/mission-session-api';
+import { getCurrentParticipationLocation } from '@/lib/mission-location';
 import { getTripSchedule, removeMissionFromSchedule, updateScheduleMissionDate, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 
@@ -133,6 +137,16 @@ function isStartedMissionSession(session: MissionSession) {
   return Boolean(session.startedAt) || (session.status !== 'WAITING' && session.status !== 'READY');
 }
 
+function isParticipatingMissionMember(member: MissionSession['members'][number] | undefined) {
+  return member?.participationStatus === 'PARTICIPATING' || member?.participationStatus === 'COMPLETED';
+}
+
+function hasLeftMissionParticipation(member: MissionSession['members'][number] | undefined) {
+  return member?.participationStatus === 'SKIPPED'
+    || member?.participationStatus === 'LOCKED_OUT'
+    || member?.participationStatus === 'TIMED_OUT';
+}
+
 
 function isCompletedScheduleMission(mission: TripScheduleMission) {
   return mission.status === 'COMPLETED';
@@ -144,6 +158,27 @@ function getMissionLocation(mission: TripScheduleMission) {
   }
 
   return mission.placeLabel ?? mission.districtLabel ?? '부산';
+}
+
+function getMissionStartErrorMessage(error: unknown) {
+  if (error instanceof MissionSessionApiError) {
+    switch (error.code) {
+      case 'MISSION_LOCATION_REQUIRED':
+        return '위치 권한을 허용하고 현재 위치를 다시 확인해 주세요.';
+      case 'MISSION_LOCATION_TIMESTAMP_INVALID':
+        return '현재 위치 시간을 확인하지 못했어요. 다시 시도해 주세요.';
+      case 'MISSION_LOCATION_STALE':
+        return '위치 정보가 오래됐어요. 현재 위치를 다시 측정해 주세요.';
+      case 'MISSION_LOCATION_INACCURATE':
+        return '현재 위치의 정확도가 낮아요. 야외에서 잠시 후 다시 시도해 주세요.';
+      case 'MISSION_LOCATION_OUT_OF_RANGE':
+        return '미션 장소 근처에서만 참여할 수 있어요.';
+      default:
+        return error.message;
+    }
+  }
+
+  return error instanceof Error ? error.message : '미션을 시작하지 못했어요.';
 }
 
 function prefetchMissionIcons(missions: TripScheduleMission[]) {
@@ -250,9 +285,14 @@ function getScheduleSyncSignature(schedule: TripSchedule) {
 }
 
 export default function ActiveTripScreen() {
-  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    scheduleId?: string | string[];
+    sessionId?: string | string[];
+    suppressedParticipationSessionId?: string | string[];
+  }>();
   const scheduleId = getParamValue(params.scheduleId);
   const initialSessionId = getParamValue(params.sessionId);
+  const suppressedParticipationSessionId = getParamValue(params.suppressedParticipationSessionId);
   const currentUserId = getAuthItem('user_id');
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [schedule, setSchedule] = useState<TripSchedule | null>(null);
@@ -274,6 +314,9 @@ export default function ActiveTripScreen() {
 
   const missionSessionsRef = useRef<Record<string, MissionSession>>({});
   const revealedSessionsRef = useRef<Record<string, MissionSession>>({});
+  const pendingMissionLocationRef = useRef<MissionParticipationLocation | null>(null);
+  const leaderStartingMissionRef = useRef(false);
+  const suppressedLeaderSessionIdsRef = useRef(new Set<string>());
   const missions = useMemo(() => schedule?.missions ?? [], [schedule]);
   const [todayDay, setTodayDay] = useState(() => getCalendarDayNumber(new Date()));
   const visibleMissions = missions.filter((mission) => {
@@ -313,7 +356,10 @@ export default function ActiveTripScreen() {
   const canAddMission = schedule?.permissions.canAddMission ?? false;
   const isScheduleCreator = Boolean(schedule?.creatorId && currentUserId && schedule.creatorId === currentUserId);
   const requiredScheduleMemberCount = schedule?.participants.length ?? 0;
-  const activeBlockingSession = Object.values(missionSessions).find((nextSession) => !isFinishedSession(nextSession)) ?? null;
+  const activeBlockingSession = Object.values(missionSessions).find((nextSession) => (
+    !isFinishedSession(nextSession)
+    && isParticipatingMissionMember(nextSession.members.find((member) => member.userId === currentUserId))
+  )) ?? null;
   const hasStartedMissionSession = Object.values(missionSessions).some(isStartedMissionSession);
   const canInviteCompanion = (schedule?.permissions.canInviteCompanion ?? false) && !hasStartedMissionSession;
   const inviteUrl = getInviteUrl(inviteData);
@@ -326,6 +372,25 @@ export default function ActiveTripScreen() {
     const scheduleMissionId = nextSession.scheduleMissionId || fallbackScheduleMissionId;
 
     if (!scheduleMissionId) {
+      return;
+    }
+
+    if (nextSession.status === 'CANCELLED') {
+      delete missionSessionsRef.current[scheduleMissionId];
+      setMissionSessions((currentSessions) => {
+        const nextSessions = { ...currentSessions };
+        delete nextSessions[scheduleMissionId];
+        return nextSessions;
+      });
+      delete revealedSessionsRef.current[scheduleMissionId];
+      setRevealedSessions((currentSessions) => {
+        const nextSessions = { ...currentSessions };
+        delete nextSessions[scheduleMissionId];
+        if (scheduleId) {
+          saveCachedRevealedSessions(scheduleId, nextSessions);
+        }
+        return nextSessions;
+      });
       return;
     }
 
@@ -504,7 +569,16 @@ export default function ActiveTripScreen() {
     }
 
     const openParticipation = (nextSession: MissionSession) => {
-      if (!nextSession.id || !['WAITING', 'READY'].includes(nextSession.status)) {
+      const myMember = nextSession.members.find((member) => member.userId === currentUserId);
+
+      if (
+        !nextSession.id
+        || leaderStartingMissionRef.current
+        || suppressedLeaderSessionIdsRef.current.has(nextSession.id)
+        || nextSession.id === suppressedParticipationSessionId
+        || !['WAITING', 'READY'].includes(nextSession.status)
+        || hasLeftMissionParticipation(myMember)
+      ) {
         return;
       }
 
@@ -526,12 +600,17 @@ export default function ActiveTripScreen() {
     const socket = connectScheduleMissionSessionSocket(scheduleId, {
       onError: () => {
         void getActiveMissionSession(scheduleId).then((nextSession) => {
+          rememberFeedSession(nextSession);
           if (nextSession.status === 'WAITING' || nextSession.status === 'READY') {
             openParticipation(nextSession);
           }
         }).catch(() => undefined);
       },
       onMessage: ({ session: nextSession, type }) => {
+        if (nextSession) {
+          rememberFeedSession(nextSession);
+        }
+
         if (nextSession && (type === 'mission_session_created' || type === 'schedule_mission_snapshot')) {
           openParticipation(nextSession);
         }
@@ -541,7 +620,7 @@ export default function ActiveTripScreen() {
     return () => {
       socket.close();
     };
-  }, [rememberFeedSession, schedule, scheduleId]);
+  }, [currentUserId, rememberFeedSession, schedule, scheduleId, suppressedParticipationSessionId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -799,6 +878,23 @@ export default function ActiveTripScreen() {
 
     setMessage('');
     setMissionListVisible(false);
+
+    if (isScheduleCreator && mission.verificationType?.toUpperCase() === 'GPS_PHOTO') {
+      setIsSessionBusy(true);
+      void getCurrentParticipationLocation()
+        .then((location) => {
+          pendingMissionLocationRef.current = location;
+          setPendingMission(mission);
+        })
+        .catch((error) => {
+          setMessage(getMissionStartErrorMessage(error));
+        })
+        .finally(() => {
+          setIsSessionBusy(false);
+        });
+      return;
+    }
+
     setPendingMission(mission);
   };
 
@@ -808,13 +904,25 @@ export default function ActiveTripScreen() {
     }
 
     const mission = pendingMission;
+    const requiresGps = isScheduleCreator && mission.verificationType?.toUpperCase() === 'GPS_PHOTO';
+    let createdSessionId: string | null = null;
 
     try {
       setIsSessionBusy(true);
       setMessage('');
-      const nextSession = await createMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+      leaderStartingMissionRef.current = true;
+      const createdSession = await createMissionSession(schedule.scheduleId, mission.scheduleMissionId);
+      createdSessionId = createdSession.id;
+      const nextSession = requiresGps
+        ? await chooseMissionParticipation(
+          createdSession.id,
+          'PARTICIPATE',
+          pendingMissionLocationRef.current ?? await getCurrentParticipationLocation(),
+        )
+        : createdSession;
 
       rememberFeedSession(nextSession, mission.scheduleMissionId);
+      pendingMissionLocationRef.current = null;
       setPendingMission(null);
       router.push({
         pathname: '/trip/participation',
@@ -822,11 +930,20 @@ export default function ActiveTripScreen() {
           scheduleId: schedule.scheduleId,
           scheduleMissionId: mission.scheduleMissionId,
           sessionId: nextSession.id,
+          ...(nextSession.verificationType || mission.verificationType
+            ? { verificationType: nextSession.verificationType ?? mission.verificationType ?? '' }
+            : {}),
         },
       });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '미션 세션을 열지 못했어요.');
+      if (createdSessionId) {
+        suppressedLeaderSessionIdsRef.current.add(createdSessionId);
+      }
+      pendingMissionLocationRef.current = null;
+      setPendingMission(null);
+      setMessage(getMissionStartErrorMessage(error));
     } finally {
+      leaderStartingMissionRef.current = false;
       setIsSessionBusy(false);
     }
   };
@@ -1082,13 +1199,21 @@ export default function ActiveTripScreen() {
 
       <Modal
         animationType="slide"
-        onRequestClose={() => !isSessionBusy && setPendingMission(null)}
+        onRequestClose={() => {
+          if (!isSessionBusy) {
+            pendingMissionLocationRef.current = null;
+            setPendingMission(null);
+          }
+        }}
         transparent
         visible={Boolean(pendingMission)}>
         <Pressable
           accessibilityLabel="미션 시작 팝업 닫기"
           disabled={isSessionBusy}
-          onPress={() => setPendingMission(null)}
+          onPress={() => {
+            pendingMissionLocationRef.current = null;
+            setPendingMission(null);
+          }}
           style={styles.missionStartOverlay}>
           <Pressable style={[styles.missionStartDialog, { paddingBottom: bottomSafeInset + 22 }]}>
             <Image contentFit="fill" source={pendingMissionLevel.frame} style={styles.missionStartFrame} />

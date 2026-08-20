@@ -1,4 +1,5 @@
 import {
+  clearPersistedAuthItem,
   deletePersistentAuthItem,
   getAuthItem,
   setAuthItem,
@@ -36,6 +37,8 @@ export type AuthUser = {
   last_login_at: string | null;
 };
 
+let refreshPromise: Promise<AuthTokens> | null = null;
+
 export function getProfileImageUrl(profileImageUrl: string | null | undefined) {
   if (!profileImageUrl) {
     return null;
@@ -50,18 +53,37 @@ export function getProfileImageUrl(profileImageUrl: string | null | undefined) {
 
 async function readAuthResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+  let data: unknown = {};
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // A proxy or upstream server can return an HTML error page instead of
+      // the JSON response expected from the API. Do not expose JSON.parse's
+      // low-level error to the user in that case.
+      const statusMessage = ` (HTTP ${res.status})`;
+      throw new Error(
+        res.ok
+          ? `서버 응답을 처리할 수 없습니다${statusMessage}. 잠시 후 다시 시도해주세요.`
+          : `서버 오류가 발생했습니다${statusMessage}. 잠시 후 다시 시도해주세요.`,
+      );
+    }
+  }
 
   if (!res.ok) {
-    const message = data?.detail ?? data?.message ?? '인증 요청에 실패했습니다.';
+    const responseData = data as { detail?: unknown; message?: unknown } | null;
+    const message = responseData?.detail ?? responseData?.message ?? '인증 요청에 실패했습니다.';
     throw new Error(
       Array.isArray(message)
         ? message.map((item) => `${item.loc?.join('.') ?? 'field'}: ${item.msg}`).join('\n')
-        : message,
+        : typeof message === 'string'
+          ? message
+          : '인증 요청에 실패했습니다.',
     );
   }
 
-  return data;
+  return data as T;
 }
 
 async function postJson<T>(path: string, body: Record<string, string>): Promise<T> {
@@ -86,16 +108,9 @@ async function postJson<T>(path: string, body: Record<string, string>): Promise<
 }
 
 async function patchJson<T>(path: string, body: Record<string, string>): Promise<T> {
-  const token = getAuthItem('access_token');
-
-  if (!token) {
-    throw new Error('access_token이 없습니다.');
-  }
-
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetchWithAuth(`${API_BASE_URL}${path}`, {
     body: JSON.stringify(body),
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       ...getLanguageHeaders(),
     },
@@ -106,16 +121,9 @@ async function patchJson<T>(path: string, body: Record<string, string>): Promise
 }
 
 async function postMultipart<T>(path: string, formData: FormData): Promise<T> {
-  const token = getAuthItem('access_token');
-
-  if (!token) {
-    throw new Error('access_token이 없습니다.');
-  }
-
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetchWithAuth(`${API_BASE_URL}${path}`, {
     body: formData,
     headers: {
-      Authorization: `Bearer ${token}`,
       ...getLanguageHeaders(),
     },
     method: 'POST',
@@ -126,6 +134,7 @@ async function postMultipart<T>(path: string, formData: FormData): Promise<T> {
 
 export async function saveAuthTokens(data: AuthTokens, persist = false) {
   const accessToken = data.access_token ?? data.token;
+  const refreshToken = data.refresh_token ?? getAuthItem('refresh_token');
 
   if (!accessToken) {
     throw new Error('로그인 응답에 access token이 없습니다.');
@@ -133,18 +142,18 @@ export async function saveAuthTokens(data: AuthTokens, persist = false) {
 
   setAuthItem('access_token', accessToken);
 
-  if (data.refresh_token) {
-    setAuthItem('refresh_token', data.refresh_token);
+  if (refreshToken) {
+    setAuthItem('refresh_token', refreshToken);
   }
 
   if (data.user_id !== undefined) {
     setAuthItem('user_id', String(data.user_id));
   }
 
-  if (persist && data.refresh_token) {
+  if (persist && refreshToken) {
     await Promise.all([
       setPersistentAuthItem('access_token', accessToken),
-      setPersistentAuthItem('refresh_token', data.refresh_token),
+      setPersistentAuthItem('refresh_token', refreshToken),
       setPersistentAuthItem('auto_login', 'true'),
       data.user_id === undefined ? Promise.resolve() : setPersistentAuthItem('user_id', String(data.user_id)),
     ]);
@@ -152,18 +161,67 @@ export async function saveAuthTokens(data: AuthTokens, persist = false) {
   }
 
   await Promise.all([
-    deletePersistentAuthItem('access_token'),
-    deletePersistentAuthItem('refresh_token'),
-    deletePersistentAuthItem('auto_login'),
-    deletePersistentAuthItem('user_id'),
+    clearPersistedAuthItem('access_token'),
+    clearPersistedAuthItem('refresh_token'),
+    clearPersistedAuthItem('auto_login'),
+    clearPersistedAuthItem('user_id'),
   ]);
 }
 
-/**
- * Web Kakao OAuth redirects contain an access token but currently do not
- * contain a refresh token. Keep that session token without clearing it as a
- * side effect of the persistent-login cleanup used by native/email login.
- */
+async function refreshCurrentSession() {
+  const refreshToken = getAuthItem('refresh_token');
+
+  if (!refreshToken) {
+    throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
+  }
+
+  if (!refreshPromise) {
+    refreshPromise = refreshAuthToken(refreshToken)
+      .then((tokens) => saveAuthTokens(tokens, getAuthItem('auto_login') === 'true').then(() => tokens))
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
+}
+
+export async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
+  const request = async () => {
+    const token = getAuthItem('access_token');
+
+    if (!token) {
+      throw new Error('로그인이 필요합니다.');
+    }
+
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+
+    return fetch(input, { ...init, headers });
+  };
+
+  const response = await request();
+
+  if (response.status !== 401 || !getAuthItem('refresh_token')) {
+    return response;
+  }
+
+  try {
+    await refreshCurrentSession();
+  } catch {
+    await Promise.all([
+      deletePersistentAuthItem('access_token'),
+      deletePersistentAuthItem('refresh_token'),
+      deletePersistentAuthItem('auto_login'),
+      deletePersistentAuthItem('user_id'),
+    ]);
+    return response;
+  }
+
+  return request();
+}
+
+/** Keep the web OAuth callback token for the current session without enabling auto login. */
 export function saveWebKakaoAuthToken(data: AuthTokens) {
   const accessToken = data.access_token ?? data.token;
 
@@ -225,9 +283,8 @@ export async function fetchMe(): Promise<AuthUser> {
     throw new Error('access_token이 없습니다.');
   }
 
-  const res = await fetch(`${API_BASE_URL}/auth/me`, {
+  const res = await fetchWithAuth(`${API_BASE_URL}/auth/me`, {
     headers: {
-      Authorization: `Bearer ${token}`,
       ...getLanguageHeaders(),
     },
   });

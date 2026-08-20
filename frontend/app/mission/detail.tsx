@@ -11,12 +11,13 @@ import { fetchMissions, getCachedMissions, type MissionItem } from '@/lib/missio
 import { getLatestMissionSession, isMissionSessionNotFoundError, type MissionSession } from '@/lib/mission-session-api';
 import { addMissionToSchedule, getCachedTripSchedules, getTripSchedule, listTripSchedules, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
-type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
+type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY' | 'DEMO';
 
 const themeItems: { icon: number; label: string; value: MissionTheme }[] = [
   { icon: require('../../assets/svg/mission_theme/mountain.svg'), label: '산', value: 'MOUNTAIN' },
   { icon: require('../../assets/svg/mission_theme/sea.svg'), label: '바다', value: 'SEA' },
   { icon: require('../../assets/svg/mission_theme/city.svg'), label: '도시', value: 'CITY' },
+  { icon: require('../../assets/svg/theme_icon/flag.svg'), label: '데모', value: 'DEMO' },
 ];
 const districtCodeByLabel: Record<string, string> = {
   강서구: 'GANGSEO',
@@ -48,7 +49,7 @@ function normalizeValue(value: string | null | undefined) {
 function getValidTheme(value: string | string[] | undefined): MissionTheme {
   const theme = normalizeValue(getParamValue(value));
 
-  return theme === 'SEA' || theme === 'CITY' ? theme : 'MOUNTAIN';
+  return theme === 'SEA' || theme === 'CITY' || theme === 'DEMO' ? theme : 'MOUNTAIN';
 }
 
 function getSortedMissions(

@@ -10,38 +10,26 @@ import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
 import {
   chooseMissionParticipation,
+  cancelMissionSession,
   connectMissionSessionSocket,
   getMissionSession,
   MissionSessionApiError,
   startMissionSession,
-  type MissionParticipationLocation,
   type MissionParticipationStatus,
   type MissionSession,
 } from '@/lib/mission-session-api';
+import { getCurrentParticipationLocation } from '@/lib/mission-location';
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function getParticipationLabel(status: MissionParticipationStatus | null | undefined) {
-  switch (status) {
-    case 'PARTICIPATING':
-      return '참여';
-    case 'COMPLETED':
-      return '완료';
-    case 'SKIPPED':
-      return '패스';
-    case 'LOCKED_OUT':
-      return '미선택';
-    case 'TIMED_OUT':
-      return '시간 초과';
-    default:
-      return '선택 대기';
-  }
-}
-
 function isParticipating(status: MissionParticipationStatus | null | undefined) {
   return status === 'PARTICIPATING' || status === 'COMPLETED';
+}
+
+function hasLeftParticipation(status: MissionParticipationStatus | null | undefined) {
+  return status === 'SKIPPED' || status === 'LOCKED_OUT' || status === 'TIMED_OUT';
 }
 
 function getParticipationErrorMessage(error: unknown) {
@@ -65,43 +53,6 @@ function getParticipationErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '참여 상태를 바꾸지 못했어요.';
 }
 
-async function getCurrentParticipationLocation(): Promise<MissionParticipationLocation> {
-  let Location: typeof import('expo-location');
-  try {
-    Location = await import('expo-location');
-  } catch {
-    throw new Error('위치 기능을 사용할 수 없어요. 앱을 최신 개발 빌드로 다시 설치해 주세요.');
-  }
-
-  const permission = await Location.requestForegroundPermissionsAsync();
-  if (permission.status !== 'granted') {
-    throw new Error('미션 참여를 위해 위치 권한이 필요해요.');
-  }
-
-  let location: import('expo-location').LocationObject;
-  try {
-    location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-  } catch {
-    throw new Error('현재 위치를 가져오지 못했어요. 위치 서비스를 켜고 다시 시도해 주세요.');
-  }
-  const { accuracy, latitude, longitude } = location.coords;
-  if (
-    !Number.isFinite(latitude)
-    || !Number.isFinite(longitude)
-    || typeof accuracy !== 'number'
-    || !Number.isFinite(accuracy)
-  ) {
-    throw new Error('현재 위치의 정확도를 확인하지 못했어요. 다시 시도해 주세요.');
-  }
-
-  return {
-    accuracy_m: accuracy,
-    latitude,
-    longitude,
-    measured_at: new Date(location.timestamp).toISOString(),
-  };
-}
-
 export default function MissionParticipationScreen() {
   const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[]; verificationType?: string | string[] }>();
   const scheduleId = getParamValue(params.scheduleId);
@@ -122,10 +73,12 @@ export default function MissionParticipationScreen() {
     [currentUserId, session?.members],
   );
   const isMissionLeader = Boolean(session?.createdByUserId && currentUserId && session.createdByUserId === currentUserId);
-  const participatingCount = session?.members.filter((member) => isParticipating(member.participationStatus)).length ?? 0;
+  const missionLeader = session?.members.find((member) => member.userId === session.createdByUserId) ?? null;
+  const participatingMembers = session?.members.filter((member) => isParticipating(member.participationStatus)) ?? [];
   const participantCount = session?.members.filter((member) => (
     member.userId !== session.createdByUserId && isParticipating(member.participationStatus)
   )).length ?? 0;
+  const isMyParticipationActive = isParticipating(myMember?.participationStatus);
   const canChangeParticipation = Boolean(!isMissionLeader && session && ['WAITING', 'READY'].includes(session.status) && myMember && myMember.participationStatus !== 'LOCKED_OUT');
   const requiresGps = (session?.verificationType ?? routeVerificationType)?.toUpperCase() === 'GPS_PHOTO';
 
@@ -154,10 +107,18 @@ export default function MissionParticipationScreen() {
       }
       return;
     }
+    const nextMember = nextSession.members.find((member) => member.userId === currentUserId);
+    if (scheduleId && hasLeftParticipation(nextMember?.participationStatus)) {
+      router.replace({
+        pathname: '/trip/active',
+        params: { scheduleId, suppressedParticipationSessionId: nextSession.id },
+      });
+      return;
+    }
     if (nextSession.status === 'SHOOTING' || nextSession.status === 'UPLOADING') {
       navigateToCapture(nextSession);
     }
-  }, [navigateToCapture, scheduleId]);
+  }, [currentUserId, navigateToCapture, scheduleId]);
 
   useEffect(() => {
     if (
@@ -308,6 +269,28 @@ export default function MissionParticipationScreen() {
     }
   };
 
+  const handleClose = async () => {
+    if (!sessionId || isSubmitting) {
+      return;
+    }
+
+    if (!isMissionLeader || !['WAITING', 'READY'].includes(session?.status ?? '')) {
+      goBack();
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setMessage('');
+      const nextSession = await cancelMissionSession(sessionId);
+      applySession(nextSession);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '미션을 취소하지 못했어요.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleStart = async () => {
     if (!sessionId || !isMissionLeader || participantCount === 0 || isSubmitting) {
       return;
@@ -328,7 +311,13 @@ export default function MissionParticipationScreen() {
 
   const goBack = () => {
     if (scheduleId) {
-      router.replace({ pathname: '/trip/active', params: { scheduleId } });
+      router.replace({
+        pathname: '/trip/active',
+        params: {
+          scheduleId,
+          ...(sessionId ? { suppressedParticipationSessionId: sessionId } : {}),
+        },
+      });
     } else {
       router.back();
     }
@@ -336,12 +325,12 @@ export default function MissionParticipationScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: topSafeInset + 24, paddingHorizontal: horizontalPadding }]}>
-        <ScalePressable accessibilityLabel="돌아가기" onPress={goBack} pressedScale={0.86} style={styles.backButton}>
-          <Ionicons color="#26363D" name="chevron-back" size={26} />
-        </ScalePressable>
-        <Text numberOfLines={1} style={styles.headerTitle}>미션 참여</Text>
-        <View style={styles.headerSpacer} />
+      <View style={[styles.closeHeader, { paddingTop: topSafeInset + 14, paddingHorizontal: horizontalPadding }]}>
+        {isMissionLeader || participantCount === 0 ? (
+          <ScalePressable accessibilityLabel={isMissionLeader ? '미션 취소' : '미션 참여 닫기'} disabled={isSubmitting} onPress={() => void handleClose()} pressedScale={0.86} style={styles.closeButton}>
+            <Ionicons color="#1D252B" name="close" size={32} />
+          </ScalePressable>
+        ) : null}
       </View>
 
       {isLoading || (session?.members.length === 1 && !message) ? (
@@ -350,103 +339,215 @@ export default function MissionParticipationScreen() {
           {session?.members.length === 1 ? <Text style={styles.stateText}>촬영 화면을 준비하고 있어요.</Text> : null}
         </View>
       ) : (
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomSafeInset + 32, paddingHorizontal: horizontalPadding }]} showsVerticalScrollIndicator={false}>
-          <Text style={styles.title}>{session?.missionTitle ?? '미션'}</Text>
-          <Text style={styles.description}>이번 미션에 참여할 사람을 확인하고 있어요.</Text>
+        <>
+          <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: horizontalPadding }]} showsVerticalScrollIndicator={false}>
+            <Text style={styles.title}>{session?.missionTitle ?? '미션'}</Text>
+            <Text style={styles.description}>시작 버튼을 누르면 모두 동시에 미션이 시작돼요</Text>
 
-          <View style={styles.countCard}>
-            <Text style={styles.countLabel}>현재 참여자</Text>
-            <Text style={styles.countValue}>{participatingCount}명</Text>
-          </View>
-
-          <View style={styles.memberCard}>
-            {session?.members.map((member, index) => {
-              const mine = member.userId === currentUserId;
-              return (
-                <View key={member.userId || String(index)} style={styles.memberRow}>
-                  <ProfileAvatar profileEmoji={member.profileEmoji} profileImageUrl={member.profileImageUrl} size={48} />
-                  <View style={styles.memberCopy}>
-                    <Text style={styles.memberName}>{member.nickname?.trim() || `멤버 ${index + 1}`}{mine ? ' (나)' : ''}</Text>
-                    <Text style={[styles.memberStatus, member.participationStatus === 'PARTICIPATING' && styles.participatingStatus]}>
-                      {getParticipationLabel(member.participationStatus)}
-                    </Text>
-                  </View>
+            {missionLeader ? (
+              <View style={styles.leaderCard}>
+                <ProfileAvatar profileEmoji={missionLeader.profileEmoji} profileImageUrl={missionLeader.profileImageUrl} size={35} />
+                <Text numberOfLines={1} style={styles.leaderName}>{missionLeader.nickname?.trim() || '미션장'}</Text>
+                <View style={styles.leaderBadge}>
+                  <Text style={styles.leaderBadgeText}>방장</Text>
                 </View>
-              );
-            })}
-          </View>
+              </View>
+            ) : null}
+
+            <View style={styles.participantCard}>
+              <Text style={styles.participantLabel}>참가자</Text>
+              {participatingMembers.map((member, index) => {
+                const mine = member.userId === currentUserId;
+                return (
+                  <View key={member.userId || String(index)} style={[styles.memberRow, index === participatingMembers.length - 1 && styles.lastMemberRow]}>
+                    <ProfileAvatar profileEmoji={member.profileEmoji} profileImageUrl={member.profileImageUrl} size={35} />
+                    <Text numberOfLines={1} style={styles.memberName}>{member.nickname?.trim() || `멤버 ${index + 1}`}{mine ? ' (나)' : ''}</Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            {message ? <Text style={styles.message}>{message}</Text> : null}
+          </ScrollView>
 
           {isMissionLeader ? (
-            <Text style={styles.leaderParticipationText}>미션장은 자동으로 참여돼요.</Text>
-          ) : canChangeParticipation ? (
-            <View style={styles.choiceRow}>
+            <View style={[styles.bottomAction, { paddingBottom: bottomSafeInset + 22, paddingHorizontal: horizontalPadding }]}>
               <ScalePressable
-                disabled={isSubmitting}
-                onPress={() => void handleParticipation('PARTICIPATE')}
+                disabled={isSubmitting || participantCount === 0 || !['WAITING', 'READY'].includes(session?.status ?? '')}
+                onPress={() => void handleStart()}
                 pressedScale={0.97}
-                style={[styles.choiceButton, myMember?.participationStatus === 'PARTICIPATING' && styles.selectedChoice]}>
-                <Text style={styles.choiceText}>참여할게요</Text>
+                style={[styles.startButton, participantCount > 0 ? styles.enabledStartButton : styles.disabledStartButton]}>
+                {isSubmitting ? <ActivityIndicator color={participantCount > 0 ? '#FFFFFF' : '#409CB7'} /> : <Text style={[styles.startButtonText, participantCount === 0 && styles.disabledStartButtonText]}>미션 시작</Text>}
               </ScalePressable>
+            </View>
+          ) : canChangeParticipation ? (
+            <View style={[styles.bottomAction, { paddingBottom: bottomSafeInset + 22, paddingHorizontal: horizontalPadding }]}>
               <ScalePressable
                 disabled={isSubmitting}
-                onPress={() => void handleParticipation('PASS')}
+                onPress={() => void handleParticipation(isMyParticipationActive ? 'PASS' : 'PARTICIPATE')}
                 pressedScale={0.97}
-                style={[styles.choiceButton, myMember?.participationStatus === 'SKIPPED' && styles.selectedPassChoice]}>
-                <Text style={styles.choiceText}>패스할게요</Text>
+                style={[styles.participationButton, isMyParticipationActive ? styles.passButton : styles.participateButton]}>
+                {isSubmitting ? (
+                  <ActivityIndicator color={isMyParticipationActive ? '#409CB7' : '#FFFFFF'} />
+                ) : (
+                  <Text style={[styles.participationButtonText, isMyParticipationActive && styles.passButtonText]}>
+                    {isMyParticipationActive ? '패스하기' : '참여하기'}
+                  </Text>
+                )}
               </ScalePressable>
             </View>
           ) : null}
-
-          {isMissionLeader ? (
-            <ScalePressable
-              disabled={isSubmitting || participantCount === 0 || !['WAITING', 'READY'].includes(session?.status ?? '')}
-              onPress={() => void handleStart()}
-              pressedScale={0.97}
-              style={[styles.startButton, participantCount > 0 ? styles.enabledStartButton : styles.disabledStartButton]}>
-              {isSubmitting ? <ActivityIndicator color={participantCount > 0 ? '#FFFFFF' : '#409CB7'} /> : <Text style={[styles.startButtonText, participantCount === 0 && styles.disabledStartButtonText]}>참여자와 미션 시작하기</Text>}
-            </ScalePressable>
-          ) : (
-            <Text style={styles.waitingText}>미션장이 참여자를 확인한 뒤 시작해요.</Text>
-          )}
-
-          {message ? <Text style={styles.message}>{message}</Text> : null}
-        </ScrollView>
+        </>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#FFFFFF', flex: 1 },
-  header: { alignItems: 'center', flexDirection: 'row' },
-  backButton: { alignItems: 'center', height: 42, justifyContent: 'center', width: 42 },
-  headerSpacer: { width: 42 },
-  headerTitle: { color: '#26363D', flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
-  centerState: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  stateText: { color: '#8A9194', fontSize: 13, marginTop: 12 },
-  content: { paddingTop: 48 },
-  title: { color: '#26363D', fontSize: 27, fontWeight: '600', textAlign: 'center' },
-  description: { color: '#8A9194', fontSize: 13, marginTop: 9, textAlign: 'center' },
-  countCard: { alignItems: 'center', backgroundColor: '#F2F8FA', borderRadius: 18, flexDirection: 'row', justifyContent: 'space-between', marginTop: 30, paddingHorizontal: 20, paddingVertical: 17 },
-  countLabel: { color: '#617078', fontSize: 14 },
-  countValue: { color: '#409CB7', fontSize: 17, fontWeight: '700' },
-  memberCard: { backgroundColor: '#FFFFFF', borderColor: '#E8EFF1', borderRadius: 20, borderWidth: 1, marginTop: 14, paddingHorizontal: 17, paddingVertical: 8 },
-  memberRow: { alignItems: 'center', borderBottomColor: '#EEF2F3', borderBottomWidth: 1, flexDirection: 'row', gap: 13, paddingVertical: 13 },
-  memberCopy: { flex: 1 },
-  memberName: { color: '#26363D', fontSize: 15, fontWeight: '600' },
-  memberStatus: { color: '#A2ADB1', fontSize: 12, marginTop: 5 },
-  participatingStatus: { color: '#409CB7', fontWeight: '600' },
-  choiceRow: { flexDirection: 'row', gap: 10, marginTop: 18 },
-  leaderParticipationText: { color: '#409CB7', fontSize: 13, fontWeight: '600', marginTop: 18, textAlign: 'center' },
-  choiceButton: { alignItems: 'center', borderColor: '#C9D6DA', borderRadius: 999, borderWidth: 1, flex: 1, height: 55, justifyContent: 'center' },
-  selectedChoice: { backgroundColor: '#63B5CD', borderColor: '#63B5CD' },
-  selectedPassChoice: { backgroundColor: '#E7EEF0', borderColor: '#E7EEF0' },
-  choiceText: { color: '#26363D', fontSize: 14, fontWeight: '600' },
-  startButton: { alignItems: 'center', borderRadius: 999, height: 62, justifyContent: 'center', marginTop: 18 },
-  enabledStartButton: { backgroundColor: '#63B5CD' },
-  disabledStartButton: { backgroundColor: '#E3F0F6' },
-  startButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  disabledStartButtonText: { color: '#409CB7' },
-  waitingText: { color: '#8A9194', fontSize: 13, marginTop: 22, textAlign: 'center' },
-  message: { color: '#D06958', fontSize: 13, marginTop: 18, textAlign: 'center' },
+  container: {
+    backgroundColor: '#FFFFFF',
+    flex: 1,
+  },
+  closeHeader: {
+    height: 60,
+  },
+  closeButton: {
+    alignItems: 'center',
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  centerState: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  stateText: {
+    color: '#8A9194',
+    fontSize: 13,
+    marginTop: 12,
+  },
+  content: {
+    flexGrow: 1,
+    paddingBottom: 28,
+    paddingTop: 47,
+  },
+  title: {
+    color: '#10161F',
+    fontSize: 24,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  description: {
+    color: '#8A9194',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  leaderCard: {
+    alignItems: 'center',
+    backgroundColor: '#E9F8FF',
+    borderRadius: 20,
+    flexDirection: 'row',
+    gap: 13,
+    marginTop: 99,
+    minHeight: 59,
+    paddingHorizontal: 16,
+  },
+  leaderName: {
+    color: '#10161F',
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  leaderBadge: {
+    backgroundColor: '#C9EBFA',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  leaderBadgeText: {
+    color: '#63B5CD',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  participantCard: {
+    backgroundColor: '#F6F9FB',
+    borderRadius: 20,
+    marginTop: 22,
+    paddingBottom: 10,
+    paddingHorizontal: 16,
+    paddingTop: 17,
+  },
+  participantLabel: {
+    color: '#8A9194',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  memberRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 13,
+    minHeight: 68,
+  },
+  lastMemberRow: {
+    marginBottom: 0,
+  },
+  memberName: {
+    color: '#10161F',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  bottomAction: {
+    backgroundColor: '#FFFFFF',
+    paddingTop: 12,
+  },
+  startButton: {
+    alignItems: 'center',
+    borderRadius: 999,
+    height: 63,
+    justifyContent: 'center',
+  },
+  enabledStartButton: {
+    backgroundColor: '#63B5CD',
+  },
+  disabledStartButton: {
+    backgroundColor: '#E3F0F6',
+  },
+  startButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  disabledStartButtonText: {
+    color: '#409CB7',
+  },
+  participationButton: {
+    alignItems: 'center',
+    borderRadius: 999,
+    height: 63,
+    justifyContent: 'center',
+  },
+  participateButton: {
+    backgroundColor: '#63B5CD',
+  },
+  passButton: {
+    backgroundColor: '#E3F0F6',
+  },
+  participationButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  passButtonText: {
+    color: '#409CB7',
+  },
+  message: {
+    color: '#D06958',
+    fontSize: 13,
+    marginTop: 18,
+    textAlign: 'center',
+  },
 });

@@ -1,5 +1,4 @@
-import { API_BASE_URL } from '@/lib/auth-api';
-import { getAuthItem } from '@/lib/auth-storage';
+import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
 import { getLanguageHeaders } from '@/lib/language';
 
 export type TripInvite = {
@@ -98,16 +97,9 @@ async function requestJson<T>(path: string, method: 'GET' | 'POST' | 'PATCH', bo
 }
 
 async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' | 'PATCH', body?: Record<string, string>) {
-  const token = getAuthItem('access_token');
-
-  if (!token) {
-    throw new Error('로그인이 필요합니다.');
-  }
-
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetchWithAuth(`${API_BASE_URL}${path}`, {
     body: body ? JSON.stringify(body) : undefined,
     headers: {
-      Authorization: `Bearer ${token}`,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...getLanguageHeaders(),
     },

@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/lib/auth-api';
+import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
 import { getAuthItem } from '@/lib/auth-storage';
 import { getCurrentLanguage, getLanguageHeaders } from '@/lib/language';
 
@@ -243,7 +243,7 @@ async function requestJson<T>(path: string, method: 'GET' | 'POST', body?: Recor
   const { controller, timer } = createRequestTimeout(15000);
 
   try {
-    const res = await fetch(`${API_BASE_URL}${path}`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}${path}`, {
       body: body ? JSON.stringify(body) : undefined,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -546,6 +546,11 @@ export async function startMissionSession(sessionId: string) {
   return normalizeSession(data);
 }
 
+export async function cancelMissionSession(sessionId: string) {
+  const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/cancel`, 'POST');
+  return normalizeSession(data);
+}
+
 export async function revealMissionSession(sessionId: string) {
   const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/reveal`, 'POST');
   return normalizeSession(data);
@@ -580,7 +585,7 @@ export async function uploadMissionSessionPhoto(sessionId: string, photoUri: str
   const { controller, timer } = createRequestTimeout(30000);
 
   try {
-    const res = await fetch(`${API_BASE_URL}/mission-sessions/${encodeURIComponent(sessionId)}/photo`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/mission-sessions/${encodeURIComponent(sessionId)}/photo`, {
       body: formData,
       headers: { Authorization: `Bearer ${token}`, ...getLanguageHeaders() },
       method: 'POST',

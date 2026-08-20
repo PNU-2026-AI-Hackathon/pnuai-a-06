@@ -1,5 +1,4 @@
-import { API_BASE_URL } from '@/lib/auth-api';
-import { getAuthItem } from '@/lib/auth-storage';
+import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
 import { getCurrentLanguage, getLanguageHeaders, type AppLanguage } from '@/lib/language';
 
 export const DEFAULT_MAGAZINE_TEMPLATE_KEY = 'handwriting-2025-v1';
@@ -142,16 +141,6 @@ function normalizeMagazineCandidate(data: ApiMagazineCandidate): MagazineCandida
   };
 }
 
-function getToken() {
-  const token = getAuthItem('access_token');
-
-  if (!token) {
-    throw new Error('로그인이 필요합니다.');
-  }
-
-  return token;
-}
-
 async function readResponse(response: Response, fallbackMessage: string) {
   const text = await response.text();
   let data: unknown = {};
@@ -170,13 +159,11 @@ async function readResponse(response: Response, fallbackMessage: string) {
 }
 
 export async function getMagazine(scheduleId: string, templateKey = DEFAULT_MAGAZINE_TEMPLATE_KEY) {
-  const token = getToken();
   const language = getCurrentLanguage();
 
   const query = `?template_key=${encodeURIComponent(templateKey)}&lang=${encodeURIComponent(language)}`;
-  const response = await fetch(`${API_BASE_URL}/schedules/${encodeURIComponent(scheduleId)}/magazine${query}`, {
+  const response = await fetchWithAuth(`${API_BASE_URL}/schedules/${encodeURIComponent(scheduleId)}/magazine${query}`, {
     headers: {
-      Authorization: `Bearer ${token}`,
       ...getLanguageHeaders(),
     },
   });
@@ -199,9 +186,8 @@ export async function getMagazine(scheduleId: string, templateKey = DEFAULT_MAGA
 export async function getMagazineCandidates(scheduleId: string, templateKey = DEFAULT_MAGAZINE_TEMPLATE_KEY) {
   const language = getCurrentLanguage();
   const query = '?template_key=' + encodeURIComponent(templateKey) + '&lang=' + encodeURIComponent(language);
-  const response = await fetch(API_BASE_URL + '/schedules/' + encodeURIComponent(scheduleId) + '/magazine/candidates' + query, {
+  const response = await fetchWithAuth(API_BASE_URL + '/schedules/' + encodeURIComponent(scheduleId) + '/magazine/candidates' + query, {
     headers: {
-      Authorization: 'Bearer ' + getToken(),
       ...getLanguageHeaders(),
     },
   });
@@ -231,10 +217,9 @@ export async function createMagazine(
     force: input.force ?? false,
     ...(numericMissionIds && numericMissionIds.length > 0 ? { schedule_mission_ids: numericMissionIds } : {}),
   };
-  const response = await fetch(API_BASE_URL + '/schedules/' + encodeURIComponent(scheduleId) + '/magazine?lang=' + encodeURIComponent(language), {
+  const response = await fetchWithAuth(API_BASE_URL + '/schedules/' + encodeURIComponent(scheduleId) + '/magazine?lang=' + encodeURIComponent(language), {
     body: JSON.stringify(body),
     headers: {
-      Authorization: 'Bearer ' + getToken(),
       'Content-Type': 'application/json',
       ...getLanguageHeaders(),
     },

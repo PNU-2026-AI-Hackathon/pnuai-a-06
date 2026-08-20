@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/lib/auth-api';
+import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 import { getLanguageHeaders } from '@/lib/language';
 
@@ -237,12 +237,11 @@ function getAccessToken() {
 }
 
 async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: Record<string, JsonBodyValue>) {
-  const token = getAccessToken();
+  getAccessToken();
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetchWithAuth(`${API_BASE_URL}${path}`, {
     body: body ? JSON.stringify(body) : undefined,
     headers: {
-      Authorization: `Bearer ${token}`,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...getLanguageHeaders(),
     },

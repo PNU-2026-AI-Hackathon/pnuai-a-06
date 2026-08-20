@@ -4,8 +4,8 @@ import { useEffect } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { fetchMe, refreshAuthToken, saveAuthTokens, saveWebKakaoAuthToken } from '@/lib/auth-api';
-import { deletePersistentAuthItem, getAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
+import { refreshAuthToken, saveAuthTokens, saveWebKakaoAuthToken } from '@/lib/auth-api';
+import { deletePersistentAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
 
 const splashText = require('../assets/svg/logo_text.svg');
 const splashMap = require('../assets/svg/splash_map.svg');
@@ -78,20 +78,6 @@ export default function SplashScreen() {
       const refreshToken = await getPersistentAuthItem('refresh_token');
 
       if (shouldAutoLogin !== 'true' || !refreshToken) {
-        // Web Kakao OAuth currently returns only an access token. Reuse it
-        // across a page refresh while it remains valid, without changing the
-        // native SecureStore/refresh-token flow.
-        if (Platform.OS === 'web' && getAuthItem('access_token')) {
-          try {
-            await fetchMe();
-            await routeAfterSplash('/main');
-            return;
-          } catch {
-            await deletePersistentAuthItem('access_token');
-            await deletePersistentAuthItem('user_id');
-          }
-        }
-
         await routeAfterSplash('/login');
         return;
       }
@@ -101,10 +87,12 @@ export default function SplashScreen() {
         await saveAuthTokens(tokens, true);
         await routeAfterSplash('/main');
       } catch {
-        await deletePersistentAuthItem('access_token');
-        await deletePersistentAuthItem('refresh_token');
-        await deletePersistentAuthItem('auto_login');
-        await deletePersistentAuthItem('user_id');
+        await Promise.all([
+          deletePersistentAuthItem('access_token'),
+          deletePersistentAuthItem('refresh_token'),
+          deletePersistentAuthItem('auto_login'),
+          deletePersistentAuthItem('user_id'),
+        ]);
         await routeAfterSplash('/login');
       }
     };

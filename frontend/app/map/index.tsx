@@ -15,9 +15,10 @@ const themeMapByCategory: Record<MissionTheme, number> = {
   MOUNTAIN: require('../../assets/svg/map/mountain_map.svg'),
   SEA: require('../../assets/svg/map/sea_map.svg'),
   CITY: require('../../assets/svg/map/city_map.svg'),
+  DEMO: dividedMap,
 };
 
-type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
+type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY' | 'DEMO';
 type CategoryValue = MissionTheme | 'ACQUIRED';
 
 const categoryItems = [
@@ -38,6 +39,12 @@ const categoryItems = [
     selectedIcon: require('../../assets/svg/theme_icon/city_filled.svg'),
     label: '도시',
     value: 'CITY',
+  },
+  {
+    icon: require('../../assets/svg/theme_icon/flag.svg'),
+    selectedIcon: require('../../assets/svg/theme_icon/flag_filled.svg'),
+    label: '데모',
+    value: 'DEMO',
   },
 ] satisfies { icon: number; selectedIcon: number; label: string; value: CategoryValue }[];
 
@@ -83,6 +90,7 @@ const DEFAULT_THEME_DISTRICTS: Record<MissionTheme, string[]> = {
   MOUNTAIN: [],
   SEA: [],
   CITY: [],
+  DEMO: [],
 };
 const MAP_ASPECT_RATIO = 1;
 const MISSION_FRAME_ASPECT_RATIO = 164 / 209;
