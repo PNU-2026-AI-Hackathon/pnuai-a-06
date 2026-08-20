@@ -123,6 +123,9 @@ export default function MissionParticipationScreen() {
   );
   const isMissionLeader = Boolean(session?.createdByUserId && currentUserId && session.createdByUserId === currentUserId);
   const participatingCount = session?.members.filter((member) => isParticipating(member.participationStatus)).length ?? 0;
+  const participantCount = session?.members.filter((member) => (
+    member.userId !== session.createdByUserId && isParticipating(member.participationStatus)
+  )).length ?? 0;
   const canChangeParticipation = Boolean(!isMissionLeader && session && ['WAITING', 'READY'].includes(session.status) && myMember && myMember.participationStatus !== 'LOCKED_OUT');
   const requiresGps = (session?.verificationType ?? routeVerificationType)?.toUpperCase() === 'GPS_PHOTO';
 
@@ -306,7 +309,7 @@ export default function MissionParticipationScreen() {
   };
 
   const handleStart = async () => {
-    if (!sessionId || !isMissionLeader || participatingCount === 0 || isSubmitting) {
+    if (!sessionId || !isMissionLeader || participantCount === 0 || isSubmitting) {
       return;
     }
 
@@ -396,11 +399,11 @@ export default function MissionParticipationScreen() {
 
           {isMissionLeader ? (
             <ScalePressable
-              disabled={isSubmitting || participatingCount === 0 || !['WAITING', 'READY'].includes(session?.status ?? '')}
+              disabled={isSubmitting || participantCount === 0 || !['WAITING', 'READY'].includes(session?.status ?? '')}
               onPress={() => void handleStart()}
               pressedScale={0.97}
-              style={[styles.startButton, (isSubmitting || participatingCount === 0) && styles.disabledButton]}>
-              {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.startButtonText}>참여자와 미션 시작하기</Text>}
+              style={[styles.startButton, participantCount > 0 ? styles.enabledStartButton : styles.disabledStartButton]}>
+              {isSubmitting ? <ActivityIndicator color={participantCount > 0 ? '#FFFFFF' : '#409CB7'} /> : <Text style={[styles.startButtonText, participantCount === 0 && styles.disabledStartButtonText]}>참여자와 미션 시작하기</Text>}
             </ScalePressable>
           ) : (
             <Text style={styles.waitingText}>미션장이 참여자를 확인한 뒤 시작해요.</Text>
@@ -439,9 +442,11 @@ const styles = StyleSheet.create({
   selectedChoice: { backgroundColor: '#63B5CD', borderColor: '#63B5CD' },
   selectedPassChoice: { backgroundColor: '#E7EEF0', borderColor: '#E7EEF0' },
   choiceText: { color: '#26363D', fontSize: 14, fontWeight: '600' },
-  startButton: { alignItems: 'center', backgroundColor: '#63B5CD', borderRadius: 999, height: 62, justifyContent: 'center', marginTop: 18 },
+  startButton: { alignItems: 'center', borderRadius: 999, height: 62, justifyContent: 'center', marginTop: 18 },
+  enabledStartButton: { backgroundColor: '#63B5CD' },
+  disabledStartButton: { backgroundColor: '#E3F0F6' },
   startButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  disabledButton: { opacity: 0.42 },
+  disabledStartButtonText: { color: '#409CB7' },
   waitingText: { color: '#8A9194', fontSize: 13, marginTop: 22, textAlign: 'center' },
   message: { color: '#D06958', fontSize: 13, marginTop: 18, textAlign: 'center' },
 });

@@ -1,11 +1,11 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { refreshAuthToken, saveAuthTokens } from '@/lib/auth-api';
-import { deletePersistentAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
+import { fetchMe, refreshAuthToken, saveAuthTokens, saveWebKakaoAuthToken } from '@/lib/auth-api';
+import { deletePersistentAuthItem, getAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
 
 const splashText = require('../assets/svg/logo_text.svg');
 const splashMap = require('../assets/svg/splash_map.svg');
@@ -21,6 +21,32 @@ function waitForMinimumSplash(startedAt: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, remaining);
   });
+}
+
+function getWebKakaoCallbackTokens() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const accessToken = params.get('token');
+
+  if (!accessToken) {
+    return null;
+  }
+
+  return {
+    access_token: accessToken,
+    user_id: params.get('user_id') ?? undefined,
+  };
+}
+
+function clearWebKakaoCallbackUrl() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return;
+  }
+
+  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
 }
 
 export default function SplashScreen() {
@@ -39,10 +65,33 @@ export default function SplashScreen() {
     };
 
     const restoreSession = async () => {
+      const webKakaoTokens = getWebKakaoCallbackTokens();
+
+      if (webKakaoTokens) {
+        saveWebKakaoAuthToken(webKakaoTokens);
+        clearWebKakaoCallbackUrl();
+        await routeAfterSplash('/main');
+        return;
+      }
+
       const shouldAutoLogin = await getPersistentAuthItem('auto_login');
       const refreshToken = await getPersistentAuthItem('refresh_token');
 
       if (shouldAutoLogin !== 'true' || !refreshToken) {
+        // Web Kakao OAuth currently returns only an access token. Reuse it
+        // across a page refresh while it remains valid, without changing the
+        // native SecureStore/refresh-token flow.
+        if (Platform.OS === 'web' && getAuthItem('access_token')) {
+          try {
+            await fetchMe();
+            await routeAfterSplash('/main');
+            return;
+          } catch {
+            await deletePersistentAuthItem('access_token');
+            await deletePersistentAuthItem('user_id');
+          }
+        }
+
         await routeAfterSplash('/login');
         return;
       }

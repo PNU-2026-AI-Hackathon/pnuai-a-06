@@ -18,6 +18,7 @@ import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/compon
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import {
+  API_BASE_URL,
   loginWithEmail,
   loginWithKakaoAccessToken,
   registerWithEmail,
@@ -146,6 +147,15 @@ export default function LoginScreen() {
     try {
       setIsSubmitting(true);
       resetMessage();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const frontendRedirectUri = `${window.location.origin}/`;
+        window.location.assign(
+          `${API_BASE_URL}/auth/kakao/login?frontend_redirect_uri=${encodeURIComponent(frontendRedirectUri)}`,
+        );
+        return;
+      }
+
       const kakaoToken = await loginWithKakao();
       const serviceTokens = await loginWithKakaoAccessToken(kakaoToken.accessToken);
       await saveAuthTokens(serviceTokens, true);

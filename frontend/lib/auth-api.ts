@@ -6,7 +6,9 @@ import {
 } from '@/lib/auth-storage';
 import { getLanguageHeaders } from '@/lib/language';
 
-export const API_BASE_URL = 'http://211.213.193.67:7020';
+import { API_BASE_URL } from '@/lib/api-config';
+
+export { API_BASE_URL } from '@/lib/api-config';
 
 
 type ProfileImageUploadInput = {
@@ -63,16 +65,24 @@ async function readAuthResponse<T>(res: Response): Promise<T> {
 }
 
 async function postJson<T>(path: string, body: Record<string, string>): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    body: JSON.stringify(body),
-    headers: {
-      'Content-Type': 'application/json',
-      ...getLanguageHeaders(),
-    },
-    method: 'POST',
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  return readAuthResponse<T>(res);
+  try {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      body: JSON.stringify(body),
+      headers: {
+        'Content-Type': 'application/json',
+        ...getLanguageHeaders(),
+      },
+      method: 'POST',
+      signal: controller.signal,
+    });
+
+    return readAuthResponse<T>(res);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function patchJson<T>(path: string, body: Record<string, string>): Promise<T> {
@@ -147,6 +157,25 @@ export async function saveAuthTokens(data: AuthTokens, persist = false) {
     deletePersistentAuthItem('auto_login'),
     deletePersistentAuthItem('user_id'),
   ]);
+}
+
+/**
+ * Web Kakao OAuth redirects contain an access token but currently do not
+ * contain a refresh token. Keep that session token without clearing it as a
+ * side effect of the persistent-login cleanup used by native/email login.
+ */
+export function saveWebKakaoAuthToken(data: AuthTokens) {
+  const accessToken = data.access_token ?? data.token;
+
+  if (!accessToken) {
+    throw new Error('카카오 로그인 응답에 access token이 없습니다.');
+  }
+
+  setAuthItem('access_token', accessToken);
+
+  if (data.user_id !== undefined) {
+    setAuthItem('user_id', String(data.user_id));
+  }
 }
 
 export function registerWithEmail(email: string, password: string, name: string) {

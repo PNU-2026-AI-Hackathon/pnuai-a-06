@@ -3,7 +3,7 @@ import * as Linking from 'expo-linking';
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { BottomNavigationBar } from '@/components/bottom-navigation-bar';
@@ -47,7 +47,9 @@ function openKakaoInvite(url: string | null) {
 }
 
 async function openKakaoAuth(url: string | null) {
-  if (!url) {
+  // Web callbacks are handled by the splash route so they cannot race with
+  // its session-restore redirect. Native deep-link handling remains intact.
+  if (!url || Platform.OS === 'web') {
     return;
   }
 

@@ -1,7 +1,7 @@
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
 import { getLanguageHeaders } from '@/lib/language';
 
-const API_BASE_URL = 'http://211.213.193.67:7020';
+import { API_BASE_URL } from '@/lib/auth-api';
 
 type MissionApiItem = Record<string, unknown>;
 
