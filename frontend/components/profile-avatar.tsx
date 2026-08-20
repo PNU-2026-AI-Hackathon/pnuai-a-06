@@ -20,6 +20,18 @@ export const profileIconOptions: ProfileIconOption[] = [
   { key: 'people6', source: require('../assets/svg/profile_icon/people6.svg') },
 ];
 
+let profileIconPrefetchPromise: Promise<void> | null = null;
+
+export function prefetchProfileIcons() {
+  if (!profileIconPrefetchPromise) {
+    profileIconPrefetchPromise = Promise.all(
+      profileIconOptions.map((option) => Image.loadAsync(option.source).catch(() => null)),
+    ).then(() => undefined);
+  }
+
+  return profileIconPrefetchPromise;
+}
+
 const profileIconSourceByKey = new Map(profileIconOptions.map((option) => [option.key, option.source]));
 
 type ProfileAvatarProps = {

@@ -1,11 +1,11 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 
-import { ProfileAvatar } from '@/components/profile-avatar';
+import { prefetchProfileIcons, ProfileAvatar } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -31,6 +31,10 @@ export default function ProfileScreen() {
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
   const [isLanguageModalVisible, setIsLanguageModalVisible] = useState(false);
   const [isSavingLanguage, setIsSavingLanguage] = useState(false);
+
+  useEffect(() => {
+    void prefetchProfileIcons();
+  }, []);
 
   useFocusEffect(
     useCallback(() => {

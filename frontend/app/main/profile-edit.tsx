@@ -17,7 +17,7 @@ import {
 
 import { BOTTOM_NAVIGATION_RESERVED_HEIGHT } from '@/components/bottom-navigation-bar';
 import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
-import { ProfileAvatar, profileIconOptions, type ProfileIconKey } from '@/components/profile-avatar';
+import { prefetchProfileIcons, ProfileAvatar, profileIconOptions, type ProfileIconKey } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -55,6 +55,8 @@ export default function ProfileEditScreen() {
 
   useEffect(() => {
     let isMounted = true;
+
+    void prefetchProfileIcons();
 
     fetchMe()
       .then((user) => {
