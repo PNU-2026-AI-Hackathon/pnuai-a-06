@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ProfileAvatar } from '@/components/profile-avatar';
+import { LocalizedText as Text } from '@/components/localized-text';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMe } from '@/lib/auth-api';
 import { getLatestMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
@@ -12,6 +13,7 @@ import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/
 import { ClipPath, Defs, Ellipse, Image as SvgImage, Svg } from 'react-native-svg';
 
 const splashText = require('../../assets/svg/logo_text.svg');
+const emptyMagazineImage = require('../../assets/svg/main/sig_home.svg');
 const magazineTitle = require('../../assets/svg/magazine/JUST THE TWO OF US.svg');
 const magazineNumber = require('../../assets/svg/magazine/No.05.svg');
 const singleMagazineTitle = require('../../assets/svg/magazine/THE Starry Night.svg');
@@ -62,6 +64,7 @@ function getResultPhotoUrl(session: MissionSession) {
 export default function MainScreen() {
   const {
     bottomActionInset,
+    centerContentOffset,
     horizontalPadding,
     topInset,
   } = useResponsiveLayout();
@@ -163,6 +166,7 @@ export default function MainScreen() {
   );
 
   const isSingleMagazine = magazinePhotoUrls.length === 1;
+  const shouldShowEmptyMagazine = hasLoadedMagazine && magazinePhotoUrls.length === 0;
   const magazinePhotoSlots = [0, 1, 2].map((index) => magazinePhotoUrls[index] ?? null);
 
   return (
@@ -188,7 +192,15 @@ export default function MainScreen() {
         </Pressable>
       </View>
 
-      {hasLoadedMagazine ? (
+      {shouldShowEmptyMagazine ? (
+        <View style={[styles.emptyMagazineState, { transform: [{ translateY: centerContentOffset }] }]}>
+          <Image source={emptyMagazineImage} style={styles.emptyMagazineImage} contentFit="contain" />
+          <View style={styles.emptyMagazineCopy}>
+            <Text style={styles.emptyMagazineTitle}>첫 번째 매거진을 기다리고 있어요</Text>
+            <Text style={styles.emptyMagazineDescription}>여행을 완료하면 이곳에서 매거진을 확인할 수 있어요.</Text>
+          </View>
+        </View>
+      ) : hasLoadedMagazine ? (
         <Pressable
           disabled={isMagazineLoading || !magazineScheduleId}
           onPress={() => {
@@ -343,6 +355,34 @@ const styles = StyleSheet.create({
     right: '2%',
     width: '35%',
     zIndex: 1,
+  },
+  emptyMagazineState: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  emptyMagazineImage: {
+    height: 180,
+    width: 180,
+  },
+  emptyMagazineCopy: {
+    alignItems: 'center',
+    marginTop: 40,
+    width: '100%',
+  },
+  emptyMagazineTitle: {
+    color: '#10161F',
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  emptyMagazineDescription: {
+    color: '#8A9194',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+    textAlign: 'center',
   },
 
   magazineCopy: {
