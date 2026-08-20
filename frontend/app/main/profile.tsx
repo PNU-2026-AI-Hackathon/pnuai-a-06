@@ -2,7 +2,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 
 import { prefetchProfileIcons, ProfileAvatar } from '@/components/profile-avatar';
@@ -10,7 +10,7 @@ import { ScalePressable } from '@/components/scale-pressable';
 import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { clearAuthSession, deleteCurrentAccount, fetchMe } from '@/lib/auth-api';
-import type { AppLanguage } from '@/lib/language';
+import { translateText, type AppLanguage } from '@/lib/language';
 
 type MenuItem = {
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
@@ -23,6 +23,31 @@ const menuItems: MenuItem[] = [
   { icon: 'bell-outline', label: '알림' },
 ];
 
+function confirmAction(title: string, message: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && window.confirm(`${translateText(title)}\n\n${translateText(message)}`)) {
+      onConfirm();
+    }
+    return;
+  }
+
+  Alert.alert(title, message, [
+    { text: '취소', style: 'cancel' },
+    { text: '확인', style: 'destructive', onPress: onConfirm },
+  ]);
+}
+
+function showActionError(title: string, message: string) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') {
+      window.alert(`${translateText(title)}\n\n${translateText(message)}`);
+    }
+    return;
+  }
+
+  Alert.alert(title, message);
+}
+
 export default function ProfileScreen() {
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
   const { language, setLanguage } = useLanguage();
@@ -34,47 +59,33 @@ export default function ProfileScreen() {
   const [isAccountActionInProgress, setIsAccountActionInProgress] = useState(false);
 
   const handleLogout = () => {
-    Alert.alert('로그아웃', '현재 기기에서 로그아웃할까요?', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '로그아웃',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            setIsAccountActionInProgress(true);
-            try {
-              await clearAuthSession();
-              router.replace('/login');
-            } finally {
-              setIsAccountActionInProgress(false);
-            }
-          })();
-        },
-      },
-    ]);
+    confirmAction('로그아웃', '현재 기기에서 로그아웃할까요?', () => {
+      void (async () => {
+        setIsAccountActionInProgress(true);
+        try {
+          await clearAuthSession();
+          router.replace('/login');
+        } finally {
+          setIsAccountActionInProgress(false);
+        }
+      })();
+    });
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert('계정 탈퇴', '계정을 탈퇴하면 프로필과 서비스 이용 정보가 삭제됩니다. 계속할까요?', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '탈퇴하기',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            setIsAccountActionInProgress(true);
-            try {
-              await deleteCurrentAccount();
-              router.replace('/login');
-            } catch (error) {
-              Alert.alert('탈퇴 실패', error instanceof Error ? error.message : '계정 탈퇴에 실패했습니다.');
-            } finally {
-              setIsAccountActionInProgress(false);
-            }
-          })();
-        },
-      },
-    ]);
+    confirmAction('계정 탈퇴', '계정을 탈퇴하면 프로필과 서비스 이용 정보가 삭제됩니다. 계속할까요?', () => {
+      void (async () => {
+        setIsAccountActionInProgress(true);
+        try {
+          await deleteCurrentAccount();
+          router.replace('/login');
+        } catch (error) {
+          showActionError('탈퇴 실패', error instanceof Error ? error.message : '계정 탈퇴에 실패했습니다.');
+        } finally {
+          setIsAccountActionInProgress(false);
+        }
+      })();
+    });
   };
 
   useEffect(() => {

@@ -57,6 +57,21 @@ export function getLoginErrorMessage(error: unknown) {
   }
 
   if (
+    normalizedMessage.includes('invalid email, password, or unverified email') ||
+    normalizedMessage.includes('not registered') ||
+    normalizedMessage.includes('email not found') ||
+    normalizedMessage.includes('account not found') ||
+    normalizedMessage.includes('user not found') ||
+    normalizedMessage.includes('does not exist') ||
+    normalizedMessage.includes('no account') ||
+    message.includes('가입된 이메일이 없습니다') ||
+    message.includes('등록되지 않은 이메일') ||
+    message.includes('가입되지 않은 이메일')
+  ) {
+    return '입력하신 이메일로 가입된 계정을 찾을 수 없어요. 먼저 회원가입을 진행해 주세요.';
+  }
+
+  if (
     normalizedMessage.includes('not verified') ||
     normalizedMessage.includes('not verify') ||
     normalizedMessage.includes('verification') ||

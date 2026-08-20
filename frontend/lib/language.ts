@@ -8,6 +8,13 @@ const LANGUAGE_STORAGE_KEY = 'app_language';
 
 const translations: Record<string, string> = {
   '가입된 이메일이 없습니다.': 'This email is not registered.',
+  '입력하신 이메일로 가입된 계정을 찾을 수 없어요. 먼저 회원가입을 진행해 주세요.':
+    'We couldn’t find an account with this email. Please sign up first.',
+  '현재 기기에서 로그아웃할까요?': 'Log out on this device?',
+  '계정을 탈퇴하면 프로필과 서비스 이용 정보가 삭제됩니다. 계속할까요?':
+    'Deleting your account will remove your profile and service data. Continue?',
+  '탈퇴 실패': 'Account deletion failed',
+  '계정 탈퇴에 실패했습니다.': 'Failed to delete the account.',
   '계정 탈퇴': 'Delete account',
   '개 미션으로 매거진 만들기': ' missions',
   '삭제': 'Delete',
