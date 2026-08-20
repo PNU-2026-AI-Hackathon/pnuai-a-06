@@ -36,6 +36,15 @@ function getSecureStore() {
 }
 
 export const MISSION_COMPLETION_PENDING_KEY = 'mission_completion_alert_pending';
+export const DELETED_ACCOUNT_EMAIL_KEY = 'deleted_account_email';
+
+export function markDeletedAccountEmail(email: string) {
+  setAuthItem(DELETED_ACCOUNT_EMAIL_KEY, email.trim().toLowerCase());
+}
+
+export function clearDeletedAccountEmail() {
+  return deletePersistentAuthItem(DELETED_ACCOUNT_EMAIL_KEY);
+}
 
 export function setAuthItem(key: string, value: string) {
   if (Platform.OS === 'web') {

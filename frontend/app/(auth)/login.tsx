@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { login as loginWithKakao } from '@react-native-seoul/kakao-login';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,27 +19,31 @@ import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import {
   API_BASE_URL,
+  confirmPasswordReset,
   loginWithEmail,
   loginWithKakaoAccessToken,
   registerWithEmail,
+  requestPasswordReset,
   saveAuthTokens,
   verifyEmail,
 } from '@/lib/auth-api';
 import { getLoginErrorMessage, getRegisterErrorMessage, getRequestErrorMessage } from '@/lib/auth-error';
 import { getPasswordMatchState, isValidEmail, isValidPassword } from '@/lib/auth-validation';
+import { clearDeletedAccountEmail } from '@/lib/auth-storage';
 
 const kakaoTalk = require('../../assets/svg/kakaotalk.svg');
 const splashMap = require('../../assets/svg/splash_map.svg');
 const splashText = require('../../assets/svg/logo_text.svg');
 
-type AuthMode = 'home' | 'login' | 'register' | 'verify';
+type AuthMode = 'home' | 'login' | 'register' | 'verify' | 'resetRequest' | 'resetConfirm';
 
 const MATCH_COLOR = '#409CB7';
 const MISMATCH_COLOR = '#B74040';
 
 export default function LoginScreen() {
+  const params = useLocalSearchParams<{ mode?: string }>();
   const { bottomActionInset, bottomSafeInset, horizontalPadding, topInset } = useResponsiveLayout();
-  const [mode, setMode] = useState<AuthMode>('home');
+  const [mode, setMode] = useState<AuthMode>(() => (params.mode === 'reset' ? 'resetRequest' : 'home'));
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -85,7 +89,7 @@ export default function LoginScreen() {
       resetMessage();
       await completeLogin(autoLogin);
     } catch (error) {
-      setMessage(getLoginErrorMessage(error));
+      setMessage(getLoginErrorMessage(error, email));
     } finally {
       setIsSubmitting(false);
     }
@@ -116,6 +120,7 @@ export default function LoginScreen() {
       setIsSubmitting(true);
       resetMessage();
       await registerWithEmail(email.trim(), password, name.trim());
+      await clearDeletedAccountEmail();
       setMode('verify');
       setMessage('이메일로 받은 인증 코드를 입력해주세요.');
     } catch (error) {
@@ -136,6 +141,67 @@ export default function LoginScreen() {
       resetMessage();
       await verifyEmail(email.trim(), verificationCode.trim());
       await completeLogin();
+    } catch (error) {
+      setMessage(getRequestErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePasswordResetRequest = async () => {
+    if (!email.trim()) {
+      setMessage('이메일 주소를 입력해주세요.');
+      return;
+    }
+
+    if (!isValidEmail(email)) {
+      setMessage('올바른 이메일 형식으로 입력해 주세요.');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      resetMessage();
+      await requestPasswordReset(email.trim());
+      setMode('resetConfirm');
+      setMessage('인증 코드를 이메일로 전송했어요.');
+    } catch (error) {
+      setMessage(getRequestErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePasswordResetConfirm = async () => {
+    if (!email.trim() || !verificationCode.trim() || !password || !passwordConfirmation) {
+      setMessage('모든 항목을 입력해주세요.');
+      return;
+    }
+
+    if (verificationCode.trim().length !== 6) {
+      setMessage('인증 코드는 6자리로 입력해주세요.');
+      return;
+    }
+
+    if (!isValidPassword(password)) {
+      setMessage('비밀번호는 영문·숫자 포함 8자 이상이어야 합니다.');
+      return;
+    }
+
+    if (password !== passwordConfirmation) {
+      setMessage('비밀번호가 일치하지 않아요.');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      resetMessage();
+      await confirmPasswordReset(email.trim(), verificationCode.trim(), password);
+      setPassword('');
+      setPasswordConfirmation('');
+      setVerificationCode('');
+      setMode('login');
+      setMessage('비밀번호가 변경되었어요. 새 비밀번호로 로그인해 주세요.');
     } catch (error) {
       setMessage(getRequestErrorMessage(error));
     } finally {
@@ -170,6 +236,7 @@ export default function LoginScreen() {
   const openMode = (nextMode: AuthMode) => {
     resetMessage();
     setVerificationCode('');
+    setPassword('');
     setPasswordConfirmation('');
     if (nextMode !== 'register') {
       setName('');
@@ -180,6 +247,15 @@ export default function LoginScreen() {
   const handleBack = () => {
     if (mode === 'verify') {
       setMode('register');
+      resetMessage();
+      return;
+    }
+
+    if (mode === 'resetConfirm') {
+      setMode('resetRequest');
+      setVerificationCode('');
+      setPassword('');
+      setPasswordConfirmation('');
       resetMessage();
       return;
     }
@@ -222,6 +298,10 @@ export default function LoginScreen() {
             <ScalePressable disabled={isSubmitting} onPress={() => openMode('login')} pressedScale={0.95}>
               <Text style={styles.homeLinkText}>이메일 로그인</Text>
             </ScalePressable>
+            <View style={styles.homeDivider} />
+            <ScalePressable disabled={isSubmitting} onPress={() => openMode('resetRequest')} pressedScale={0.95}>
+              <Text style={styles.homeLinkText}>비밀번호 변경</Text>
+            </ScalePressable>
           </View>
         </View>
       </View>
@@ -229,9 +309,29 @@ export default function LoginScreen() {
   }
 
   const isVerifyMode = mode === 'verify';
+  const isPasswordResetRequestMode = mode === 'resetRequest';
+  const isPasswordResetConfirmMode = mode === 'resetConfirm';
   const isRegisterMode = mode === 'register';
-  const submitAuth = mode === 'login' ? handleLogin : mode === 'register' ? handleRegister : handleVerify;
-  const buttonText = mode === 'login' ? '로그인' : mode === 'register' ? '회원가입' : '인증하고 시작하기';
+  const submitAuth =
+    mode === 'login'
+      ? handleLogin
+      : mode === 'register'
+        ? handleRegister
+        : mode === 'verify'
+          ? handleVerify
+          : mode === 'resetRequest'
+            ? handlePasswordResetRequest
+            : handlePasswordResetConfirm;
+  const buttonText =
+    mode === 'login'
+      ? '로그인'
+      : mode === 'register'
+        ? '회원가입'
+        : mode === 'verify'
+          ? '인증하고 시작하기'
+          : mode === 'resetRequest'
+            ? '인증 코드 받기'
+            : '비밀번호 변경하기';
   const isKeyboardVisible = keyboardHeight > 0;
   const authBottomInset = isKeyboardVisible ? 0 : Math.max(bottomSafeInset, 12);
   const keyboardScrollPadding = isKeyboardVisible ? Math.max(keyboardHeight - topInset, 120) : 28;
@@ -266,7 +366,15 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.formArea}>
-          <Text style={styles.title}>{mode === 'login' ? '로그인' : mode === 'register' ? '회원가입' : '이메일 인증'}</Text>
+          <Text style={styles.title}>
+            {mode === 'login'
+              ? '로그인'
+              : mode === 'register'
+                ? '회원가입'
+                : mode === 'verify'
+                  ? '이메일 인증'
+                  : '비밀번호 재설정'}
+          </Text>
 
           {isVerifyMode ? (
             <>
@@ -279,6 +387,68 @@ export default function LoginScreen() {
                 placeholderTextColor="#92989C"
                 style={styles.input}
                 value={verificationCode}
+              />
+            </>
+          ) : isPasswordResetRequestMode ? (
+            <>
+              <Text style={styles.verifyDescription}>비밀번호를 변경하려면 이메일 인증이 필요해요.</Text>
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isSubmitting}
+                keyboardType="email-address"
+                onChangeText={setEmail}
+                onFocus={keepFocusedInputVisible}
+                placeholder="이메일 주소"
+                placeholderTextColor="#92989C"
+                style={styles.input}
+                value={email}
+              />
+            </>
+          ) : isPasswordResetConfirmMode ? (
+            <>
+              <Text style={styles.verifyDescription}>이메일로 받은 인증 코드와 새 비밀번호를 입력해주세요.</Text>
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isSubmitting}
+                keyboardType="email-address"
+                onChangeText={setEmail}
+                onFocus={keepFocusedInputVisible}
+                placeholder="이메일 주소"
+                placeholderTextColor="#92989C"
+                style={styles.input}
+                value={email}
+              />
+              <TextInput
+                editable={!isSubmitting}
+                keyboardType="number-pad"
+                onChangeText={setVerificationCode}
+                onFocus={keepFocusedInputVisible}
+                placeholder="인증 코드 6자리"
+                placeholderTextColor="#92989C"
+                style={styles.input}
+                value={verificationCode}
+              />
+              <TextInput
+                editable={!isSubmitting}
+                onChangeText={setPassword}
+                onFocus={keepFocusedInputVisible}
+                placeholder="새 비밀번호"
+                placeholderTextColor="#92989C"
+                secureTextEntry
+                style={styles.input}
+                value={password}
+              />
+              <TextInput
+                editable={!isSubmitting}
+                onChangeText={setPasswordConfirmation}
+                onFocus={keepFocusedInputVisible}
+                placeholder="새 비밀번호를 다시 입력해 주세요"
+                placeholderTextColor="#92989C"
+                secureTextEntry
+                style={styles.input}
+                value={passwordConfirmation}
               />
             </>
           ) : (

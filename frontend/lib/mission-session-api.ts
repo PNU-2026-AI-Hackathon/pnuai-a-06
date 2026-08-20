@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
 import { getAuthItem } from '@/lib/auth-storage';
 import { getCurrentLanguage, getLanguageHeaders } from '@/lib/language';
@@ -576,11 +578,22 @@ export async function uploadMissionSessionPhoto(sessionId: string, photoUri: str
   const token = getAccessToken();
   const formData = new FormData();
 
-  formData.append('photo', {
-    name: `mission-${sessionId}.jpg`,
-    type: 'image/jpeg',
-    uri: photoUri,
-  } as unknown as Blob);
+  if (Platform.OS === 'web') {
+    const photoResponse = await fetch(photoUri);
+
+    if (!photoResponse.ok) {
+      throw new Error('촬영한 사진을 불러오지 못했습니다. 다시 촬영해 주세요.');
+    }
+
+    const photoBlob = await photoResponse.blob();
+    formData.append('photo', photoBlob, `mission-${sessionId}.jpg`);
+  } else {
+    formData.append('photo', {
+      name: `mission-${sessionId}.jpg`,
+      type: 'image/jpeg',
+      uri: photoUri,
+    } as unknown as Blob);
+  }
 
   const { controller, timer } = createRequestTimeout(30000);
 

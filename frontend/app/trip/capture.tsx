@@ -113,6 +113,7 @@ export default function MissionCaptureScreen() {
   const missionCardTranslateY = useRef(new Animated.Value(0)).current;
   const missionCardOffsetY = useRef(0);
   const isFinishingSoloMission = useRef(false);
+  const hasNavigatedAway = useRef(false);
   const { bottomSafeInset, height, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>('back');
@@ -214,13 +215,24 @@ export default function MissionCaptureScreen() {
       return;
     }
 
+    let isActive = true;
+
     const applyTimeoutSession = (nextSession: MissionSession) => {
+      if (!isActive) {
+        return;
+      }
+
       setSession(nextSession);
       const myMember = nextSession.members.find((member) => member.userId === getAuthItem('user_id'));
       const hasTimedOut = myMember?.participationStatus === 'TIMED_OUT';
       const isCancelled = nextSession.status === 'CANCELLED';
 
       if (isCancelled) {
+        if (hasNavigatedAway.current) {
+          return;
+        }
+
+        hasNavigatedAway.current = true;
         router.replace({
           pathname: '/trip/active',
           ...(scheduleId ? { params: { scheduleId } } : {}),
@@ -229,6 +241,11 @@ export default function MissionCaptureScreen() {
       }
 
       if (hasTimedOut && ['REVEALED', 'VOTING', 'COMPLETED'].includes(nextSession.status)) {
+        if (hasNavigatedAway.current) {
+          return;
+        }
+
+        hasNavigatedAway.current = true;
         router.replace({
           pathname: '/trip/review',
           params: {
@@ -254,6 +271,7 @@ export default function MissionCaptureScreen() {
     }, 1500);
 
     return () => {
+      isActive = false;
       clearInterval(timer);
       socket.close();
     };
@@ -301,11 +319,12 @@ export default function MissionCaptureScreen() {
   }, [scheduleId, scheduleMissionId]);
 
   const finishPassedJudgement = useCallback(async (passedSessionId: string, passedSession?: MissionSession | null) => {
-    if (isFinishingSoloMission.current) {
+    if (isFinishingSoloMission.current || hasNavigatedAway.current) {
       return;
     }
 
     isFinishingSoloMission.current = true;
+    hasNavigatedAway.current = true;
     setJudgementSessionId(null);
     setIsMissionComplete(true);
 
@@ -433,6 +452,11 @@ export default function MissionCaptureScreen() {
     }
 
     if (returnCountdown <= 0) {
+      if (hasNavigatedAway.current) {
+        return;
+      }
+
+      hasNavigatedAway.current = true;
       if (scheduleId) {
         router.replace({
           pathname: '/trip/active',

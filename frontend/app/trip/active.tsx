@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import * as Linking from 'expo-linking';
@@ -284,6 +284,10 @@ function getScheduleSyncSignature(schedule: TripSchedule) {
   });
 }
 
+function hasSameMissionSessionSnapshot(left: MissionSession | undefined, right: MissionSession) {
+  return Boolean(left && JSON.stringify(left) === JSON.stringify(right));
+}
+
 export default function ActiveTripScreen() {
   const params = useLocalSearchParams<{
     scheduleId?: string | string[];
@@ -295,6 +299,7 @@ export default function ActiveTripScreen() {
   const suppressedParticipationSessionId = getParamValue(params.suppressedParticipationSessionId);
   const currentUserId = getAuthItem('user_id');
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
+  const isFocused = useIsFocused();
   const [schedule, setSchedule] = useState<TripSchedule | null>(null);
   const [revealedSessions, setRevealedSessions] = useState<Record<string, MissionSession>>({});
   const [missionSessions, setMissionSessions] = useState<Record<string, MissionSession>>({});
@@ -316,6 +321,7 @@ export default function ActiveTripScreen() {
   const revealedSessionsRef = useRef<Record<string, MissionSession>>({});
   const pendingMissionLocationRef = useRef<MissionParticipationLocation | null>(null);
   const leaderStartingMissionRef = useRef(false);
+  const openingParticipationSessionIdRef = useRef<string | null>(null);
   const suppressedLeaderSessionIdsRef = useRef(new Set<string>());
   const missions = useMemo(() => schedule?.missions ?? [], [schedule]);
   const [todayDay, setTodayDay] = useState(() => getCalendarDayNumber(new Date()));
@@ -376,6 +382,10 @@ export default function ActiveTripScreen() {
     }
 
     if (nextSession.status === 'CANCELLED') {
+      if (!missionSessionsRef.current[scheduleMissionId] && !revealedSessionsRef.current[scheduleMissionId]) {
+        return;
+      }
+
       delete missionSessionsRef.current[scheduleMissionId];
       setMissionSessions((currentSessions) => {
         const nextSessions = { ...currentSessions };
@@ -399,15 +409,27 @@ export default function ActiveTripScreen() {
       scheduleMissionId,
     };
     const mergedMissionSession = mergeMissionSessions(missionSessionsRef.current[scheduleMissionId], normalizedIncomingSession);
+    const hasMissionSessionChanged = !hasSameMissionSessionSnapshot(missionSessionsRef.current[scheduleMissionId], mergedMissionSession);
 
-    missionSessionsRef.current = {
-      ...missionSessionsRef.current,
-      [scheduleMissionId]: mergedMissionSession,
-    };
-    setMissionSessions((currentSessions) => ({
-      ...currentSessions,
-      [scheduleMissionId]: mergeMissionSessions(currentSessions[scheduleMissionId], mergedMissionSession),
-    }));
+    if (hasMissionSessionChanged) {
+      missionSessionsRef.current = {
+        ...missionSessionsRef.current,
+        [scheduleMissionId]: mergedMissionSession,
+      };
+      setMissionSessions((currentSessions) => {
+        const currentSession = currentSessions[scheduleMissionId];
+        const nextSessions = mergeMissionSessions(currentSession, mergedMissionSession);
+
+        if (hasSameMissionSessionSnapshot(currentSession, nextSessions)) {
+          return currentSessions;
+        }
+
+        return {
+          ...currentSessions,
+          [scheduleMissionId]: nextSessions,
+        };
+      });
+    }
 
 
     const shouldShowInFeed = isFeedReadySession(mergedMissionSession, requiredScheduleMemberCount) && getFeedSubmissions(mergedMissionSession).length > 0;
@@ -417,6 +439,10 @@ export default function ActiveTripScreen() {
     }
 
     const normalizedSession = mergeMissionSessions(revealedSessionsRef.current[scheduleMissionId], mergedMissionSession);
+    if (hasSameMissionSessionSnapshot(revealedSessionsRef.current[scheduleMissionId], normalizedSession)) {
+      return;
+    }
+
     const nextRevealedSessions = {
       ...revealedSessionsRef.current,
       [scheduleMissionId]: normalizedSession,
@@ -433,7 +459,7 @@ export default function ActiveTripScreen() {
   }, [requiredScheduleMemberCount, scheduleId]);
 
   useEffect(() => {
-    if (!activeBlockingSession?.id) {
+    if (!activeBlockingSession?.id || !isFocused) {
       return;
     }
 
@@ -449,15 +475,10 @@ export default function ActiveTripScreen() {
       },
     });
 
-    const refreshTimer = setInterval(() => {
-      void getMissionSession(activeSessionId).then((nextSession) => rememberFeedSession(nextSession)).catch(() => undefined);
-    }, 1000);
-
     return () => {
-      clearInterval(refreshTimer);
       socket.close();
     };
-  }, [activeBlockingSession?.id, rememberFeedSession]);
+  }, [activeBlockingSession?.id, isFocused, rememberFeedSession]);
 
 
 
@@ -564,7 +585,7 @@ export default function ActiveTripScreen() {
   useFocusEffect(refreshSchedule);
 
   useEffect(() => {
-    if (!scheduleId) {
+    if (!scheduleId || !isFocused) {
       return;
     }
 
@@ -578,10 +599,12 @@ export default function ActiveTripScreen() {
         || nextSession.id === suppressedParticipationSessionId
         || !['WAITING', 'READY'].includes(nextSession.status)
         || hasLeftMissionParticipation(myMember)
+        || openingParticipationSessionIdRef.current === nextSession.id
       ) {
         return;
       }
 
+      openingParticipationSessionIdRef.current = nextSession.id;
       rememberFeedSession(nextSession);
       const scheduleMission = schedule?.missions.find((mission) => mission.scheduleMissionId === nextSession.scheduleMissionId);
       router.replace({
@@ -620,7 +643,7 @@ export default function ActiveTripScreen() {
     return () => {
       socket.close();
     };
-  }, [currentUserId, rememberFeedSession, schedule, scheduleId, suppressedParticipationSessionId]);
+  }, [currentUserId, isFocused, rememberFeedSession, schedule, scheduleId, suppressedParticipationSessionId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -682,14 +705,9 @@ export default function ActiveTripScreen() {
 
       void syncSchedule();
       void syncActiveMissionSession();
-      const syncTimer = setInterval(() => {
-        void syncSchedule();
-        void syncActiveMissionSession();
-      }, 1000);
 
       return () => {
         isActive = false;
-        clearInterval(syncTimer);
       };
     }, [rememberFeedSession, scheduleId])
   );

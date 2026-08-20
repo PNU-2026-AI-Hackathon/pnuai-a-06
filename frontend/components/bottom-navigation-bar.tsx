@@ -108,6 +108,12 @@ function toActiveMissionTarget(scheduleId: string, session: MissionSession): Act
   };
 }
 
+function areActiveMissionTargetsEqual(left: ActiveMissionTarget | null, right: ActiveMissionTarget | null) {
+  return left?.scheduleId === right?.scheduleId
+    && left?.scheduleMissionId === right?.scheduleMissionId
+    && left?.sessionId === right?.sessionId;
+}
+
 export function BottomNavigationBar() {
   const pathname = usePathname();
   const params = useLocalSearchParams<{ scheduleId?: string | string[] }>();
@@ -131,7 +137,8 @@ export function BottomNavigationBar() {
       if (currentScheduleId) {
         try {
           const session = await getActiveMissionSession(currentScheduleId);
-          setActiveMission(toActiveMissionTarget(currentScheduleId, session));
+          const nextActiveMission = toActiveMissionTarget(currentScheduleId, session);
+          setActiveMission((currentActiveMission) => areActiveMissionTargetsEqual(currentActiveMission, nextActiveMission) ? currentActiveMission : nextActiveMission);
           return;
         } catch {
           setActiveMission(null);
@@ -157,7 +164,8 @@ export function BottomNavigationBar() {
         })
       );
 
-      setActiveMission(activeTargets.find((target): target is ActiveMissionTarget => target !== null) ?? null);
+      const nextActiveMission = activeTargets.find((target): target is ActiveMissionTarget => target !== null) ?? null;
+      setActiveMission((currentActiveMission) => areActiveMissionTargetsEqual(currentActiveMission, nextActiveMission) ? currentActiveMission : nextActiveMission);
     } finally {
       setIsCheckingMission(false);
     }

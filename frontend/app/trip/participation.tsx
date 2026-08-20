@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useIsFocused } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
@@ -64,6 +65,7 @@ export default function MissionParticipationScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState('');
+  const isFocused = useIsFocused();
   const hasNavigated = useRef(false);
   const leaderParticipationRequested = useRef(false);
   const soloStartRequested = useRef(false);
@@ -102,13 +104,15 @@ export default function MissionParticipationScreen() {
   const applySession = useCallback((nextSession: MissionSession) => {
     setSession(nextSession);
     if (nextSession.status === 'COMPLETED' || nextSession.status === 'CANCELLED') {
-      if (scheduleId) {
+      if (isFocused && scheduleId && !hasNavigated.current) {
+        hasNavigated.current = true;
         router.replace({ pathname: '/trip/active', params: { scheduleId } });
       }
       return;
     }
     const nextMember = nextSession.members.find((member) => member.userId === currentUserId);
-    if (scheduleId && hasLeftParticipation(nextMember?.participationStatus)) {
+    if (isFocused && scheduleId && hasLeftParticipation(nextMember?.participationStatus) && !hasNavigated.current) {
+      hasNavigated.current = true;
       router.replace({
         pathname: '/trip/active',
         params: { scheduleId, suppressedParticipationSessionId: nextSession.id },
@@ -118,7 +122,7 @@ export default function MissionParticipationScreen() {
     if (nextSession.status === 'SHOOTING' || nextSession.status === 'UPLOADING') {
       navigateToCapture(nextSession);
     }
-  }, [currentUserId, navigateToCapture, scheduleId]);
+  }, [currentUserId, isFocused, navigateToCapture, scheduleId]);
 
   useEffect(() => {
     if (

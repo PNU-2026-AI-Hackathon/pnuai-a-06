@@ -250,6 +250,14 @@ export function verifyEmail(email: string, code: string) {
   return postJson('/auth/email/verify', { code, email });
 }
 
+export function requestPasswordReset(email: string) {
+  return postJson('/auth/email/password-reset/request', { email });
+}
+
+export function confirmPasswordReset(email: string, code: string, newPassword: string) {
+  return postJson('/auth/email/password-reset/confirm', { code, email, new_password: newPassword });
+}
+
 export function loginWithEmail(email: string, password: string) {
   // 이메일 로그인 요청
   return postJson<AuthTokens>('/auth/email/login', { email, password });

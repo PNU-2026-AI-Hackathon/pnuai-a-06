@@ -10,6 +10,7 @@ import { ScalePressable } from '@/components/scale-pressable';
 import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { clearAuthSession, deleteCurrentAccount, fetchMe } from '@/lib/auth-api';
+import { markDeletedAccountEmail } from '@/lib/auth-storage';
 import { translateText, type AppLanguage } from '@/lib/language';
 
 type MenuItem = {
@@ -52,6 +53,7 @@ export default function ProfileScreen() {
   const { bottomActionInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
   const { language, setLanguage } = useLanguage();
   const [nickname, setNickname] = useState('사용자');
+  const [email, setEmail] = useState('');
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
   const [isLanguageModalVisible, setIsLanguageModalVisible] = useState(false);
@@ -78,6 +80,9 @@ export default function ProfileScreen() {
         setIsAccountActionInProgress(true);
         try {
           await deleteCurrentAccount();
+          if (email) {
+            markDeletedAccountEmail(email);
+          }
           router.replace('/login');
         } catch (error) {
           showActionError('탈퇴 실패', error instanceof Error ? error.message : '계정 탈퇴에 실패했습니다.');
@@ -99,6 +104,7 @@ export default function ProfileScreen() {
       fetchMe()
         .then((user) => {
           if (isActive) {
+            setEmail(user.email?.trim() || '');
             setNickname(user.nickname?.trim() || '사용자');
             setProfileImageUrl(user.profile_image_url);
             setProfileEmoji(user.profile_emoji);
@@ -222,6 +228,18 @@ export default function ProfileScreen() {
             </ScalePressable>
           ))}
           <View style={styles.menuDivider} />
+          <ScalePressable
+            accessibilityRole="button"
+            disabled={isAccountActionInProgress}
+            onPress={() => router.push({ pathname: '/login', params: { mode: 'reset' } })}
+            pressedScale={0.98}
+            style={styles.menuRow}>
+            <View style={styles.menuLeft}>
+              <MaterialCommunityIcons color="#10161F" name="lock-reset" size={25} />
+              <Text style={styles.menuText}>비밀번호 변경</Text>
+            </View>
+            <MaterialCommunityIcons color="#10161F" name="chevron-right" size={30} />
+          </ScalePressable>
           <ScalePressable
             accessibilityRole="button"
             disabled={isAccountActionInProgress}

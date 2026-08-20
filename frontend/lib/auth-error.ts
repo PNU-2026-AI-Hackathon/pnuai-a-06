@@ -1,3 +1,5 @@
+import { DELETED_ACCOUNT_EMAIL_KEY, getAuthItem } from '@/lib/auth-storage';
+
 export function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message;
@@ -48,16 +50,19 @@ export function getRegisterErrorMessage(error: unknown) {
   return message;
 }
 
-export function getLoginErrorMessage(error: unknown) {
+export function getLoginErrorMessage(error: unknown, email?: string) {
   const message = getRequestErrorMessage(error);
   const normalizedMessage = message.toLowerCase();
+  const deletedAccountEmail = getAuthItem(DELETED_ACCOUNT_EMAIL_KEY);
+  const isKnownDeletedAccount = Boolean(
+    email?.trim() && deletedAccountEmail && email.trim().toLowerCase() === deletedAccountEmail,
+  );
 
   if (message === '네트워크 연결이 불안정합니다. 다시 시도해 주세요.') {
     return message;
   }
 
   if (
-    normalizedMessage.includes('invalid email, password, or unverified email') ||
     normalizedMessage.includes('not registered') ||
     normalizedMessage.includes('email not found') ||
     normalizedMessage.includes('account not found') ||
@@ -66,7 +71,8 @@ export function getLoginErrorMessage(error: unknown) {
     normalizedMessage.includes('no account') ||
     message.includes('가입된 이메일이 없습니다') ||
     message.includes('등록되지 않은 이메일') ||
-    message.includes('가입되지 않은 이메일')
+    message.includes('가입되지 않은 이메일') ||
+    (isKnownDeletedAccount && normalizedMessage.includes('invalid email, password, or unverified email'))
   ) {
     return '입력하신 이메일로 가입된 계정을 찾을 수 없어요. 먼저 회원가입을 진행해 주세요.';
   }
