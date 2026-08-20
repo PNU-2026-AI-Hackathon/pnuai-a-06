@@ -39,12 +39,6 @@ const categoryItems = [
     label: '도시',
     value: 'CITY',
   },
-  {
-    icon: require('../../assets/svg/theme_icon/flag.svg'),
-    selectedIcon: require('../../assets/svg/theme_icon/flag_filled.svg'),
-    label: '획득',
-    value: 'ACQUIRED',
-  },
 ] satisfies { icon: number; selectedIcon: number; label: string; value: CategoryValue }[];
 
 // 구 별 지도 터치 위치
