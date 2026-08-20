@@ -114,6 +114,7 @@ export default function MissionCaptureScreen() {
   const missionCardOffsetY = useRef(0);
   const isFinishingSoloMission = useRef(false);
   const hasNavigatedAway = useRef(false);
+  const timeoutRefreshKey = useRef<string | null>(null);
   const { bottomSafeInset, height, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>('back');
@@ -211,7 +212,7 @@ export default function MissionCaptureScreen() {
   }, [scheduleId, scheduleMissionId, sessionId]);
 
   useEffect(() => {
-    if (!sessionId || judgementSessionId) {
+    if (!sessionId) {
       return;
     }
 
@@ -228,6 +229,19 @@ export default function MissionCaptureScreen() {
       const isCancelled = nextSession.status === 'CANCELLED';
 
       if (isCancelled) {
+        if (hasNavigatedAway.current) {
+          return;
+        }
+
+        hasNavigatedAway.current = true;
+        router.replace({
+          pathname: '/trip/active',
+          ...(scheduleId ? { params: { scheduleId } } : {}),
+        });
+        return;
+      }
+
+      if (hasTimedOut && nextSession.members.length === 1) {
         if (hasNavigatedAway.current) {
           return;
         }
@@ -275,7 +289,45 @@ export default function MissionCaptureScreen() {
       clearInterval(timer);
       socket.close();
     };
-  }, [judgementSessionId, scheduleId, sessionId]);
+  }, [scheduleId, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || !session) {
+      return;
+    }
+
+    const isDeadlineExpired = capturedPhotoUri ? isUploadExpired : isShootingExpired;
+    if (!isDeadlineExpired) {
+      timeoutRefreshKey.current = null;
+      return;
+    }
+
+    const deadline = capturedPhotoUri
+      ? session.photoUploadEndsAt ?? session.shootingEndsAt
+      : session.shootingEndsAt ?? session.photoUploadEndsAt;
+    const refreshKey = `${session.id}:${capturedPhotoUri ? 'upload' : 'shooting'}:${deadline ?? 'unknown'}`;
+    if (timeoutRefreshKey.current === refreshKey) {
+      return;
+    }
+
+    timeoutRefreshKey.current = refreshKey;
+    void getMissionSession(sessionId).then((nextSession) => {
+      setSession(nextSession);
+
+      const currentUserId = getAuthItem('user_id');
+      const hasActiveSubmission = nextSession.submissions.some((submission) => (
+        submission.userId === currentUserId && !isRetryableJudgementStatus(submission.judgeStatus)
+      ));
+
+      if (nextSession.members.length === 1 && !hasActiveSubmission && !hasNavigatedAway.current) {
+        hasNavigatedAway.current = true;
+        router.replace({
+          pathname: '/trip/active',
+          ...(scheduleId ? { params: { scheduleId } } : {}),
+        });
+      }
+    }).catch(() => undefined);
+  }, [capturedPhotoUri, isShootingExpired, isUploadExpired, scheduleId, session, sessionId]);
   useEffect(() => {
     if (!scheduleId || !scheduleMissionId) {
       setMission(null);

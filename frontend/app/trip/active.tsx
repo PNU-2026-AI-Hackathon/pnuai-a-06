@@ -100,7 +100,28 @@ function getCompletedParticipantIds(session: MissionSession) {
 }
 
 function isFinishedSession(session: MissionSession | undefined) {
-  return Boolean(session && (session.status === 'COMPLETED' || session.status === 'CANCELLED'));
+  const soloMember = session?.members.length === 1 ? session.members[0] : undefined;
+  const isSoloTimedOut = Boolean(
+    soloMember?.participationStatus === 'TIMED_OUT'
+      || (
+        soloMember
+        && session
+        && session.status !== 'COMPLETED'
+        && session.status !== 'CANCELLED'
+        && !session.submissions.some((submission) => (
+          submission.userId === soloMember.userId
+          && submission.judgeStatus !== 'REJECTED'
+          && submission.judgeStatus !== 'ERROR'
+        ))
+        && (() => {
+          const deadline = session.photoUploadEndsAt ?? session.shootingEndsAt;
+          const deadlineTime = deadline ? new Date(deadline).getTime() : NaN;
+          return Number.isFinite(deadlineTime) && deadlineTime <= Date.now();
+        })()
+      ),
+  );
+
+  return Boolean(session && (session.status === 'COMPLETED' || session.status === 'CANCELLED' || isSoloTimedOut));
 }
 
 function hasAllPassedMemberSubmissions(session: MissionSession, requiredMemberCount: number) {

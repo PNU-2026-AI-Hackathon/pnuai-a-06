@@ -14,6 +14,7 @@ import {
   cancelMissionSession,
   connectMissionSessionSocket,
   getMissionSession,
+  isMissionSessionNotFoundError,
   MissionSessionApiError,
   startMissionSession,
   type MissionParticipationStatus,
@@ -101,28 +102,44 @@ export default function MissionParticipationScreen() {
     });
   }, [currentUserId, scheduleId]);
 
+  const goBack = useCallback(() => {
+    if (scheduleId) {
+      router.replace({
+        pathname: '/trip/active',
+        params: {
+          scheduleId,
+          ...(sessionId ? { suppressedParticipationSessionId: sessionId } : {}),
+        },
+      });
+    } else {
+      router.back();
+    }
+  }, [scheduleId, sessionId]);
+
+  const returnToActiveAfterMissingSession = useCallback(() => {
+    if (!isFocused || hasNavigated.current) {
+      return;
+    }
+
+    hasNavigated.current = true;
+    goBack();
+  }, [goBack, isFocused]);
+
   const applySession = useCallback((nextSession: MissionSession) => {
     setSession(nextSession);
     if (nextSession.status === 'COMPLETED' || nextSession.status === 'CANCELLED') {
-      if (isFocused && scheduleId && !hasNavigated.current) {
-        hasNavigated.current = true;
-        router.replace({ pathname: '/trip/active', params: { scheduleId } });
-      }
+      returnToActiveAfterMissingSession();
       return;
     }
     const nextMember = nextSession.members.find((member) => member.userId === currentUserId);
-    if (isFocused && scheduleId && hasLeftParticipation(nextMember?.participationStatus) && !hasNavigated.current) {
-      hasNavigated.current = true;
-      router.replace({
-        pathname: '/trip/active',
-        params: { scheduleId, suppressedParticipationSessionId: nextSession.id },
-      });
+    if (hasLeftParticipation(nextMember?.participationStatus)) {
+      returnToActiveAfterMissingSession();
       return;
     }
     if (nextSession.status === 'SHOOTING' || nextSession.status === 'UPLOADING') {
       navigateToCapture(nextSession);
     }
-  }, [currentUserId, isFocused, navigateToCapture, scheduleId]);
+  }, [currentUserId, navigateToCapture, returnToActiveAfterMissingSession]);
 
   useEffect(() => {
     if (
@@ -164,6 +181,10 @@ export default function MissionParticipationScreen() {
           navigateToCapture(nextSession);
         } catch (error) {
           soloStartRequested.current = false;
+          if (isMissionSessionNotFoundError(error)) {
+            returnToActiveAfterMissingSession();
+            return;
+          }
           setMessage(getParticipationErrorMessage(error));
         } finally {
           setIsSubmitting(false);
@@ -190,12 +211,16 @@ export default function MissionParticipationScreen() {
       })
       .catch((error) => {
         leaderParticipationRequested.current = false;
+        if (isMissionSessionNotFoundError(error)) {
+          returnToActiveAfterMissingSession();
+          return;
+        }
         setMessage(getParticipationErrorMessage(error));
       })
       .finally(() => {
         setIsSubmitting(false);
       });
-  }, [applySession, isMissionLeader, myMember, navigateToCapture, requiresGps, session, sessionId]);
+  }, [applySession, isMissionLeader, myMember, navigateToCapture, requiresGps, returnToActiveAfterMissingSession, session, sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -213,6 +238,10 @@ export default function MissionParticipationScreen() {
         }
       } catch (error) {
         if (active) {
+          if (isMissionSessionNotFoundError(error)) {
+            returnToActiveAfterMissingSession();
+            return;
+          }
           setMessage(error instanceof Error ? error.message : '미션 정보를 불러오지 못했어요.');
         }
       } finally {
@@ -226,7 +255,7 @@ export default function MissionParticipationScreen() {
     return () => {
       active = false;
     };
-  }, [applySession, sessionId]);
+  }, [applySession, returnToActiveAfterMissingSession, sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -235,7 +264,11 @@ export default function MissionParticipationScreen() {
 
     const socket = connectMissionSessionSocket(sessionId, {
       onError: () => {
-        void getMissionSession(sessionId).then(applySession).catch(() => undefined);
+        void getMissionSession(sessionId).then(applySession).catch((error) => {
+          if (isMissionSessionNotFoundError(error)) {
+            returnToActiveAfterMissingSession();
+          }
+        });
       },
       onMessage: ({ session: nextSession }) => {
         if (nextSession) {
@@ -244,14 +277,18 @@ export default function MissionParticipationScreen() {
       },
     });
     const timer = setInterval(() => {
-      void getMissionSession(sessionId).then(applySession).catch(() => undefined);
+      void getMissionSession(sessionId).then(applySession).catch((error) => {
+        if (isMissionSessionNotFoundError(error)) {
+          returnToActiveAfterMissingSession();
+        }
+      });
     }, 1500);
 
     return () => {
       clearInterval(timer);
       socket.close();
     };
-  }, [applySession, sessionId]);
+  }, [applySession, returnToActiveAfterMissingSession, sessionId]);
 
   const handleParticipation = async (decision: 'PARTICIPATE' | 'PASS') => {
     if (!sessionId || !canChangeParticipation || isSubmitting) {
@@ -267,6 +304,10 @@ export default function MissionParticipationScreen() {
       const nextSession = await chooseMissionParticipation(sessionId, decision, location);
       applySession(nextSession);
     } catch (error) {
+      if (isMissionSessionNotFoundError(error)) {
+        returnToActiveAfterMissingSession();
+        return;
+      }
       setMessage(getParticipationErrorMessage(error));
     } finally {
       setIsSubmitting(false);
@@ -289,6 +330,10 @@ export default function MissionParticipationScreen() {
       const nextSession = await cancelMissionSession(sessionId);
       applySession(nextSession);
     } catch (error) {
+      if (isMissionSessionNotFoundError(error)) {
+        returnToActiveAfterMissingSession();
+        return;
+      }
       setMessage(error instanceof Error ? error.message : '미션을 취소하지 못했어요.');
     } finally {
       setIsSubmitting(false);
@@ -307,23 +352,13 @@ export default function MissionParticipationScreen() {
       applySession(nextSession);
       navigateToCapture(nextSession);
     } catch (error) {
+      if (isMissionSessionNotFoundError(error)) {
+        returnToActiveAfterMissingSession();
+        return;
+      }
       setMessage(error instanceof Error ? error.message : '미션을 시작하지 못했어요.');
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const goBack = () => {
-    if (scheduleId) {
-      router.replace({
-        pathname: '/trip/active',
-        params: {
-          scheduleId,
-          ...(sessionId ? { suppressedParticipationSessionId: sessionId } : {}),
-        },
-      });
-    } else {
-      router.back();
     }
   };
 
