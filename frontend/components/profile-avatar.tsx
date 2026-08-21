@@ -1,5 +1,6 @@
 import { Image, type ImageSource } from 'expo-image';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { getProfileImageUrl } from '@/lib/auth-api';
 
@@ -18,6 +19,18 @@ export const profileIconOptions: ProfileIconOption[] = [
   { key: 'people5', source: require('../assets/svg/profile_icon/people5.svg') },
   { key: 'people6', source: require('../assets/svg/profile_icon/people6.svg') },
 ];
+
+let profileIconPrefetchPromise: Promise<void> | null = null;
+
+export function prefetchProfileIcons() {
+  if (!profileIconPrefetchPromise) {
+    profileIconPrefetchPromise = Promise.all(
+      profileIconOptions.map((option) => Image.loadAsync(option.source).catch(() => null)),
+    ).then(() => undefined);
+  }
+
+  return profileIconPrefetchPromise;
+}
 
 const profileIconSourceByKey = new Map(profileIconOptions.map((option) => [option.key, option.source]));
 

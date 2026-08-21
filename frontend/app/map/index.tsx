@@ -1,10 +1,12 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, PanResponder, Pressable, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { getMissionCardLevel, MissionCard } from '@/components/mission-card';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, type MissionItem } from '@/lib/mission-api';
 
@@ -13,9 +15,10 @@ const themeMapByCategory: Record<MissionTheme, number> = {
   MOUNTAIN: require('../../assets/svg/map/mountain_map.svg'),
   SEA: require('../../assets/svg/map/sea_map.svg'),
   CITY: require('../../assets/svg/map/city_map.svg'),
+  DEMO: dividedMap,
 };
 
-type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
+type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY' | 'DEMO';
 type CategoryValue = MissionTheme | 'ACQUIRED';
 
 const categoryItems = [
@@ -40,8 +43,8 @@ const categoryItems = [
   {
     icon: require('../../assets/svg/theme_icon/flag.svg'),
     selectedIcon: require('../../assets/svg/theme_icon/flag_filled.svg'),
-    label: '획득',
-    value: 'ACQUIRED',
+    label: '데모',
+    value: 'DEMO',
   },
 ] satisfies { icon: number; selectedIcon: number; label: string; value: CategoryValue }[];
 
@@ -87,6 +90,7 @@ const DEFAULT_THEME_DISTRICTS: Record<MissionTheme, string[]> = {
   MOUNTAIN: [],
   SEA: [],
   CITY: [],
+  DEMO: [],
 };
 const MAP_ASPECT_RATIO = 1;
 const MISSION_FRAME_ASPECT_RATIO = 164 / 209;
@@ -128,6 +132,7 @@ export default function BusanMapScreen() {
     topInset,
     width,
   } = useResponsiveLayout();
+  const { language } = useLanguage();
   const [isMissionDeckOpen, setIsMissionDeckOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<CategoryValue>('MOUNTAIN');
   const [themeDistricts, setThemeDistricts] = useState(DEFAULT_THEME_DISTRICTS);
@@ -200,7 +205,7 @@ export default function BusanMapScreen() {
     return () => {
       isActive = false;
     };
-  }, [selectedMissionTheme]);
+  }, [language, selectedMissionTheme]);
 
   useEffect(() => {
     setSelectedMapPiece(null);
@@ -401,10 +406,10 @@ export default function BusanMapScreen() {
                 })}
               </View>
             ) : null}
-            {!isMissionDeckOpen && (isThemeDistrictLoading || themeDistrictError) ? (
+            {!isMissionDeckOpen && isThemeDistrictLoading ? <ActivityIndicator color="#202124" size="small" style={styles.mapLoadingIndicator} /> : null}
+            {!isMissionDeckOpen && !isThemeDistrictLoading && themeDistrictError ? (
               <View style={styles.mapStatusBox}>
-                {isThemeDistrictLoading ? <ActivityIndicator color="#202124" size="small" /> : null}
-                <Text style={styles.mapStatusText}>{isThemeDistrictLoading ? '미션 구를 불러오는 중' : themeDistrictError}</Text>
+                <Text style={styles.mapStatusText}>{themeDistrictError}</Text>
               </View>
             ) : null}
           </View>
@@ -620,6 +625,12 @@ const styles = StyleSheet.create({
   selectedMapPieceLabel: {
     backgroundColor: '#202124',
     color: '#ffffff',
+  },
+  mapLoadingIndicator: {
+    left: '50%',
+    position: 'absolute',
+    top: '50%',
+    transform: [{ translateX: -10 }, { translateY: -10 }],
   },
   mapStatusBox: {
     alignItems: 'center',

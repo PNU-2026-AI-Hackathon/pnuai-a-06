@@ -2,7 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -80,7 +81,10 @@ export default function MissionVoteScreen() {
   }, [goWaiting, hasVoted, isLoading, sessionId]);
 
   const handleVote = async () => {
-    if (!sessionId || !selectedSubmissionId || isSubmitting) {
+    const selectedSubmission = submissions.find((submission) => submission.id === selectedSubmissionId);
+    const isOwnSubmission = Boolean(currentUserId && selectedSubmission?.userId === currentUserId);
+
+    if (!sessionId || !selectedSubmissionId || isSubmitting || isOwnSubmission) {
       return;
     }
 
@@ -120,10 +124,12 @@ export default function MissionVoteScreen() {
           <Text style={styles.description}>이번 미션을 대표할 사진을 골라주세요.</Text>
           <View style={styles.photoGrid}>
             {submissions.map((submission) => {
-              const isSelected = submission.id === selectedSubmissionId;
+              const isOwnSubmission = Boolean(currentUserId && submission.userId === currentUserId);
+              const isSelected = !isOwnSubmission && submission.id === selectedSubmissionId;
+              const isPhotoDisabled = hasVoted || isOwnSubmission;
 
               return (
-                <ScalePressable disabled={hasVoted} key={submission.id} onPress={() => setSelectedSubmissionId(submission.id)} pressedScale={0.97} style={[styles.photoCard, isSelected && styles.selectedPhotoCard]}>
+                <ScalePressable accessibilityState={{ disabled: isPhotoDisabled }} disabled={isPhotoDisabled} key={submission.id} onPress={() => setSelectedSubmissionId(submission.id)} pressedScale={0.97} style={[styles.photoCard, isSelected && styles.selectedPhotoCard, isOwnSubmission && styles.ownPhotoCard]}>
                   <Image contentFit="cover" source={{ uri: submission.imageUrl }} style={styles.photo} />
                   {isSelected ? <View style={styles.selectedBadge}><Ionicons color="#FFFFFF" name="checkmark" size={18} /></View> : null}
                 </ScalePressable>
@@ -136,7 +142,7 @@ export default function MissionVoteScreen() {
 
       <View style={[styles.footer, { paddingBottom: bottomSafeInset + 14, paddingHorizontal: horizontalPadding }]}>
         <ScalePressable disabled={!selectedSubmissionId || isSubmitting || hasVoted} onPress={handleVote} pressedScale={0.97} style={[styles.voteButton, (!selectedSubmissionId || isSubmitting || hasVoted) && styles.disabledButton]}>
-          {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.voteButtonText}>투표하기</Text>}
+          {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.voteButtonText}>다음</Text>}
         </ScalePressable>
       </View>
     </View>
@@ -157,7 +163,7 @@ const styles = StyleSheet.create({
     paddingTop: 16 
   },
   title: { 
-    color: '#111820', 
+    color: '#2D3C43', 
     fontSize: 24, 
     fontWeight: '600', 
     textAlign: 'center' 
@@ -185,6 +191,9 @@ const styles = StyleSheet.create({
   },
   selectedPhotoCard: { 
     borderColor: '#63B5CD' 
+  },
+  ownPhotoCard: {
+    opacity: 0.48,
   },
   photo: { 
     aspectRatio: 3 / 4, 

@@ -2,21 +2,31 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getLatestMissionSession, getMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
 import { getTripSchedule } from '@/lib/trip-schedule-api';
 
+const pinkEffect = require('../../assets/svg/effect/pink_llipse.svg');
+const yellowEffect = require('../../assets/svg/effect/yellow_ellipse.svg');
+const blueEffect = require('../../assets/svg/effect/blue_ellipse.svg');
+
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
 export default function MissionResultScreen() {
-  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    scheduleId?: string | string[];
+    sessionId?: string | string[];
+    returnTo?: string | string[];
+  }>();
   const scheduleId = getParamValue(params.scheduleId);
   const sessionId = getParamValue(params.sessionId);
+  const returnTo = getParamValue(params.returnTo);
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const [session, setSession] = useState<MissionSession | null>(null);
   const [resultSessions, setResultSessions] = useState<MissionSession[]>([]);
@@ -102,6 +112,22 @@ export default function MissionResultScreen() {
       return;
     }
 
+    if (returnTo === 'hub') {
+      router.replace('/trip/hub');
+      return;
+    }
+
+    if (scheduleId) {
+      router.replace({
+        pathname: '/trip/active',
+        params: {
+          scheduleId,
+          ...(currentSession?.id ? { sessionId: currentSession.id } : {}),
+        },
+      });
+      return;
+    }
+
     router.replace('/trip/hub');
   };
 
@@ -115,6 +141,11 @@ export default function MissionResultScreen() {
         <View style={[styles.resultContent, { paddingBottom: bottomSafeInset + 20, paddingHorizontal: horizontalPadding, paddingTop: topSafeInset + 90 }]}>
           <View style={styles.resultHeading}>
             <Text style={styles.title}>친구들이{`\n`}가장 많이 선택한 사진</Text>
+            <View pointerEvents="none" style={styles.effects}>
+              <Image contentFit="contain" source={pinkEffect} style={styles.pinkEffect} />
+              <Image contentFit="contain" source={yellowEffect} style={styles.yellowEffect} />
+              <Image contentFit="contain" source={blueEffect} style={styles.blueEffect} />
+            </View>
             <Text style={styles.subtitle}>{winnerSubmission.nickname ? `${winnerSubmission.nickname}님이 담았어요` : '친구가 담은 사진이에요'}</Text>
           </View>
 
@@ -183,18 +214,48 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start'
   },
   resultHeading: {
-    alignItems: 'center'
+    alignItems: 'center',
+    overflow: 'visible',
+    width: '100%',
+    zIndex: 0,
+  },
+  effects: { 
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+  pinkEffect: { 
+    height: 375, 
+    left: -8, 
+    position: 'absolute', 
+    top: 165, 
+    width: 270 
+  },
+  yellowEffect: { 
+    height: 600, 
+    position: 'absolute', 
+    right: -80, 
+    top: 50, 
+    width: 500 
+  },
+  blueEffect: { 
+    bottom: 72, 
+    height: 386, 
+    left: -20, 
+    position: 'absolute', 
+    width: 303 
   },
   photo: {
     aspectRatio: 3 / 4,
     borderRadius: 20,
     marginTop: 32,
     width: '78%',
+    zIndex: 1,
   },
   footer: {
     alignItems: 'center',
     marginTop: 'auto',
-    width: '100%'
+    width: '100%',
+    zIndex: 2,
   },
   savedText: {
     color: '#8A9194',

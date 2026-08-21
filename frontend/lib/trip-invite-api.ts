@@ -1,13 +1,15 @@
-import { API_BASE_URL } from '@/lib/auth-api';
-import { getAuthItem } from '@/lib/auth-storage';
+import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
+import { getLanguageHeaders } from '@/lib/language';
 
 export type TripInvite = {
+  endDate?: string;
   roomId: string;
   roomName: string;
   inviterName: string;
   inviteToken: string;
   inviteUrl?: string;
   expiresAt?: string;
+  startDate?: string;
   status?: string;
 };
 
@@ -15,6 +17,8 @@ type ApiTripInvite = {
   creator?: {
     nickname?: string | null;
   };
+  endDate?: string;
+  end_date?: string;
   expiresAt?: string;
   expires_at?: string;
   inviteToken?: string;
@@ -29,8 +33,12 @@ type ApiTripInvite = {
   room_name?: string;
   status?: string;
   schedule_id?: string | number;
+  schedule_end_date?: string;
+  schedule_start_date?: string;
   schedule_name?: string;
   schedule_title?: string;
+  startDate?: string;
+  start_date?: string;
 };
 
 type CreateTripInviteInput = {
@@ -81,7 +89,7 @@ async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
 async function requestJson<T>(path: string, method: 'GET' | 'POST' | 'PATCH', body?: Record<string, string>) {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     body: body ? JSON.stringify(body) : undefined,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: { ...getLanguageHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     method,
   });
 
@@ -89,17 +97,11 @@ async function requestJson<T>(path: string, method: 'GET' | 'POST' | 'PATCH', bo
 }
 
 async function requestAuthenticatedJson<T>(path: string, method: 'GET' | 'POST' | 'PATCH', body?: Record<string, string>) {
-  const token = getAuthItem('access_token');
-
-  if (!token) {
-    throw new Error('로그인이 필요합니다.');
-  }
-
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetchWithAuth(`${API_BASE_URL}${path}`, {
     body: body ? JSON.stringify(body) : undefined,
     headers: {
-      Authorization: `Bearer ${token}`,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...getLanguageHeaders(),
     },
     method,
   });
@@ -115,12 +117,14 @@ function normalizeTripInvite(data: ApiTripInvite, fallbackRoomName: string): Tri
   }
 
   return {
+    endDate: data.endDate ?? data.end_date ?? data.schedule_end_date,
     expiresAt: data.expiresAt ?? data.expires_at,
     inviteToken,
     inviteUrl: data.inviteUrl ?? data.invite_url,
     inviterName: data.inviterName ?? data.inviter_name ?? data.creator?.nickname ?? '친구',
     roomId: String(data.roomId ?? data.room_id ?? data.schedule_id ?? ''),
     roomName: data.roomName ?? data.room_name ?? data.schedule_name ?? data.schedule_title ?? fallbackRoomName,
+    startDate: data.startDate ?? data.start_date ?? data.schedule_start_date,
     status: data.status,
   };
 }

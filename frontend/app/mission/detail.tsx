@@ -1,20 +1,23 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
+import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, getCachedMissions, type MissionItem } from '@/lib/mission-api';
 import { getLatestMissionSession, isMissionSessionNotFoundError, type MissionSession } from '@/lib/mission-session-api';
 import { addMissionToSchedule, getCachedTripSchedules, getTripSchedule, listTripSchedules, type TripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
-type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY';
+type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY' | 'DEMO';
 
 const themeItems: { icon: number; label: string; value: MissionTheme }[] = [
   { icon: require('../../assets/svg/mission_theme/mountain.svg'), label: '산', value: 'MOUNTAIN' },
   { icon: require('../../assets/svg/mission_theme/sea.svg'), label: '바다', value: 'SEA' },
   { icon: require('../../assets/svg/mission_theme/city.svg'), label: '도시', value: 'CITY' },
+  { icon: require('../../assets/svg/theme_icon/flag.svg'), label: '데모', value: 'DEMO' },
 ];
 const districtCodeByLabel: Record<string, string> = {
   강서구: 'GANGSEO',
@@ -46,7 +49,7 @@ function normalizeValue(value: string | null | undefined) {
 function getValidTheme(value: string | string[] | undefined): MissionTheme {
   const theme = normalizeValue(getParamValue(value));
 
-  return theme === 'SEA' || theme === 'CITY' ? theme : 'MOUNTAIN';
+  return theme === 'SEA' || theme === 'CITY' || theme === 'DEMO' ? theme : 'MOUNTAIN';
 }
 
 function getSortedMissions(
@@ -55,32 +58,33 @@ function getSortedMissions(
 ) {
   const focusedDistrictCode = normalizeValue(options.districtCode);
   const focusedMissionCode = normalizeValue(options.missionCode);
+  const seenMissionKeys = new Set<string>();
+  const themedMissions = missions.filter((mission) => normalizeValue(mission.theme) === options.theme);
+  const uniqueThemedMissions = themedMissions.filter((mission) => {
+    const missionKey = normalizeValue(mission.code ?? mission.id);
 
-  return missions
+    if (seenMissionKeys.has(missionKey)) {
+      return false;
+    }
+
+    seenMissionKeys.add(missionKey);
+    return true;
+  });
+
+  return uniqueThemedMissions
     .map((mission, index) => {
       const missionCode = normalizeValue(mission.code ?? mission.id);
-      const missionTheme = normalizeValue(mission.theme);
       const missionDistrictCode = normalizeValue(mission.districtCode);
-      const isSameTheme = missionTheme === options.theme;
       const isSameDistrict =
         Boolean(focusedDistrictCode && missionDistrictCode === focusedDistrictCode) || mission.districtLabel === options.district;
       const isSameMission = Boolean(focusedMissionCode && missionCode === focusedMissionCode);
-      let priority = 4;
-
-      if (isSameTheme && isSameDistrict) {
-        priority = isSameMission ? 0 : 1;
-      } else if (isSameTheme) {
-        priority = 2;
-      } else if (isSameDistrict) {
-        priority = 3;
-      }
+      const priority = isSameMission ? 0 : isSameDistrict ? 1 : 2;
 
       return { index, mission, priority };
     })
     .sort((a, b) => a.priority - b.priority || a.index - b.index)
     .map(({ mission }) => mission);
 }
-
 function formatScheduleDate(schedule: TripSchedule) {
   if (schedule.startDate && schedule.endDate) {
     if (schedule.startDate === schedule.endDate) {
@@ -118,6 +122,18 @@ function addDays(date: Date, days: number) {
   return nextDate;
 }
 
+function isPastDate(value: string) {
+  const date = parseDateValue(value);
+
+  if (!date) {
+    return false;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date.getTime() < today.getTime();
+}
+
 function getScheduleDateOptions(schedule: TripSchedule) {
   const startDate = parseDateValue(schedule.startDate);
   const endDate = parseDateValue(schedule.endDate ?? schedule.startDate);
@@ -137,6 +153,7 @@ function getScheduleDateOptions(schedule: TripSchedule) {
   return dates;
 }
 export default function MissionDetailScreen() {
+  const { language } = useLanguage();
   const { bottomActionInset, bottomSafeInset, contentMaxWidth, horizontalPadding, topInset } = useResponsiveLayout();
   const params = useLocalSearchParams<{ district?: string; districtCode?: string; missionCode?: string; scheduleId?: string; theme?: string }>();
   const focusedDistrict = getParamValue(params.district) ?? '금정구';
@@ -184,25 +201,27 @@ export default function MissionDetailScreen() {
     let isActive = true;
 
     async function loadMissions() {
+      const cachedMissions = getCachedMissions();
+      const cachedThemeMissions = cachedMissions.filter((mission) => normalizeValue(mission.theme) === selectedTheme);
+
       try {
-        const cachedMissions = getCachedMissions();
-        if (cachedMissions.length > 0) {
-          setMissions(cachedMissions);
+        if (cachedThemeMissions.length > 0) {
+          setMissions(cachedThemeMissions);
           setIsLoading(false);
         } else {
+          setMissions([]);
           setIsLoading(true);
         }
         setErrorMessage('');
-        const missionList = await fetchMissions({});
+        const missionList = await fetchMissions({ theme: selectedTheme });
 
         if (isActive) {
           setMissions(missionList);
         }
       } catch (error) {
         if (isActive) {
-          const cachedMissions = getCachedMissions();
-          setMissions(cachedMissions);
-          setErrorMessage(cachedMissions.length === 0 ? (error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.') : '');
+          setMissions(cachedThemeMissions);
+          setErrorMessage(cachedThemeMissions.length === 0 ? (error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.') : '');
         }
       } finally {
         if (isActive) {
@@ -211,12 +230,12 @@ export default function MissionDetailScreen() {
       }
     }
 
-    loadMissions();
+    void loadMissions();
 
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [language, selectedTheme]);
 
   useEffect(() => {
     if (!targetScheduleId) {
@@ -242,7 +261,7 @@ export default function MissionDetailScreen() {
     return () => {
       isActive = false;
     };
-  }, [targetScheduleId]);
+  }, [language, targetScheduleId]);
   useEffect(() => {
     if (!targetScheduleId || !targetSchedule) {
       setTargetSessions({});
@@ -343,7 +362,10 @@ export default function MissionDetailScreen() {
     try {
       setIsAddingMission(true);
       setActionMessage('');
-      await addMissionToSchedule(schedule.scheduleId, mission.id, plannedDate);
+      const addedScheduleMission = await addMissionToSchedule(schedule.scheduleId, mission.id, plannedDate);
+      if (addedScheduleMission.emojiUrl) {
+        void Image.prefetch(addedScheduleMission.emojiUrl, 'memory-disk').catch(() => undefined);
+      }
       if (targetScheduleId && schedule.scheduleId === targetScheduleId) {
         await refreshTargetSchedule();
       }
@@ -380,7 +402,7 @@ export default function MissionDetailScreen() {
     setSelectedMission(mission);
     const dateOptions = getScheduleDateOptions(targetSchedule);
 
-    if (dateOptions.length === 1) {
+    if (dateOptions.length === 1 && !isPastDate(dateOptions[0])) {
       void addMissionForDate(mission, targetSchedule, dateOptions[0]);
       return;
     }
@@ -462,7 +484,7 @@ export default function MissionDetailScreen() {
 
     const dateOptions = getScheduleDateOptions(schedule);
 
-    if (dateOptions.length === 1) {
+    if (dateOptions.length === 1 && !isPastDate(dateOptions[0])) {
       void addMissionForDate(selectedMission, schedule, dateOptions[0]);
       return;
     }
@@ -591,15 +613,16 @@ export default function MissionDetailScreen() {
                     <Text style={styles.dateEmptyText}>선택할 수 있는 날짜가 없어요.</Text>
                   ) : getScheduleDateOptions(selectedScheduleForDate).map((date, index) => {
                     const isSelectedDate = selectedPlannedDate === date;
+                    const isDateDisabled = isPastDate(date);
 
                     return (
                     <ScalePressable
                       accessibilityRole="button"
-                      disabled={isAddingMission}
+                      disabled={isAddingMission || isDateDisabled}
                       key={date}
                       onPress={() => setSelectedPlannedDate(date)}
                       pressedScale={0.96}
-                      style={[styles.dateOption, isSelectedDate && styles.selectedDateOption, isAddingMission && styles.disabledButton]}>
+                      style={[styles.dateOption, isSelectedDate && styles.selectedDateOption, (isAddingMission || isDateDisabled) && styles.disabledButton]}>
                       <Text style={[styles.dateOptionText, isSelectedDate && styles.selectedDateOptionText]}>{index + 1}</Text>
                     </ScalePressable>
                     );

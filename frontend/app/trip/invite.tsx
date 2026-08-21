@@ -3,13 +3,15 @@ import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
 
 import { FlowButton, FlowScreen } from '@/components/flow-screen';
 import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { shareKakaoInvite } from '@/lib/kakao-share';
-import { acceptTripInvite, createKakaoInviteTemplateArgs, createTripInvite, previewTripInvite, type TripInvite } from '@/lib/trip-invite-api';
+import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
+import { acceptTripInvite, createKakaoInviteTemplateArgs, createTripInvite, declineTripInvite, previewTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 
 const companions = [
   { label: '나', color: '#b9d7ee' },
@@ -26,6 +28,51 @@ function getErrorMessage(error: unknown) {
   }
 
   return '초대 확인에 실패했습니다.';
+}
+
+function getDateKey(value: string | undefined) {
+  return value?.slice(0, 10);
+}
+
+function getDateRangeLabel(startDate: string | undefined, endDate: string | undefined) {
+  const start = getDateKey(startDate);
+  const end = getDateKey(endDate) ?? start;
+
+  if (!start) {
+    return '해당 날짜';
+  }
+
+  return start === end ? start : `${start} ~ ${end}`;
+}
+
+function findConflictingSchedule(invite: TripInvite, schedules: TripSchedule[]) {
+  const inviteStartDate = getDateKey(invite.startDate ?? invite.endDate);
+  const inviteEndDate = getDateKey(invite.endDate ?? invite.startDate);
+
+  if (!inviteStartDate || !inviteEndDate) {
+    return null;
+  }
+
+  return schedules.find((schedule) => {
+    const scheduleStartDate = getDateKey(schedule.startDate ?? schedule.endDate);
+    const scheduleEndDate = getDateKey(schedule.endDate ?? schedule.startDate);
+
+    return Boolean(
+      scheduleStartDate &&
+      scheduleEndDate &&
+      scheduleStartDate <= inviteEndDate &&
+      inviteStartDate <= scheduleEndDate
+    );
+  }) ?? null;
+}
+
+function isScheduleConflictError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return (
+    (message.includes('일정') && (message.includes('이미') || message.includes('날짜') || message.includes('기간') || message.includes('겹') || message.includes('충돌'))) ||
+    (message.includes('schedule') && (message.includes('date') || message.includes('overlap') || message.includes('conflict')))
+  );
 }
 
 function isAccessibleTripError(error: unknown) {
@@ -107,6 +154,7 @@ export default function TripInviteScreen() {
   const titleSize = isCompactWidth ? 23 : 25;
 
   const [invitePreview, setInvitePreview] = useState<TripInvite | null>(null);
+  const [mySchedules, setMySchedules] = useState<TripSchedule[]>(() => getCachedTripSchedules());
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'accepting' | 'success' | 'error' | 'acceptError'>('idle');
   const [message, setMessage] = useState('');
   const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
@@ -127,6 +175,17 @@ export default function TripInviteScreen() {
     setStatus('loading');
     setMessage('');
     setInvitePreview(null);
+    setMySchedules(getCachedTripSchedules());
+
+    listTripSchedules()
+      .then((schedules) => {
+        if (isMounted) {
+          setMySchedules(schedules);
+        }
+      })
+      .catch(() => {
+        // 로그인 전 초대 미리보기에서는 일정 목록을 조회할 수 없으므로 캐시를 사용한다.
+      });
 
     previewTripInvite(inviteToken)
       .then((preview) => {
@@ -223,11 +282,38 @@ export default function TripInviteScreen() {
     try {
       setStatus('accepting');
       setMessage('');
+
+      const schedules = await listTripSchedules().catch(() => mySchedules);
+      setMySchedules(schedules);
+      if (invitePreview && findConflictingSchedule(invitePreview, schedules)) {
+        try {
+          await declineTripInvite({ inviteToken });
+          setMessage(`${getDateRangeLabel(invitePreview.startDate, invitePreview.endDate)}에 이미 일정이 있어 초대를 거절했어요.`);
+        } catch {
+          setMessage(`${getDateRangeLabel(invitePreview.startDate, invitePreview.endDate)}에 이미 일정이 있어 입장할 수 없어요.`);
+        }
+
+        setStatus('acceptError');
+        return;
+      }
+
       await acceptTripInvite({ inviteToken });
       setStatus('success');
       setMessage('동행자 방에 입장했어요.');
       openTripHub();
     } catch (error) {
+      if (isScheduleConflictError(error)) {
+        try {
+          await declineTripInvite({ inviteToken });
+          setMessage('해당 날짜에 이미 일정이 있어 초대를 거절했어요.');
+        } catch {
+          setMessage('해당 날짜에 이미 일정이 있어 입장할 수 없어요.');
+        }
+
+        setStatus('acceptError');
+        return;
+      }
+
       if (isAccessibleTripError(error)) {
         openTripHub();
         return;
@@ -251,6 +337,9 @@ export default function TripInviteScreen() {
           <View style={styles.previewCard}>
             <Text style={styles.roomName}>{invitePreview.roomName}</Text>
             <Text style={styles.previewText}>{invitePreview.inviterName}님이 함께 여행하자고 초대했어요.</Text>
+            {invitePreview.startDate || invitePreview.endDate ? (
+              <Text style={styles.previewText}>여행 기간: {getDateRangeLabel(invitePreview.startDate, invitePreview.endDate)}</Text>
+            ) : null}
           </View>
         ) : null}
 

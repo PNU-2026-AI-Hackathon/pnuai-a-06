@@ -3,19 +3,21 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
 import {
   connectMissionSessionSocket,
+  completeMissionSession,
   getMissionSession,
-  getReviewMissionSubmissions,
+  getPassedMissionSubmissions,
   mergeMissionSessions,
   MissionSessionApiError,
   postMissionSessionComment,
-  readyMissionSession,
+
   type MissionSession,
 } from '@/lib/mission-session-api';
 
@@ -29,6 +31,14 @@ function getUserLabel(index: number) {
   return `익명 ${index + 1}`;
 }
 
+function getCommentParticipantIds(session: MissionSession | null | undefined) {
+  return new Set(
+    (session?.members ?? [])
+      .filter((member) => member.participationStatus === 'PARTICIPATING' || member.participationStatus === 'COMPLETED' || member.participationStatus === 'TIMED_OUT')
+      .map((member) => member.userId)
+      .filter(Boolean),
+  );
+}
 function getRemainingMs(deadline: string | null | undefined, now: number) {
   if (!deadline) {
     return null;
@@ -56,13 +66,15 @@ export default function MissionReviewScreen() {
   const sessionRef = useRef<MissionSession | null>(null);
   const transitionSubmissionIdRef = useRef<string | null>(null);
   const hasNavigatedForward = useRef(false);
+  const isCompletingSingle = useRef(false);
 
   const applySession = useCallback((nextSession: MissionSession) => {
     const previousSession = sessionRef.current;
     const mergedSession = mergeMissionSessions(previousSession, nextSession);
 
     if (previousSession?.id === mergedSession.id && transitionSubmissionIdRef.current === null) {
-      const requiredComments = Math.max(1, mergedSession.members.length);
+      const commentParticipantCount = getCommentParticipantIds(mergedSession).size;
+      const requiredComments = Math.max(1, commentParticipantCount || mergedSession.members.length);
       const newlyCompletedSubmission = mergedSession.submissions.find((submission) => {
         if (submission.comments.length < requiredComments) {
           return false;
@@ -145,6 +157,25 @@ export default function MissionReviewScreen() {
     });
   }, [scheduleId, sessionId]);
 
+  const completeSingleSubmission = useCallback(async () => {
+    if (!sessionId || isCompletingSingle.current || hasNavigatedForward.current) {
+      return;
+    }
+
+    isCompletingSingle.current = true;
+
+    try {
+      const nextSession = await completeMissionSession(sessionId);
+      applySession(nextSession);
+    } catch {
+      // The result screen can still render the single passed photo if the session was completed by the server.
+    } finally {
+      isCompletingSingle.current = false;
+    }
+
+    navigateToResult();
+  }, [applySession, navigateToResult, sessionId]);
+
   const navigateToVote = useCallback(() => {
     if (!sessionId || hasNavigatedForward.current) {
       return;
@@ -177,7 +208,11 @@ export default function MissionReviewScreen() {
           }, 700);
         } else if (type === 'voting_started' || nextSession?.status === 'VOTING') {
           setTimeout(() => {
-            navigateToVote();
+            if (nextSession && getPassedMissionSubmissions(nextSession).length === 1) {
+              void completeSingleSubmission();
+            } else {
+              navigateToVote();
+            }
           }, 3000);
         }
       },
@@ -186,19 +221,17 @@ export default function MissionReviewScreen() {
     return () => {
       socket.close();
     };
-  }, [applySession, navigateToResult, navigateToVote, sessionId]);
+  }, [applySession, completeSingleSubmission, navigateToResult, navigateToVote, sessionId]);
 
-  const myMember = useMemo(() => {
-    return session?.members.find((member) => member.userId === currentUserId) ?? null;
-  }, [currentUserId, session?.members]);
 
-  const allMembersReady = useMemo(() => {
-    const members = session?.members ?? [];
-    return members.length > 0 && members.every((member) => Boolean(member.readyAt));
-  }, [session?.members]);
-
-  const passedSubmissions = useMemo(() => getReviewMissionSubmissions(session), [session]);
-  const requiredCommentsPerPhoto = Math.max(1, session?.members.length ?? 0);
+  const commentParticipantIds = useMemo(() => getCommentParticipantIds(session), [session]);
+  const passedSubmissions = useMemo(() => {
+    const submissions = getPassedMissionSubmissions(session);
+    return commentParticipantIds.size === 0
+      ? submissions
+      : submissions.filter((submission) => commentParticipantIds.has(submission.userId));
+  }, [commentParticipantIds, session]);
+  const requiredCommentsPerPhoto = Math.max(1, commentParticipantIds.size || session?.members.length || 0);
   const currentSubmissionIndex = useMemo(() => {
     if (transitionSubmissionId) {
       const transitionIndex = passedSubmissions.findIndex((submission) => submission.id === transitionSubmissionId);
@@ -232,7 +265,11 @@ export default function MissionReviewScreen() {
       setCommentText('');
 
       if (isAllCommentsComplete) {
-        navigateToVote();
+        if (passedSubmissions.length === 1) {
+          void completeSingleSubmission();
+        } else {
+          navigateToVote();
+        }
       }
 
       return;
@@ -240,7 +277,7 @@ export default function MissionReviewScreen() {
 
     const timer = setTimeout(() => setTransitionCountdown((countdown) => countdown === null ? null : countdown - 1), 1000);
     return () => clearTimeout(timer);
-  }, [isAllCommentsComplete, navigateToVote, transitionCountdown, transitionSubmissionId]);
+  }, [completeSingleSubmission, isAllCommentsComplete, navigateToVote, passedSubmissions.length, transitionCountdown, transitionSubmissionId]);
 
   useEffect(() => {
     if (!isAllCommentsComplete || transitionSubmissionId) {
@@ -248,38 +285,17 @@ export default function MissionReviewScreen() {
     }
 
     const timer = setTimeout(() => {
-      navigateToVote();
+      if (passedSubmissions.length === 1) {
+        void completeSingleSubmission();
+      } else {
+        navigateToVote();
+      }
     }, 3000);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [isAllCommentsComplete, navigateToVote, transitionSubmissionId]);
-
-  const handleReady = async () => {
-    if (!sessionId || isSubmitting) {
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      setMessage('');
-      const currentSession = await getMissionSession(sessionId);
-      applySession(currentSession);
-      const nextSession = await readyMissionSession(sessionId);
-      applySession(nextSession);
-    } catch (error) {
-      if (error instanceof MissionSessionApiError && [400, 409, 422].includes(error.status)) {
-        setMessage('READY 상태를 확인하고 있어요. 잠시 후 다시 눌러주세요.');
-        await refreshSession();
-        return;
-      }
-
-      setMessage(error instanceof Error ? error.message : '준비 처리에 실패했어요.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  }, [completeSingleSubmission, isAllCommentsComplete, navigateToVote, passedSubmissions.length, transitionSubmissionId]);
 
   const handleSubmitComment = async () => {
     const content = commentText.trim();
@@ -307,6 +323,11 @@ export default function MissionReviewScreen() {
   };
 
   const goNext = () => {
+    if (passedSubmissions.length === 1) {
+      void completeSingleSubmission();
+      return;
+    }
+
     navigateToVote();
   };
 
@@ -319,7 +340,7 @@ export default function MissionReviewScreen() {
     router.back();
   };
 
-  const showReadyScreen = Boolean(session && !allMembersReady && session.status !== 'VOTING' && session.status !== 'COMPLETED');
+  const isWaitingForReveal = Boolean(session && !['REVEALED', 'VOTING', 'COMPLETED'].includes(session.status));
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
@@ -338,29 +359,11 @@ export default function MissionReviewScreen() {
           <ActivityIndicator color="#409CB7" />
           <Text style={styles.stateText}>서버에서 세션을 불러오는 중이에요.</Text>
         </View>
-      ) : showReadyScreen ? (
-        <View style={[styles.readyWrap, { paddingBottom: bottomSafeInset + 28, paddingHorizontal: horizontalPadding }]}>
-          <Text style={styles.readyTitle}>사진 감상 시작!</Text>
-          <View style={styles.readyCard}>
-            <View style={styles.memberList}>
-              {session?.members.map((member, index) => (
-                <View key={`${member.userId}-${index}`} style={styles.memberRow}>
-                  <Text style={styles.memberName}>{member.nickname?.trim() || getUserLabel(index)}</Text>
-                  <Text style={[styles.memberStatus, member.readyAt && styles.memberReady]}>{member.readyAt ? 'READY' : 'WAITING'}</Text>
-                </View>
-              ))}
-            </View>
-            <ScalePressable disabled={Boolean(myMember?.readyAt) || isSubmitting} onPress={handleReady} pressedScale={0.96} style={[styles.primaryButton, (myMember?.readyAt || isSubmitting) && styles.disabledButton]}>
-              {isSubmitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryButtonText}>{myMember?.readyAt ? '준비 완료' : '준비'}</Text>}
-            </ScalePressable>
-          </View>
-          <View style={[styles.readyGuide, { bottom: bottomSafeInset + 54 }]}>
-            <Text style={styles.readyGuideText}>작성자는 아직 비밀!</Text>
-            <Text style={styles.readyGuideText}>익명으로 댓글을 남겨보세요.</Text>
-            <Text style={styles.readyAutoText}>모두 댓글을 작성하면 3초 뒤 자동으로 넘어가요.</Text>
-          </View>
-        </View>
-      ) : (
+      ) : isWaitingForReveal ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator color="#409CB7" />
+          <Text style={styles.stateText}>참여자들의 촬영이 끝나면 댓글 화면이 열려요.</Text>
+        </View>      ) : (
         <View style={styles.reviewStage}>
           <View style={styles.pageDots}>
             {passedSubmissions.map((submission, index) => <View key={submission.id} style={[styles.pageDot, index === currentSubmissionIndex && styles.pageDotActive]} />)}
@@ -620,7 +623,7 @@ const styles = StyleSheet.create({
   },
   keyboardPhotoCard: {
     alignSelf: 'center',
-    width: '78%',
+    width: '62%',
   },
   photo: {
     aspectRatio: 3 / 4,

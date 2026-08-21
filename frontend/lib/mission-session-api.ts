@@ -1,5 +1,8 @@
-import { API_BASE_URL } from '@/lib/auth-api';
+import { Platform } from 'react-native';
+
+import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
 import { getAuthItem } from '@/lib/auth-storage';
+import { getCurrentLanguage, getLanguageHeaders } from '@/lib/language';
 
 type ApiMission = {
   code?: string;
@@ -7,6 +10,7 @@ type ApiMission = {
   id?: number | string;
   target_photo_url?: string | null;
   title?: string;
+  verification_type?: string | null;
 };
 
 type ApiMissionSessionUser = {
@@ -18,7 +22,9 @@ type ApiMissionSessionUser = {
 
 type ApiMissionSessionMember = {
   joined_at?: string;
+  participation_status?: MissionParticipationStatus | null;
   ready_at?: string | null;
+  upload_deadline_at?: string | null;
   user?: ApiMissionSessionUser;
   user_id?: number | string;
 };
@@ -70,7 +76,8 @@ type ApiMissionSession = {
   winner_user_id?: number | string | null;
 };
 
-export type MissionSessionStatus = 'WAITING' | 'READY' | 'SHOOTING' | 'UPLOADING' | 'VOTING' | 'REVEALED' | 'COMPLETED';
+export type MissionParticipationStatus = 'UNDECIDED' | 'PARTICIPATING' | 'SKIPPED' | 'LOCKED_OUT' | 'TIMED_OUT' | 'COMPLETED';
+export type MissionSessionStatus = 'WAITING' | 'READY' | 'SHOOTING' | 'UPLOADING' | 'REVEALED' | 'VOTING' | 'COMPLETED' | 'CANCELLED';
 export type MissionJudgementStatus = 'PENDING' | 'PROCESSING' | 'PASSED' | 'REJECTED' | 'REVIEW' | 'ERROR';
 export type MissionSubmission = {
   comments: {
@@ -99,9 +106,13 @@ export type MissionSession = {
   id: string;
   members: {
     joinedAt?: string;
+    participationStatus?: MissionParticipationStatus | null;
     readyAt?: string | null;
+    uploadDeadlineAt?: string | null;
     userId: string;
     nickname?: string | null;
+    profileImageUrl?: string | null;
+    profileEmoji?: string | null;
   }[];
   commentEndsAt?: string | null;
   missionTitle: string;
@@ -112,15 +123,18 @@ export type MissionSession = {
   startedAt?: string | null;
   status: MissionSessionStatus;
   submissions: MissionSubmission[];
+  verificationType?: string | null;
   winnerUserId?: string | null;
 };
 
 export class MissionSessionApiError extends Error {
+  code?: string;
   status: number;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'MissionSessionApiError';
+    this.code = code;
     this.status = status;
   }
 }
@@ -150,6 +164,13 @@ function getErrorMessage(data: unknown, fallback: string) {
     const container = data as Record<string, unknown>;
     const message = container.detail ?? container.message;
 
+    if (message !== null && typeof message === 'object' && !Array.isArray(message)) {
+      const detail = message as Record<string, unknown>;
+      if (typeof detail.message === 'string' && detail.message.trim()) {
+        return detail.message;
+      }
+    }
+
     if (Array.isArray(message)) {
       return message.map((item) => (typeof item === 'object' && item !== null && 'msg' in item ? String(item.msg) : String(item))).join('\n');
     }
@@ -160,6 +181,21 @@ function getErrorMessage(data: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function getErrorCode(data: unknown) {
+  if (data === null || typeof data !== 'object') {
+    return undefined;
+  }
+
+  const container = data as Record<string, unknown>;
+  const detail = container.detail;
+  if (detail !== null && typeof detail === 'object' && !Array.isArray(detail)) {
+    const code = (detail as Record<string, unknown>).code;
+    return typeof code === 'string' ? code : undefined;
+  }
+
+  return typeof container.code === 'string' ? container.code : undefined;
 }
 
 function getAccessToken() {
@@ -194,7 +230,7 @@ async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
   const data = parseJsonOrText(text);
 
   if (!res.ok) {
-    throw new MissionSessionApiError(getErrorMessage(data, fallbackMessage), res.status);
+    throw new MissionSessionApiError(getErrorMessage(data, fallbackMessage), res.status, getErrorCode(data));
   }
 
   if (typeof data === 'string') {
@@ -209,11 +245,12 @@ async function requestJson<T>(path: string, method: 'GET' | 'POST', body?: Recor
   const { controller, timer } = createRequestTimeout(15000);
 
   try {
-    const res = await fetch(`${API_BASE_URL}${path}`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}${path}`, {
       body: body ? JSON.stringify(body) : undefined,
       headers: {
         Authorization: `Bearer ${token}`,
         ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...getLanguageHeaders(),
       },
       method,
       signal: controller.signal,
@@ -296,10 +333,30 @@ function mergeSubmissionSnapshots(current: MissionSubmission, next: MissionSubmi
   };
 }
 
+const missionSessionStatusOrder: MissionSessionStatus[] = ['WAITING', 'READY', 'SHOOTING', 'UPLOADING', 'REVEALED', 'VOTING', 'COMPLETED', 'CANCELLED'];
+
+function getMissionSessionStatusRank(status: MissionSessionStatus) {
+  return missionSessionStatusOrder.indexOf(status);
+}
+
 export function mergeMissionSessions(current: MissionSession | null | undefined, next: MissionSession) {
   if (!current || current.id !== next.id) {
     return next;
   }
+
+  const members = new Map<string, MissionSession['members'][number]>();
+  current.members.forEach((member) => members.set(member.userId, member));
+  next.members.forEach((member) => {
+    const previous = members.get(member.userId);
+    members.set(member.userId, {
+      ...previous,
+      ...member,
+      joinedAt: member.joinedAt ?? previous?.joinedAt,
+      participationStatus: member.participationStatus ?? previous?.participationStatus ?? null,
+      readyAt: member.readyAt ?? previous?.readyAt ?? null,
+      uploadDeadlineAt: member.uploadDeadlineAt ?? previous?.uploadDeadlineAt ?? null,
+    });
+  });
 
   const submissions = new Map<string, MissionSubmission>();
   current.submissions.forEach((submission) => submissions.set(submission.id, submission));
@@ -308,9 +365,14 @@ export function mergeMissionSessions(current: MissionSession | null | undefined,
     submissions.set(submission.id, previous ? mergeSubmissionSnapshots(previous, submission) : submission);
   });
 
+  const currentStatusRank = getMissionSessionStatusRank(current.status);
+  const nextStatusRank = getMissionSessionStatusRank(next.status);
+
   return {
     ...current,
     ...next,
+    members: Array.from(members.values()),
+    status: currentStatusRank > nextStatusRank ? current.status : next.status,
     submissions: Array.from(submissions.values()),
   };
 }
@@ -330,8 +392,12 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
     id: String(sessionId),
     members: (data.members ?? []).map((member) => ({
       joinedAt: member.joined_at,
+      participationStatus: member.participation_status ?? null,
       nickname: member.user?.nickname,
+      profileEmoji: member.user?.profile_emoji,
+      profileImageUrl: member.user?.profile_image_url ? normalizePhotoUrl(member.user.profile_image_url) : null,
       readyAt: member.ready_at,
+      uploadDeadlineAt: member.upload_deadline_at,
       userId: String(member.user_id ?? member.user?.id ?? ''),
     })),
     missionTitle: data.mission?.title ?? '미션',
@@ -342,6 +408,7 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
     startedAt: data.started_at,
     status: data.status ?? 'WAITING',
     submissions: (data.submissions ?? []).map(normalizeSubmission).filter((submission) => submission.photoUrl),
+    verificationType: data.mission?.verification_type ?? null,
     winnerUserId: data.winner_user_id === null || data.winner_user_id === undefined ? null : String(data.winner_user_id),
   };
 }
@@ -350,7 +417,14 @@ function getWebSocketUrl(sessionId: string) {
   const token = getAccessToken();
   const wsBaseUrl = API_BASE_URL.replace(/^http/, 'ws');
 
-  return `${wsBaseUrl}/mission-sessions/${encodeURIComponent(sessionId)}/ws?token=${encodeURIComponent(token)}`;
+  return `${wsBaseUrl}/mission-sessions/${encodeURIComponent(sessionId)}/ws?token=${encodeURIComponent(token)}&lang=${encodeURIComponent(getCurrentLanguage())}`;
+}
+
+function getScheduleWebSocketUrl(scheduleId: string) {
+  const token = getAccessToken();
+  const wsBaseUrl = API_BASE_URL.replace(/^http/, 'ws');
+
+  return `${wsBaseUrl}/schedules/${encodeURIComponent(scheduleId)}/mission-sessions/ws?token=${encodeURIComponent(token)}&lang=${encodeURIComponent(getCurrentLanguage())}`;
 }
 
 export function connectMissionSessionSocket(
@@ -381,6 +455,33 @@ export function connectMissionSessionSocket(
   return socket;
 }
 
+export function connectScheduleMissionSessionSocket(
+  scheduleId: string,
+  handlers: {
+    onError?: () => void;
+    onMessage: (message: { session?: MissionSession; type?: string }) => void;
+  }
+) {
+  const socket = new WebSocket(getScheduleWebSocketUrl(scheduleId));
+
+  socket.onmessage = (event) => {
+    try {
+      const message = JSON.parse(String(event.data)) as { payload?: { session?: ApiMissionSession }; type?: string };
+      handlers.onMessage({
+        session: message.payload?.session ? normalizeSession(message.payload.session) : undefined,
+        type: message.type,
+      });
+    } catch {
+      // Ignore malformed socket payloads and recover through the normal schedule polling.
+    }
+  };
+
+  socket.onerror = () => {
+    handlers.onError?.();
+  };
+
+  return socket;
+}
 export async function createMissionSession(scheduleId: string, scheduleMissionId: string) {
   const data = await requestJson<ApiMissionSession>(`/schedules/${encodeURIComponent(scheduleId)}/missions/${encodeURIComponent(scheduleMissionId)}/sessions`, 'POST');
   return normalizeSession(data);
@@ -421,8 +522,34 @@ export async function readyMissionSession(sessionId: string) {
   return normalizeSession(data);
 }
 
+export type MissionParticipationLocation = {
+  accuracy_m: number;
+  latitude: number;
+  longitude: number;
+  measured_at: string;
+};
+
+export async function chooseMissionParticipation(
+  sessionId: string,
+  decision: 'PARTICIPATE' | 'PASS',
+  location?: MissionParticipationLocation,
+) {
+  const body: Record<string, string | number> = { decision };
+  if (decision === 'PARTICIPATE' && location) {
+    Object.assign(body, location);
+  }
+
+  const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/participation`, 'POST', body);
+  return normalizeSession(data);
+}
+
 export async function startMissionSession(sessionId: string) {
   const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/start`, 'POST');
+  return normalizeSession(data);
+}
+
+export async function cancelMissionSession(sessionId: string) {
+  const data = await requestJson<ApiMissionSession>(`/mission-sessions/${encodeURIComponent(sessionId)}/cancel`, 'POST');
   return normalizeSession(data);
 }
 
@@ -451,18 +578,29 @@ export async function uploadMissionSessionPhoto(sessionId: string, photoUri: str
   const token = getAccessToken();
   const formData = new FormData();
 
-  formData.append('photo', {
-    name: `mission-${sessionId}.jpg`,
-    type: 'image/jpeg',
-    uri: photoUri,
-  } as unknown as Blob);
+  if (Platform.OS === 'web') {
+    const photoResponse = await fetch(photoUri);
+
+    if (!photoResponse.ok) {
+      throw new Error('촬영한 사진을 불러오지 못했습니다. 다시 촬영해 주세요.');
+    }
+
+    const photoBlob = await photoResponse.blob();
+    formData.append('photo', photoBlob, `mission-${sessionId}.jpg`);
+  } else {
+    formData.append('photo', {
+      name: `mission-${sessionId}.jpg`,
+      type: 'image/jpeg',
+      uri: photoUri,
+    } as unknown as Blob);
+  }
 
   const { controller, timer } = createRequestTimeout(30000);
 
   try {
-    const res = await fetch(`${API_BASE_URL}/mission-sessions/${encodeURIComponent(sessionId)}/photo`, {
+    const res = await fetchWithAuth(`${API_BASE_URL}/mission-sessions/${encodeURIComponent(sessionId)}/photo`, {
       body: formData,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...getLanguageHeaders() },
       method: 'POST',
       signal: controller.signal,
     });

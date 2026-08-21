@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ProfileAvatar } from '@/components/profile-avatar';
+import { LocalizedText as Text } from '@/components/localized-text';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMe } from '@/lib/auth-api';
 import { getLatestMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
@@ -12,6 +13,7 @@ import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/
 import { ClipPath, Defs, Ellipse, Image as SvgImage, Svg } from 'react-native-svg';
 
 const splashText = require('../../assets/svg/logo_text.svg');
+const emptyMagazineImage = require('../../assets/svg/main/sig_home.svg');
 const magazineTitle = require('../../assets/svg/magazine/JUST THE TWO OF US.svg');
 const magazineNumber = require('../../assets/svg/magazine/No.05.svg');
 const singleMagazineTitle = require('../../assets/svg/magazine/THE Starry Night.svg');
@@ -62,12 +64,16 @@ function getResultPhotoUrl(session: MissionSession) {
 export default function MainScreen() {
   const {
     bottomActionInset,
+    centerContentOffset,
     horizontalPadding,
     topInset,
   } = useResponsiveLayout();
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [profileEmoji, setProfileEmoji] = useState<string | null>(null);
   const [magazinePhotoUrls, setMagazinePhotoUrls] = useState<string[]>([]);
+  const [magazineScheduleId, setMagazineScheduleId] = useState<string | null>(null);
+  const [isMagazineLoading, setIsMagazineLoading] = useState(true);
+  const [hasLoadedMagazine, setHasLoadedMagazine] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -98,6 +104,10 @@ export default function MainScreen() {
       let isActive = true;
 
       const loadLatestMagazine = async () => {
+        if (isActive) {
+          setIsMagazineLoading(true);
+        }
+
         try {
           let schedules: TripSchedule[];
 
@@ -113,6 +123,7 @@ export default function MainScreen() {
 
           if (!latestClosedSchedule) {
             if (isActive) {
+              setMagazineScheduleId(null);
               setMagazinePhotoUrls([]);
             }
             return;
@@ -127,12 +138,21 @@ export default function MainScreen() {
             }
           }))).filter((photoUrl): photoUrl is string => Boolean(photoUrl)).slice(0, 3);
 
+          await Promise.all(photoUrls.map((photoUrl) => Image.prefetch(photoUrl, 'memory-disk'))).catch(() => undefined);
+
           if (isActive) {
+            setMagazineScheduleId(latestClosedSchedule.scheduleId);
             setMagazinePhotoUrls(photoUrls);
           }
         } catch {
           if (isActive) {
+            setMagazineScheduleId(null);
             setMagazinePhotoUrls([]);
+          }
+        } finally {
+          if (isActive) {
+            setIsMagazineLoading(false);
+            setHasLoadedMagazine(true);
           }
         }
       };
@@ -146,6 +166,7 @@ export default function MainScreen() {
   );
 
   const isSingleMagazine = magazinePhotoUrls.length === 1;
+  const shouldShowEmptyMagazine = hasLoadedMagazine && magazinePhotoUrls.length === 0;
   const magazinePhotoSlots = [0, 1, 2].map((index) => magazinePhotoUrls[index] ?? null);
 
   return (
@@ -158,15 +179,41 @@ export default function MainScreen() {
         },
       ]}>
       <View style={[styles.header, { paddingTop: topInset }]}>
-        <Image source={splashText} style={styles.logoText} contentFit="contain" />
+        <Pressable
+          accessibilityLabel="찌그까 로그인 화면으로 이동"
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={() => router.replace('/login')}
+          style={styles.logoButton}>
+          <Image source={splashText} style={styles.logoText} contentFit="contain" />
+        </Pressable>
         <Pressable accessibilityLabel="프로필" onPress={() => router.push('/main/profile')} style={styles.profileButton}>
           <ProfileAvatar profileImageUrl={profileImageUrl} profileEmoji={profileEmoji} size={56} />
         </Pressable>
       </View>
 
-      <Pressable
-        onPress={() => router.push('/magazine/detail')}
-        style={[styles.magazineCard, isSingleMagazine && styles.singleMagazineFrame]}>
+      {shouldShowEmptyMagazine ? (
+        <View style={[styles.emptyMagazineState, { transform: [{ translateY: centerContentOffset }] }]}>
+          <Image source={emptyMagazineImage} style={styles.emptyMagazineImage} contentFit="contain" />
+          <View style={styles.emptyMagazineCopy}>
+            <Text style={styles.emptyMagazineTitle}>첫 번째 매거진을 기다리고 있어요</Text>
+            <Text style={styles.emptyMagazineDescription}>여행을 완료하면 이곳에서 매거진을 확인할 수 있어요.</Text>
+          </View>
+        </View>
+      ) : hasLoadedMagazine ? (
+        <Pressable
+          disabled={isMagazineLoading || !magazineScheduleId}
+          onPress={() => {
+            if (!magazineScheduleId) {
+              return;
+            }
+
+            router.push({
+              pathname: '/magazine/detail',
+              params: { scheduleId: magazineScheduleId },
+            });
+          }}
+          style={[styles.magazineCard, isSingleMagazine && styles.singleMagazineFrame]}>
         {isSingleMagazine ? (
           <View style={styles.singleMagazineInner}>
             <Image source={singleMagazineTitle} style={styles.singleMagazineTitle} contentFit="contain" />
@@ -206,7 +253,8 @@ export default function MainScreen() {
             </View>
           </>
         )}
-      </Pressable>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -229,6 +277,10 @@ const styles = StyleSheet.create({
   logoText: {
     height: 23,
     width: 72,
+  },
+  logoButton: {
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   profileButton: {
     borderRadius: 999,
@@ -304,6 +356,35 @@ const styles = StyleSheet.create({
     width: '35%',
     zIndex: 1,
   },
+  emptyMagazineState: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  emptyMagazineImage: {
+    height: 180,
+    width: 180,
+  },
+  emptyMagazineCopy: {
+    alignItems: 'center',
+    marginTop: 40,
+    width: '100%',
+  },
+  emptyMagazineTitle: {
+    color: '#10161F',
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  emptyMagazineDescription: {
+    color: '#8A9194',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+
   magazineCopy: {
     alignItems: 'flex-start',
     flex: 1,
