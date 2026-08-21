@@ -1,357 +1,65 @@
-import * as Clipboard from 'expo-clipboard';
-import * as Linking from 'expo-linking';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
-import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
+// 일정 생성 화면의 라우트 진입점입니다.
 
+import { router, useLocalSearchParams } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
+import { LocalizedText as Text } from '@/components/localized-text';
+
+import { TripCreateCalendar } from '@/features/trip/create/components/trip-create-calendar';
+import { TripCreateNameForm } from '@/features/trip/create/components/trip-create-name-form';
+import { TripInviteModal } from '@/features/trip/create/components/trip-invite-modal';
+import { useTripCreate } from '@/features/trip/create/hooks/use-trip-create';
+import { getParamValue, shiftMonth } from '@/features/trip/create/trip-create-data';
+import { styles } from '@/features/trip/create/trip-create-styles';
 import { ScalePressable } from '@/components/scale-pressable';
 import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
-import { shareKakaoInvite } from '@/lib/kakao-share';
-import { addMissionToSchedule, createDraftSchedule, getCachedTripSchedules, listTripSchedules, updateDraftSchedule, type TripSchedule } from '@/lib/trip-schedule-api';
-import { createKakaoInviteTemplateArgs, type TripInvite } from '@/lib/trip-invite-api';
-
-type TripStep = 'date' | 'people';
-
-type DateParts = {
-  day: number;
-  month: number;
-  year: number;
-};
-
-type CalendarDay = DateParts & {
-  dateValue: string;
-  isCurrentMonth: boolean;
-  isSelectable: boolean;
-};
-
-
-const weekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
-
-const formatDateValue = (date: Date) => {
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-};
-
-
-const parseDateValue = (value: string): DateParts => {
-  const [year, month, day] = value.split('-').map(Number);
-
-  return { day, month, year };
-};
-
-const createDateValue = ({ day, month, year }: DateParts) =>
-  `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return '여행 일정 생성에 실패했습니다.';
-}
-
-const addDays = (date: Date, days: number) => {
-  const nextDate = new Date(date);
-  nextDate.setDate(nextDate.getDate() + days);
-
-  return nextDate;
-};
-
-const compareDateParts = (left: DateParts, right: DateParts) => createDateValue(left).localeCompare(createDateValue(right));
-
-const getDaysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
-
-
-const shiftMonth = (parts: DateParts, offset: number): DateParts => {
-  const date = new Date(parts.year, parts.month - 1 + offset, 1);
-
-  return { day: 1, month: date.getMonth() + 1, year: date.getFullYear() };
-};
-
-const getCalendarDays = (monthParts: DateParts, minDate: DateParts, maxDate: DateParts) => {
-  const firstDay = new Date(monthParts.year, monthParts.month - 1, 1);
-  const firstWeekday = firstDay.getDay();
-  const daysInMonth = getDaysInMonth(monthParts.year, monthParts.month);
-  const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
-  const firstCalendarDate = addDays(firstDay, -firstWeekday);
-
-  return Array.from({ length: totalCells }, (_, index): CalendarDay => {
-    const date = addDays(firstCalendarDate, index);
-    const parts = {
-      day: date.getDate(),
-      month: date.getMonth() + 1,
-      year: date.getFullYear(),
-    };
-    const dateValue = createDateValue(parts);
-    const isSelectable = compareDateParts(parts, minDate) >= 0 && compareDateParts(parts, maxDate) <= 0;
-
-    return {
-      ...parts,
-      dateValue,
-      isCurrentMonth: parts.month === monthParts.month && parts.year === monthParts.year,
-      isSelectable,
-    };
-  });
-};
-
-const isDateInRange = (value: string, startDate: string, endDate: string) => value >= startDate && value <= endDate;
-
-const getOccupiedDateValues = (schedules: TripSchedule[]) => {
-  const occupiedDates = new Set<string>();
-
-  schedules.forEach((schedule) => {
-    if (!schedule.startDate || !schedule.endDate) {
-      return;
-    }
-
-    let currentDate = new Date(`${schedule.startDate}T00:00:00`);
-    const lastDate = new Date(`${schedule.endDate}T00:00:00`);
-
-    while (currentDate <= lastDate) {
-      occupiedDates.add(formatDateValue(currentDate));
-      currentDate = addDays(currentDate, 1);
-    }
-  });
-
-  return occupiedDates;
-};
-
-const createFallbackInviteUrl = (inviteToken: string) => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const url = new URL('/trip/invite', window.location.origin);
-    url.searchParams.set('inviteToken', inviteToken);
-
-    return url.toString();
-  }
-
-  return Linking.createURL('/trip/invite', {
-    isTripleSlashed: true,
-    queryParams: {
-      inviteToken,
-    },
-  });
-};
-
-const getInviteUrl = (invite: TripInvite | null) => {
-  if (!invite) {
-    return '';
-  }
-
-  return invite.inviteUrl ?? createFallbackInviteUrl(invite.inviteToken);
-};
-
-function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
 
 export default function TripCreateScreen() {
   const params = useLocalSearchParams<{ pendingMissionId?: string | string[] }>();
   const pendingMissionId = getParamValue(params.pendingMissionId);
-  const {
-    bottomActionInset,
-    horizontalPadding,
-    isCompactWidth,
-    isTallScreen,
-    topInset,
-  } = useResponsiveLayout();
+  const { bottomActionInset, horizontalPadding, isCompactWidth, isTallScreen, topInset } = useResponsiveLayout();
   const contentTopGap = isTallScreen ? 36 : 22;
   const nextButtonPadding = isTallScreen ? 18 : 15;
   const bottomButtonInset = Math.max(bottomActionInset - 8, 0);
   const nextButtonOffset = 32;
   const titleSize = isCompactWidth ? 21 : 23;
-  const today = useMemo(() => new Date(), []);
-  const minStartDate = useMemo(() => parseDateValue(formatDateValue(today)), [today]);
-  const maxTripDate = useMemo(() => parseDateValue(formatDateValue(addDays(today, 179))), [today]);
-  const [startDate, setStartDate] = useState<string | null>(null);
-  const [endDate, setEndDate] = useState<string | null>(null);
-  const [scheduleName, setScheduleName] = useState('');
-  const [inviteSheetVisible, setInviteSheetVisible] = useState(false);
-  const [draftSchedule, setDraftSchedule] = useState<TripSchedule | null>(null);
-  const [inviteData] = useState<TripInvite | null>(null);
-  const [isCreatingInvite] = useState(false);
-  const [isSharingInvite, setIsSharingInvite] = useState(false);
-  const [step, setStep] = useState<TripStep>('date');
-  const [isSelectingEndDate, setIsSelectingEndDate] = useState(false);
-  const [calendarMonth, setCalendarMonth] = useState<DateParts>(() => {
-    const parts = parseDateValue(formatDateValue(today));
-
-    return { ...parts, day: 1 };
-  });
-  const [message, setMessage] = useState('');
-  const [isCreatingSchedule, setIsCreatingSchedule] = useState(false);
-  const [occupiedDateValues, setOccupiedDateValues] = useState<Set<string>>(() => getOccupiedDateValues(getCachedTripSchedules()));
-
-  const calendarDays = useMemo(() => getCalendarDays(calendarMonth, minStartDate, maxTripDate), [calendarMonth, maxTripDate, minStartDate]);
-  const canGoPrevMonth = compareDateParts(shiftMonth(calendarMonth, -1), { ...minStartDate, day: 1 }) >= 0;
-  const canGoNextMonth = compareDateParts(shiftMonth(calendarMonth, 1), { ...maxTripDate, day: 1 }) <= 0;
-  const roomName = scheduleName.trim();
-  const canProceedFromDate = Boolean(startDate);
-  const canStartTrip = roomName.length > 0;
-  const isBottomButtonDisabled = isCreatingSchedule || isCreatingInvite || (step === 'date' ? !canProceedFromDate : !canStartTrip);
-  const inviteUrl = getInviteUrl(inviteData);
-
-  useEffect(() => {
-    let isActive = true;
-
-    listTripSchedules()
-      .then((schedules) => {
-        if (isActive) {
-          setOccupiedDateValues(getOccupiedDateValues(schedules));
-        }
-      })
-      .catch(() => {
-        // 캐시에 저장된 일정 날짜를 그대로 사용한다.
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
-
-  const handleScheduleNameChange = (value: string) => {
-    setScheduleName(value);
-    setMessage('');
-  };
-
-  const handleDateSelect = (day: CalendarDay) => {
-    if (!day.isSelectable || occupiedDateValues.has(day.dateValue)) {
-      return;
-    }
-
-    if (!startDate || !isSelectingEndDate || day.dateValue < startDate) {
-      setStartDate(day.dateValue);
-      setEndDate(day.dateValue);
-      setIsSelectingEndDate(true);
-    } else {
-      const includesOccupiedDate = [...occupiedDateValues].some((dateValue) => isDateInRange(dateValue, startDate, day.dateValue));
-
-      if (includesOccupiedDate) {
-        setMessage('이미 등록된 일정과 겹치지 않는 날짜를 선택해 주세요.');
-        return;
-      }
-
-      setEndDate(day.dateValue);
-      setIsSelectingEndDate(false);
-    }
-
-    setMessage('');
-  };
-
-  const handleDateStepNext = () => {
-    if (!startDate) {
-      return;
-    }
-
-    setStep('people');
-    setMessage('');
-  };
-
-  const handleBack = () => {
-    if (inviteSheetVisible) {
-      setInviteSheetVisible(false);
-      return;
-    }
-
-    if (step === 'people') {
-      setMessage('');
-      setStep('date');
-      return;
-    }
-
-    router.back();
-  };
-
-  const createOrSyncDraftSchedule = async () => {
-    if (!startDate || !endDate) {
-      throw new Error('여행 날짜를 선택해 주세요.');
-    }
-
-    if (!roomName) {
-      throw new Error('일정 이름을 입력해 주세요.');
-    }
-
-    const input = {
-      endDate,
-      peopleCount: '1',
-      roomName,
-      startDate,
-    };
-
-    const schedule = draftSchedule
-      ? await updateDraftSchedule({ ...input, scheduleId: draftSchedule.scheduleId })
-      : await createDraftSchedule(input);
-
-    setDraftSchedule(schedule);
-
-    return schedule;
-  };
-
-  const closeInviteSheet = () => {
-    if (isSharingInvite) {
-      return;
-    }
-
-    setInviteSheetVisible(false);
-    setMessage('');
-  };
-
-  const handleShareInvite = async () => {
-    if (!inviteData || !inviteUrl || isSharingInvite) {
-      return;
-    }
-
-    const templateArgs = createKakaoInviteTemplateArgs({ ...inviteData, inviteUrl });
-
-    try {
-      setIsSharingInvite(true);
-      setMessage('');
-      await shareKakaoInvite(templateArgs);
-      setInviteSheetVisible(false);
-      setMessage('카카오톡 초대장을 열었어요.');
-    } catch (error) {
-      setMessage(`카카오 초대 실패: ${getErrorMessage(error)}`);
-    } finally {
-      setIsSharingInvite(false);
-    }
-  };
-
-  const handleCopyInviteLink = async () => {
-    if (!inviteUrl) {
-      return;
-    }
-
-    await Clipboard.setStringAsync(inviteUrl);
-    setMessage('초대 링크를 복사했어요.');
-  };
-
-  const handleNext = async () => {
-    if (isCreatingSchedule || isCreatingInvite || !canStartTrip) {
-      return;
-    }
-
-    try {
-      Keyboard.dismiss();
-      setIsCreatingSchedule(true);
-      setMessage('');
-      const schedule = await createOrSyncDraftSchedule();
-
-      if (pendingMissionId) {
-        await addMissionToSchedule(schedule.scheduleId, pendingMissionId, schedule.startDate ?? startDate);
-        router.replace({ pathname: '/trip/active', params: { scheduleId: schedule.scheduleId } });
+  const {
+    calendarDays,
+    calendarMonth,
+    canGoNextMonth,
+    canGoPrevMonth,
+    closeInviteSheet,
+    endDate,
+    handleBack,
+    handleCopyInviteLink,
+    handleDateSelect,
+    handleDateStepNext,
+    handleNext,
+    handleScheduleNameChange,
+    handleShareInvite,
+    inviteSheetVisible,
+    isBottomButtonDisabled,
+    isCreatingSchedule,
+    isSharingInvite,
+    message,
+    occupiedDateValues,
+    setCalendarMonth,
+    setScheduleName,
+    scheduleName,
+    startDate,
+    step,
+  } = useTripCreate({
+    onBack: () => router.back(),
+    onCreated: (scheduleId, createdPendingMissionId) => {
+      if (createdPendingMissionId) {
+        router.replace({ pathname: '/trip/active', params: { scheduleId } });
         return;
       }
 
       router.replace('/trip/hub');
-    } catch (error) {
-      setIsCreatingSchedule(false);
-      setMessage(getErrorMessage(error));
-    }
-  };
+    },
+    pendingMissionId,
+  });
 
   return (
     <View
@@ -365,14 +73,7 @@ export default function TripCreateScreen() {
       ]}>
       <TopBar title="여행 시작하기" onBack={handleBack} />
 
-      <View
-        style={[
-          styles.content,
-          {
-            paddingTop: contentTopGap,
-            paddingBottom: 14,
-          },
-        ]}>
+      <View style={[styles.content, { paddingBottom: 14, paddingTop: contentTopGap }]}>
         {step === 'date' ? (
           <>
             <View>
@@ -380,69 +81,17 @@ export default function TripCreateScreen() {
               <Text style={[styles.heading, { fontSize: titleSize }]}>여행 기간을 알려주세요</Text>
               <Text style={styles.description}>여행 기간에 맞춰 미션이 부여돼요.</Text>
             </View>
-
-            <View style={styles.calendarSection}>
-              <View style={styles.calendarHeader}>
-                <Text style={styles.monthTitle}>
-                  {calendarMonth.year}년 {calendarMonth.month}월
-                </Text>
-                <View style={styles.monthButtons}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="이전 달"
-                    disabled={!canGoPrevMonth}
-                    onPress={() => setCalendarMonth((current) => shiftMonth(current, -1))}
-                    style={styles.monthButton}>
-                    <Text style={[styles.monthButtonText, !canGoPrevMonth && styles.disabledMonthButtonText]}>‹</Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="다음 달"
-                    disabled={!canGoNextMonth}
-                    onPress={() => setCalendarMonth((current) => shiftMonth(current, 1))}
-                    style={styles.monthButton}>
-                    <Text style={[styles.monthButtonText, !canGoNextMonth && styles.disabledMonthButtonText]}>›</Text>
-                  </Pressable>
-                </View>
-              </View>
-
-              <View style={styles.weekdayRow}>
-                {weekdayLabels.map((day) => (
-                  <Text key={day} style={styles.weekdayText}>
-                    {day}
-                  </Text>
-                ))}
-              </View>
-
-              <View style={styles.calendarGrid}>
-                {calendarDays.map((day) => {
-                  const isSelected = startDate && endDate ? isDateInRange(day.dateValue, startDate, endDate) : false;
-                  const isOccupied = occupiedDateValues.has(day.dateValue);
-                  const isDayDisabled = !day.isSelectable || isOccupied;
-
-                  return (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: isDayDisabled, selected: isSelected }}
-                      disabled={isDayDisabled}
-                      key={day.dateValue}
-                      onPress={() => handleDateSelect(day)}
-                      style={styles.dayCell}>
-                      {isSelected ? <View style={styles.rangeFill} /> : null}
-                      <Text
-                        style={[
-                          styles.dayText,
-                          !day.isCurrentMonth && styles.outsideMonthText,
-                          isDayDisabled && styles.disabledDayText,
-                          isSelected && styles.selectedDayText,
-                        ]}>
-                        {day.day}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
+            <TripCreateCalendar
+              calendarDays={calendarDays}
+              calendarMonth={calendarMonth}
+              canGoNextMonth={canGoNextMonth}
+              canGoPrevMonth={canGoPrevMonth}
+              endDate={endDate}
+              occupiedDateValues={occupiedDateValues}
+              onChangeMonth={(offset) => setCalendarMonth((current) => shiftMonth(current, offset))}
+              onSelectDate={handleDateSelect}
+              startDate={startDate}
+            />
           </>
         ) : (
           <>
@@ -451,25 +100,7 @@ export default function TripCreateScreen() {
               <Text style={[styles.heading, { fontSize: titleSize }]}>어떤 여행인가요?</Text>
               <Text style={styles.description}>일정 이름을 작성해주세요</Text>
             </View>
-
-            <View style={styles.tripSetupSection}>
-              <Text style={styles.formLabel}>일정 이름</Text>
-                <View style={styles.inputLine}>
-                  <TextInput
-                    accessibilityLabel="일정 이름"
-                    onChangeText={handleScheduleNameChange}
-                    placeholder="우정여행"
-                    placeholderTextColor="#A3AAAE"
-                    style={styles.scheduleInput}
-                    value={scheduleName}
-                  />
-                  {scheduleName ? (
-                    <Pressable accessibilityRole="button" accessibilityLabel="일정 이름 지우기" onPress={() => setScheduleName('')} style={styles.clearButton}>
-                      <Text style={styles.clearButtonText}>×</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-            </View>
+            <TripCreateNameForm onChangeName={handleScheduleNameChange} onClearName={() => setScheduleName('')} scheduleName={scheduleName} />
           </>
         )}
 
@@ -481,366 +112,19 @@ export default function TripCreateScreen() {
           disabled={isBottomButtonDisabled}
           onPress={step === 'date' ? handleDateStepNext : handleNext}
           pressedScale={0.97}
-          style={[
-            styles.nextButton,
-            { paddingVertical: nextButtonPadding },
-            step === 'people' && styles.startTripButton,
-            isBottomButtonDisabled && styles.disabledButton,
-          ]}>
+          style={[styles.nextButton, { paddingVertical: nextButtonPadding }, step === 'people' && styles.startTripButton, isBottomButtonDisabled && styles.disabledButton]}>
           {isCreatingSchedule ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.nextButtonText, step === 'people' && styles.startTripButtonText]}>{step === 'date' ? '다음' : '여행 시작'}</Text>}
         </ScalePressable>
       </View>
 
-      <Modal animationType="fade" transparent visible={inviteSheetVisible} onRequestClose={closeInviteSheet}>
-        <Pressable accessibilityLabel="초대 닫기" onPress={closeInviteSheet} style={styles.inviteModalBackdrop}>
-          <Pressable style={styles.invitePanel}>
-            <Text style={styles.invitePanelTitle}>동행자 추가하기</Text>
-            <View style={styles.inviteTopDivider} />
-
-            <View style={styles.inviteOptionsRow}>
-              <Pressable accessibilityRole="button" accessibilityLabel="카카오톡으로 초대하기" onPress={handleShareInvite} style={styles.inviteOption}>
-                <View style={[styles.kakaoInviteAvatar, isSharingInvite && styles.disabledButton]}>
-                  {isSharingInvite ? <ActivityIndicator color="#3A2D00" /> : <Text style={styles.kakaoTalkText}>TALK</Text>}
-                </View>
-                <Text style={styles.inviteOptionText}>카카오톡</Text>
-              </Pressable>
-
-              {[
-                { label: '연진이', color: '#E9EDF0' },
-                { label: '김민지', color: '#E9EDF0' },
-              ].map((item) => (
-                <Pressable accessibilityRole="button" accessibilityLabel={`${item.label}에게 카카오톡 초대하기`} key={item.label} onPress={handleShareInvite} style={styles.inviteOption}>
-                  <View style={[styles.inviteContactAvatar, { backgroundColor: item.color }]}>
-                    <View style={styles.contactKakaoBadge}>
-                      <Text style={styles.contactKakaoText}>TALK</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.inviteOptionText}>{item.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <View style={styles.inviteMiddleDivider} />
-
-            <Pressable accessibilityRole="button" accessibilityLabel="초대 링크 복사하기" onPress={handleCopyInviteLink} style={styles.copyInviteButton}>
-              <Text style={styles.copyInviteText}>링크 복사하기</Text>
-              <View style={styles.copyIcon}>
-                <View style={styles.copyIconBack} />
-                <View style={styles.copyIconFront} />
-              </View>
-            </Pressable>
-            {message ? <Text style={styles.inviteMessageText}>{message}</Text> : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <TripInviteModal
+        isSharingInvite={isSharingInvite}
+        message={message}
+        onClose={closeInviteSheet}
+        onCopyLink={handleCopyInviteLink}
+        onShare={handleShareInvite}
+        visible={inviteSheetVisible}
+      />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: '#ffffff',
-    flex: 1,
-  },
-
-  content: {
-    flex: 1,
-  },
-  stepText: {
-    color: '#409CB7',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  heading: {
-    color: '#10161F',
-    fontWeight: '600',
-    lineHeight: 30,
-  },
-  description: {
-    color: '#8A9194',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  calendarSection: {
-    marginTop: 38,
-  },
-  calendarHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  monthTitle: {
-    color: '#10161F',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  monthButtons: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  monthButton: {
-    alignItems: 'center',
-    height: 30,
-    justifyContent: 'center',
-    width: 30,
-  },
-  monthButtonText: {
-    color: '#10161F',
-    fontSize: 38,
-    lineHeight: 28,
-  },
-  disabledMonthButtonText: {
-    color: '#DDE3E6',
-  },
-  weekdayRow: {
-    flexDirection: 'row',
-    marginTop: 24,
-  },
-  weekdayText: {
-    color: '#10161F',
-    flex: 1,
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 2,
-    minHeight: 264,
-  },
-  dayCell: {
-    alignItems: 'center',
-    height: 44,
-    justifyContent: 'center',
-    width: '14.285714%',
-  },
-  rangeFill: {
-    backgroundColor: '#C9E4EE',
-    borderRadius: 999,
-    height: 40,
-    position: 'absolute',
-    width: 40,
-  },
-  dayText: {
-    color: '#8A9194',
-    fontSize: 14,
-    fontWeight: '400',
-    zIndex: 1,
-  },
-  outsideMonthText: {
-    color: '#DCE3E6',
-  },
-  disabledDayText: {
-    color: '#DCE3E6',
-  },
-  selectedDayText: {
-    color: '#10161F',
-    fontWeight: '500',
-  },
-  tripSetupSection: {
-    marginTop: 58,
-  },
-  formLabel: {
-    color: '#8A9194',
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  inputLine: {
-    alignItems: 'center',
-    borderBottomColor: '#D6D6D6',
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    height: 42,
-  },
-  scheduleInput: {
-    color: '#10161F',
-    flex: 1,
-    fontSize: 24,
-    fontWeight: '500',
-    height: 42,
-    includeFontPadding: false,
-    lineHeight: 30,
-    padding: 0,
-    textAlignVertical: 'center',
-  },
-  clearButton: {
-    alignItems: 'center',
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  clearButtonText: {
-    color: '#CECECE',
-    fontSize: 32,
-    fontWeight: '300',
-    lineHeight: 42,
-  },
-  messageText: {
-    color: '#D06958',
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  nextButton: {
-    alignItems: 'center',
-    backgroundColor: '#6EA4BF',
-    borderRadius: 999,
-    justifyContent: 'center',
-    shadowColor: '#6EA4BF',
-    shadowOffset: { height: 8, width: 0 },
-    shadowOpacity: 0.26,
-    shadowRadius: 18,
-  },
-  disabledButton: {
-    opacity: 0.65,
-  },
-  startTripButton: {
-    backgroundColor: '#D6EAF5',
-    shadowOpacity: 0,
-  },
-  nextButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  startTripButtonText: {
-    color: '#6EA4BF',
-  },
-  inviteModalBackdrop: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.24)',
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingBottom: 63,
-    paddingHorizontal: 18,
-  },
-  invitePanel: {
-    backgroundColor: '#ffffff',
-    borderRadius: 22,
-    overflow: 'hidden',
-    paddingBottom: 24,
-    paddingTop: 28,
-    width: '100%',
-  },
-  invitePanelTitle: {
-    color: '#10161F',
-    fontSize: 16,
-    fontWeight: '500',
-    paddingHorizontal: 32,
-  },
-  inviteTopDivider: {
-    backgroundColor: '#E8ECEF',
-    height: 1,
-    marginTop: 22,
-  },
-  inviteMiddleDivider: {
-    backgroundColor: '#E8ECEF',
-    height: 1,
-  },
-  inviteOptionsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingBottom: 14,
-    paddingHorizontal: 32,
-    paddingTop: 14,
-  },
-  inviteOption: {
-    alignItems: 'center',
-    gap: 7,
-    width: 66,
-  },
-  kakaoInviteAvatar: {
-    alignItems: 'center',
-    backgroundColor: '#FBE339',
-    borderRadius: 999,
-    height: 56,
-    justifyContent: 'center',
-    width: 56,
-  },
-  kakaoTalkText: {
-    color: '#3A2D00',
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  inviteContactAvatar: {
-    borderRadius: 999,
-    height: 56,
-    position: 'relative',
-    width: 56,
-  },
-  contactKakaoBadge: {
-    alignItems: 'center',
-    backgroundColor: '#FBE339',
-    borderColor: '#ffffff',
-    borderRadius: 999,
-    borderWidth: 2,
-    bottom: 4,
-    height: 23,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: -2,
-    width: 23,
-  },
-  contactKakaoText: {
-    color: '#3A2D00',
-    fontSize: 5,
-    fontWeight: '800',
-  },
-  inviteOptionText: {
-    color: '#54676F',
-    fontSize: 12,
-    fontWeight: '400',
-  },
-  copyInviteButton: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: '#E9EDF0',
-    borderRadius: 16,
-    flexDirection: 'row',
-    height: 56,
-    justifyContent: 'space-between',
-    marginTop: 18,
-    paddingHorizontal: 34,
-    width: '81%',
-  },
-  copyInviteText: {
-    color: '#54676F',
-    fontSize: 12,
-    fontWeight: '400',
-  },
-  copyIcon: {
-    height: 25,
-    position: 'relative',
-    width: 25,
-  },
-  copyIconBack: {
-    borderColor: '#54676F',
-    borderRadius: 2,
-    borderWidth: 2,
-    height: 20,
-    left: 4,
-    position: 'absolute',
-    top: 5,
-    width: 16,
-  },
-  copyIconFront: {
-    backgroundColor: '#E9EDF0',
-    borderColor: '#54676F',
-    borderRadius: 2,
-    borderWidth: 2,
-    height: 20,
-    left: 10,
-    position: 'absolute',
-    top: 0,
-    width: 16,
-  },
-  inviteMessageText: {
-    color: '#409CB7',
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 10,
-    paddingHorizontal: 32,
-  },
-});

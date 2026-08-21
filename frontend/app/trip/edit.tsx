@@ -1,9 +1,8 @@
 import * as Clipboard from 'expo-clipboard';
-import * as Linking from 'expo-linking';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
 
 import { ProfileAvatar } from '@/components/profile-avatar';
@@ -12,6 +11,7 @@ import { TopBar } from '@/components/top-bar';
 import { TripInviteSheet } from '@/components/trip-invite-sheet';
 import { TripDatePicker } from '@/components/trip-date-picker';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { createFallbackInviteUrl, formatDateLabel, getDateCount, getParamValue, isTripStartedDate } from '@/features/trip/edit/trip-edit-data';
 import { getAuthItem } from '@/lib/auth-storage';
 import { shareKakaoInvite } from '@/lib/kakao-share';
 import { removeTripCompanion } from '@/lib/trip-companion-api';
@@ -21,49 +21,6 @@ import { removeMissionFromSchedule, getTripSchedule, updateDraftSchedule, update
 const crownIcon = require('@/assets/svg/active/crown_black.svg');
 const blackChevronIcon = require('@/assets/svg/active/inv_chevron_black.svg');
 const greyChevronIcon = require('@/assets/svg/active/inv_chevron_grey.svg');
-
-function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function parseDate(value: string | null | undefined) {
-  if (!value) return null;
-  const [year, month, day] = value.split('-').map(Number);
-  return Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day) ? new Date(year, month - 1, day) : null;
-}
-
-function getDateCount(startDate: string | null | undefined, endDate: string | null | undefined) {
-  const start = parseDate(startDate);
-  const end = parseDate(endDate);
-  if (!start || !end) return 0;
-  return Math.round((Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) - Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) / 86400000) + 1;
-}
-
-function isTripStartedDate(startDate: string | null | undefined) {
-  const start = parseDate(startDate);
-  if (!start) return false;
-
-  const today = new Date();
-  const todayValue = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-  const startValue = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
-
-  return todayValue >= startValue;
-}
-function formatDateLabel(value: string | null | undefined, withYear = true) {
-  const date = parseDate(value);
-  if (!date) return '날짜 선택';
-  return withYear ? `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일` : `${date.getMonth() + 1}월 ${date.getDate()}일`;
-}
-
-function createFallbackInviteUrl(invite: TripInvite) {
-  if (invite.inviteUrl) return invite.inviteUrl;
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const url = new URL('/trip/invite', window.location.origin);
-    url.searchParams.set('inviteToken', invite.inviteToken);
-    return url.toString();
-  }
-  return Linking.createURL('/trip/invite', { isTripleSlashed: true, queryParams: { inviteToken: invite.inviteToken } });
-}
 
 export default function EditTripScreen() {
   const params = useLocalSearchParams<{ scheduleId?: string | string[] }>();
