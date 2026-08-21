@@ -60,10 +60,10 @@ function getInviteUrl(invite: TripInvite | null) {
   return invite.inviteUrl ?? createFallbackInviteUrl(invite.inviteToken);
 }
 
-const activeAddIcon = require('../../assets/svg/active/add.svg');
-const activeAddPeopleIcon = require('../../assets/svg/active/add_people.svg');
-const activeSettingIcon = require('../../assets/svg/active/setting.svg');
-const crownIcon = require('../../assets/svg/active/crown.svg');
+const activeAddIcon = require('@/assets/svg/active/add.svg');
+const activeAddPeopleIcon = require('@/assets/svg/active/add_people.svg');
+const activeSettingIcon = require('@/assets/svg/active/setting.svg');
+const crownIcon = require('@/assets/svg/active/crown.svg');
 const REVEALED_SESSION_CACHE_PREFIX = 'trip_revealed_sessions:';
 
 function getRevealedSessionCacheKey(scheduleId: string) {

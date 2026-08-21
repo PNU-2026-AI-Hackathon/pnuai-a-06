@@ -10,11 +10,11 @@ import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { fetchMissions, type MissionItem } from '@/lib/mission-api';
 
-const dividedMap = require('../../assets/svg/map/divided_map.svg');
+const dividedMap = require('@/assets/svg/map/divided_map.svg');
 const themeMapByCategory: Record<MissionTheme, number> = {
-  MOUNTAIN: require('../../assets/svg/map/mountain_map.svg'),
-  SEA: require('../../assets/svg/map/sea_map.svg'),
-  CITY: require('../../assets/svg/map/city_map.svg'),
+  MOUNTAIN: require('@/assets/svg/map/mountain_map.svg'),
+  SEA: require('@/assets/svg/map/sea_map.svg'),
+  CITY: require('@/assets/svg/map/city_map.svg'),
   DEMO: dividedMap,
 };
 
@@ -23,26 +23,26 @@ type CategoryValue = MissionTheme | 'ACQUIRED';
 
 const categoryItems = [
   {
-    icon: require('../../assets/svg/theme_icon/mountain.svg'),
-    selectedIcon: require('../../assets/svg/theme_icon/mountain_filled.svg'),
+    icon: require('@/assets/svg/theme_icon/mountain.svg'),
+    selectedIcon: require('@/assets/svg/theme_icon/mountain_filled.svg'),
     label: '산',
     value: 'MOUNTAIN',
   },
   {
-    icon: require('../../assets/svg/theme_icon/sea.svg'),
-    selectedIcon: require('../../assets/svg/theme_icon/sea_filled.svg'),
+    icon: require('@/assets/svg/theme_icon/sea.svg'),
+    selectedIcon: require('@/assets/svg/theme_icon/sea_filled.svg'),
     label: '바다',
     value: 'SEA',
   },
   {
-    icon: require('../../assets/svg/theme_icon/city.svg'),
-    selectedIcon: require('../../assets/svg/theme_icon/city_filled.svg'),
+    icon: require('@/assets/svg/theme_icon/city.svg'),
+    selectedIcon: require('@/assets/svg/theme_icon/city_filled.svg'),
     label: '도시',
     value: 'CITY',
   },
   {
-    icon: require('../../assets/svg/theme_icon/flag.svg'),
-    selectedIcon: require('../../assets/svg/theme_icon/flag_filled.svg'),
+    icon: require('@/assets/svg/theme_icon/flag.svg'),
+    selectedIcon: require('@/assets/svg/theme_icon/flag_filled.svg'),
     label: '데모',
     value: 'DEMO',
   },

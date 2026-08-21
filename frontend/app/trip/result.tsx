@@ -10,9 +10,9 @@ import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getLatestMissionSession, getMissionSession, getPassedMissionSubmissions, type MissionSession } from '@/lib/mission-session-api';
 import { getTripSchedule } from '@/lib/trip-schedule-api';
 
-const pinkEffect = require('../../assets/svg/effect/pink_llipse.svg');
-const yellowEffect = require('../../assets/svg/effect/yellow_ellipse.svg');
-const blueEffect = require('../../assets/svg/effect/blue_ellipse.svg');
+const pinkEffect = require('@/assets/svg/effect/pink_llipse.svg');
+const yellowEffect = require('@/assets/svg/effect/yellow_ellipse.svg');
+const blueEffect = require('@/assets/svg/effect/blue_ellipse.svg');
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;

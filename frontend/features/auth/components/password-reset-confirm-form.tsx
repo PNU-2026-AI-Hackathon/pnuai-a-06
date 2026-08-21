@@ -1,3 +1,4 @@
+// 인증 코드와 새 비밀번호를 입력하는 재설정 완료 폼입니다.
 import { LocalizedText as Text } from '@/components/localized-text';
 
 import { AuthInput } from './auth-input';

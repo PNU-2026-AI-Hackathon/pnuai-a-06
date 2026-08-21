@@ -21,7 +21,7 @@ import {
   type MissionSession,
 } from '@/lib/mission-session-api';
 
-const nextArrowIcon = require('../../assets/svg/active/next_arrow.svg');
+const nextArrowIcon = require('@/assets/svg/active/next_arrow.svg');
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;

@@ -1,3 +1,4 @@
+// 인증 기능 화면들을 조립하고 라우팅하는 진입점입니다.
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { AuthFormLayout } from '@/features/auth/components/auth-form-layout';

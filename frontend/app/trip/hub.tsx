@@ -11,9 +11,9 @@ import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
 import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, updateTripScheduleOrder, type TripSchedule } from '@/lib/trip-schedule-api';
 
-const birdIcon = require('../../assets/svg/active/3d_bird.svg');
-const crownIcon = require('../../assets/svg/active/crown.svg');
-const galleryIcon = require('../../assets/svg/active/gallery.svg');
+const birdIcon = require('@/assets/svg/active/3d_bird.svg');
+const crownIcon = require('@/assets/svg/active/crown.svg');
+const galleryIcon = require('@/assets/svg/active/gallery.svg');
 const CARD_DRAG_STEP = 82;
 const CARD_SHIFT_DISTANCE = 100;
 

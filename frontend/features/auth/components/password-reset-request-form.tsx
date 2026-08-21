@@ -1,3 +1,4 @@
+// 비밀번호 재설정 요청용 이메일 입력 폼입니다.
 import { LocalizedText as Text } from '@/components/localized-text';
 
 import { AuthInput } from './auth-input';

@@ -7,8 +7,8 @@ import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { refreshAuthToken, saveAuthTokens, saveWebKakaoAuthToken } from '@/lib/auth-api';
 import { deletePersistentAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
 
-const splashText = require('../assets/svg/logo_text.svg');
-const splashMap = require('../assets/svg/splash_map.svg');
+const splashText = require('@/assets/svg/logo_text.svg');
+const splashMap = require('@/assets/svg/splash_map.svg');
 const MIN_SPLASH_DURATION = 1000;
 
 function waitForMinimumSplash(startedAt: number) {

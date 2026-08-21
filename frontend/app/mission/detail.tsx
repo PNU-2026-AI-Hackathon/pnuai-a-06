@@ -14,10 +14,10 @@ import { addMissionToSchedule, getCachedTripSchedules, getTripSchedule, listTrip
 type MissionTheme = 'MOUNTAIN' | 'SEA' | 'CITY' | 'DEMO';
 
 const themeItems: { icon: number; label: string; value: MissionTheme }[] = [
-  { icon: require('../../assets/svg/mission_theme/mountain.svg'), label: '산', value: 'MOUNTAIN' },
-  { icon: require('../../assets/svg/mission_theme/sea.svg'), label: '바다', value: 'SEA' },
-  { icon: require('../../assets/svg/mission_theme/city.svg'), label: '도시', value: 'CITY' },
-  { icon: require('../../assets/svg/theme_icon/flag.svg'), label: '데모', value: 'DEMO' },
+  { icon: require('@/assets/svg/mission_theme/mountain.svg'), label: '산', value: 'MOUNTAIN' },
+  { icon: require('@/assets/svg/mission_theme/sea.svg'), label: '바다', value: 'SEA' },
+  { icon: require('@/assets/svg/mission_theme/city.svg'), label: '도시', value: 'CITY' },
+  { icon: require('@/assets/svg/theme_icon/flag.svg'), label: '데모', value: 'DEMO' },
 ];
 const districtCodeByLabel: Record<string, string> = {
   강서구: 'GANGSEO',

@@ -1,3 +1,4 @@
+// 이메일 로그인에 필요한 입력 폼을 담당합니다.
 import { AuthInput } from './auth-input';
 
 type EmailLoginFormProps = {

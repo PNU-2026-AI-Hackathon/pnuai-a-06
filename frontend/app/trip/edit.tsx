@@ -18,9 +18,9 @@ import { removeTripCompanion } from '@/lib/trip-companion-api';
 import { createKakaoInviteTemplateArgs, createTripInvite, type TripInvite } from '@/lib/trip-invite-api';
 import { removeMissionFromSchedule, getTripSchedule, updateDraftSchedule, updateScheduleMissionDate, type TripSchedule, type TripScheduleMission, type TripScheduleUser } from '@/lib/trip-schedule-api';
 
-const crownIcon = require('../../assets/svg/active/crown_black.svg');
-const blackChevronIcon = require('../../assets/svg/active/inv_chevron_black.svg');
-const greyChevronIcon = require('../../assets/svg/active/inv_chevron_grey.svg');
+const crownIcon = require('@/assets/svg/active/crown_black.svg');
+const blackChevronIcon = require('@/assets/svg/active/inv_chevron_black.svg');
+const greyChevronIcon = require('@/assets/svg/active/inv_chevron_grey.svg');
 
 function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;

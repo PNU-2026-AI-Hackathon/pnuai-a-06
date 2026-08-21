@@ -1,3 +1,4 @@
+// 로그인·회원가입·인증·비밀번호 재설정 흐름과 상태를 관리합니다.
 import { useState } from 'react';
 
 import {

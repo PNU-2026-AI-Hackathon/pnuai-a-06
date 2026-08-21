@@ -1,3 +1,4 @@
+// 닉네임·이메일·비밀번호를 입력하는 회원가입 폼입니다.
 import { View } from 'react-native';
 
 import { LocalizedText as Text } from '@/components/localized-text';

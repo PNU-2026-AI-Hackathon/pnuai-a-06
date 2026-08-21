@@ -1,3 +1,4 @@
+// Web과 Native 환경의 카카오 로그인 시작 처리를 담당합니다.
 import { login as loginWithKakao } from '@react-native-seoul/kakao-login';
 import { Platform } from 'react-native';
 

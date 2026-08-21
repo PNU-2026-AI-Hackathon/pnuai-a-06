@@ -7,9 +7,9 @@ import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { completeMissionSession, getMissionSession, getPassedMissionSubmissions } from '@/lib/mission-session-api';
 
 
-const pinkEffect = require('../../assets/svg/effect/pink_llipse.svg');
-const yellowEffect = require('../../assets/svg/effect/yellow_ellipse.svg');
-const blueEffect = require('../../assets/svg/effect/blue_ellipse.svg');
+const pinkEffect = require('@/assets/svg/effect/pink_llipse.svg');
+const yellowEffect = require('@/assets/svg/effect/yellow_ellipse.svg');
+const blueEffect = require('@/assets/svg/effect/blue_ellipse.svg');
 const param = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
 
 export default function VoteWaitingScreen() {

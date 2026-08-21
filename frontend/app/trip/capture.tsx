@@ -14,11 +14,11 @@ import { getAuthItem } from '@/lib/auth-storage';
 import { completeMissionSession, connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
 
-const cameraBackIcon = require('../../assets/svg/camera/back.svg');
-const cameraFlashOffIcon = require('../../assets/svg/camera/flash_off.svg');
-const cameraFlashOnIcon = require('../../assets/svg/camera/flash_on.svg');
-const cameraSwitchIcon = require('../../assets/svg/camera/autorenew.svg');
-const cameraTimerIcon = require('../../assets/svg/camera/time_stamp.svg');
+const cameraBackIcon = require('@/assets/svg/camera/back.svg');
+const cameraFlashOffIcon = require('@/assets/svg/camera/flash_off.svg');
+const cameraFlashOnIcon = require('@/assets/svg/camera/flash_on.svg');
+const cameraSwitchIcon = require('@/assets/svg/camera/autorenew.svg');
+const cameraTimerIcon = require('@/assets/svg/camera/time_stamp.svg');
 
 const MISSION_CARD_SOURCE_WIDTH = 164;
 const MISSION_CARD_SOURCE_HEIGHT = 209;

@@ -1,3 +1,4 @@
+// 카카오 로그인과 이메일 인증 메뉴를 보여주는 인증 시작 화면입니다.
 import { Image } from 'expo-image';
 import { View } from 'react-native';
 
@@ -7,9 +8,9 @@ import { ScalePressable } from '@/components/scale-pressable';
 import type { AuthMode } from '../types';
 import { styles } from '../styles';
 
-const kakaoTalk = require('../../../assets/svg/kakaotalk.svg');
-const splashMap = require('../../../assets/svg/splash_map.svg');
-const splashText = require('../../../assets/svg/logo_text.svg');
+const kakaoTalk = require('@/assets/svg/kakaotalk.svg');
+const splashMap = require('@/assets/svg/splash_map.svg');
+const splashText = require('@/assets/svg/logo_text.svg');
 
 type AuthHomeProps = {
   bottomActionInset: number;

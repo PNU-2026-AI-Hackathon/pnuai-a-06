@@ -1,3 +1,4 @@
+// 인증 화면 전체에서 사용하는 스타일 모음입니다.
 import { StyleSheet } from 'react-native';
 
 export const MATCH_COLOR = '#409CB7';

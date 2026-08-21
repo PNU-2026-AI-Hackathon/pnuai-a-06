@@ -1,3 +1,4 @@
+// 인증 입력 화면들의 공통 레이아웃과 제출 영역을 담당합니다.
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
@@ -9,7 +10,7 @@ import { ScalePressable } from '@/components/scale-pressable';
 import { styles } from '../styles';
 import { useAuthKeyboard } from '../hooks/use-auth-keyboard';
 
-const kakaoTalk = require('../../../assets/svg/kakaotalk.svg');
+const kakaoTalk = require('@/assets/svg/kakaotalk.svg');
 
 type AuthFormLayoutProps = {
   autoLogin: boolean;

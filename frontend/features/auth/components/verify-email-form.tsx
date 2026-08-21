@@ -1,3 +1,4 @@
+// 회원가입 후 이메일 인증 코드를 입력하는 폼입니다.
 import { LocalizedText as Text } from '@/components/localized-text';
 
 import { AuthInput } from './auth-input';

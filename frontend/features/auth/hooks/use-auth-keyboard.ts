@@ -1,3 +1,4 @@
+// 인증 폼의 키보드 표시와 입력 위치 보정을 관리합니다.
 import { useEffect, useRef, useState } from 'react';
 import { Keyboard, type ScrollView } from 'react-native';
 

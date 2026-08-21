@@ -5,7 +5,7 @@ import { LocalizedText as Text } from '@/components/localized-text';
 
 import { type TripInvite } from '@/lib/trip-invite-api';
 
-const kakaoTalkIcon = require('../assets/svg/kakaotalk.svg');
+const kakaoTalkIcon = require('@/assets/svg/kakaotalk.svg');
 
 type TripInviteSheetProps = {
   bottomSafeInset: number;
