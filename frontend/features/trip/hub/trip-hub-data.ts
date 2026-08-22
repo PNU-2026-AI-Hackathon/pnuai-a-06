@@ -5,6 +5,19 @@ import type { TripSchedule } from '@/lib/trip-schedule-api';
 export const CARD_DRAG_STEP = 82;
 export const CARD_SHIFT_DISTANCE = 100;
 
+export function getDragIndexOffset(dragY: number) {
+  const roundedOffset = Math.round(dragY / CARD_DRAG_STEP);
+  return roundedOffset === 0 && Math.abs(dragY) > 28 ? Math.sign(dragY) : roundedOffset;
+}
+
+export function isCreatorSchedule(schedule: TripSchedule, currentUserId: string | null) {
+  if (currentUserId && schedule.creatorId) {
+    return currentUserId === schedule.creatorId;
+  }
+
+  return schedule.permissions.canDeleteSchedule;
+}
+
 export function getDateKey(date: string | undefined) {
   if (!date) {
     return null;
