@@ -74,10 +74,42 @@ class EmailVerifyRequest(BaseModel):
         return code
 
 
+class EmailPasswordResetRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_email(value)
+
+
+class EmailPasswordResetConfirmRequest(BaseModel):
+    email: str
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_email(value)
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, value: str) -> str:
+        code = value.strip()
+        if not code.isdigit():
+            raise ValueError("Verification code must contain digits only.")
+        return code
+
+
 class EmailVerificationResponse(BaseModel):
     message: str
     expires_in_minutes: int
     dev_verification_code: str | None = None
+
+
+class EmailPasswordResetConfirmResponse(BaseModel):
+    message: str
 
 
 class UserResponse(BaseModel):

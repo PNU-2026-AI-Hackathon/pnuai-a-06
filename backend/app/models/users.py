@@ -47,3 +47,17 @@ class User(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    password_reset_code_hash: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    password_reset_attempts: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )

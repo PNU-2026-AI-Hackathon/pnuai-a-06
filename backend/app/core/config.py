@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     kakao_rest_api_key: str = Field(default="", alias="KAKAO_REST_API_KEY")
     kakao_client_secret: str = Field(default="", alias="KAKAO_CLIENT_SECRET")
+    kakao_admin_key: str = Field(default="", alias="KAKAO_ADMIN_KEY")
     kakao_redirect_uri: str = Field(
         default="http://localhost:8000/auth/kakao/callback",
         alias="KAKAO_REDIRECT_URI",
@@ -34,6 +35,12 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_vision_model: str = Field(default="gpt-5.4-mini", alias="OPENAI_VISION_MODEL")
     openai_vision_timeout_seconds: float = Field(default=60.0, alias="OPENAI_VISION_TIMEOUT_SECONDS")
+    openai_route_model: str = Field(default="gpt-5.4-mini", alias="OPENAI_ROUTE_MODEL")
+    openai_route_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        alias="OPENAI_ROUTE_TIMEOUT_SECONDS",
+    )
     mission_judgement_pass_score: float = Field(default=70.0, alias="MISSION_JUDGEMENT_PASS_SCORE")
     mission_judgement_review_score: float = Field(default=50.0, alias="MISSION_JUDGEMENT_REVIEW_SCORE")
     mission_location_max_accuracy_m: float = Field(
