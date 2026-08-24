@@ -59,6 +59,12 @@ export function getJudgementWaitingMessage(status: MissionJudgementStatus | null
   return status === 'PROCESSING' ? '사진을 확인하고 있어요.' : 'AI가 미션 사진을 확인하고 있어요.';
 }
 
+export function getJudgementFailureMessage(status: Extract<MissionJudgementStatus, 'REJECTED' | 'ERROR'>) {
+  return status === 'REJECTED'
+    ? 'AI 판정에 통과하지 못했어요. 다시 촬영해 주세요.'
+    : 'AI 확인 중 문제가 발생했어요. 다시 촬영해 주세요.';
+}
+
 export function getMyLatestSubmission(session: MissionSession, currentUserId: string | null, submittedSubmissionId: string | null) {
   if (submittedSubmissionId) {
     const submitted = session.submissions.find((submission) => submission.id === submittedSubmissionId);

@@ -66,6 +66,15 @@ export function useMissionParticipation({
     goBack();
   }, [goBack, isFocused]);
 
+  const returnToActiveAfterCancellation = useCallback(() => {
+    if (hasNavigated.current) {
+      return;
+    }
+
+    hasNavigated.current = true;
+    goBack();
+  }, [goBack]);
+
   const navigateToCapture = useCallback((nextSession: MissionSession) => {
     const nextMember = nextSession.members.find((member) => member.userId === currentUserId);
     if (!scheduleId || !nextSession.id || !nextMember || !isParticipating(nextMember.participationStatus) || hasNavigated.current) {
@@ -102,7 +111,7 @@ export function useMissionParticipation({
   const applySession = useCallback((nextSession: MissionSession) => {
     setSession(nextSession);
     if (nextSession.status === 'CANCELLED') {
-      returnToActiveAfterMissingSession();
+      returnToActiveAfterCancellation();
       return;
     }
     const nextMember = nextSession.members.find((member) => member.userId === currentUserId);
@@ -125,7 +134,7 @@ export function useMissionParticipation({
     if (nextSession.status === 'SHOOTING' || nextSession.status === 'UPLOADING') {
       navigateToCapture(nextSession);
     }
-  }, [currentUserId, navigateToCapture, navigateToReview, returnToActiveAfterMissingSession]);
+  }, [currentUserId, navigateToCapture, navigateToReview, returnToActiveAfterCancellation, returnToActiveAfterMissingSession]);
 
   useEffect(() => {
     if (

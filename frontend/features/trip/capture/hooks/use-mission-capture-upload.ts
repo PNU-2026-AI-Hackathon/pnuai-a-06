@@ -2,9 +2,10 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import { getAuthItem } from '@/lib/auth-storage';
-import { completeMissionSession, connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
+import { completeMissionSession, connectMissionSessionSocket, getMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getRemainingMs } from '@/features/trip/trip-data';
 import {
+  getJudgementFailureMessage,
   getJudgementWaitingMessage,
   getMyLatestSubmission,
   isDuplicateSubmissionError,
@@ -12,6 +13,7 @@ import {
   isWaitingJudgementStatus,
   runWithNetworkRetry,
 } from '../mission-capture-data';
+import { ensureCurrentUserCanSubmit, resolveMissionUploadSessionId } from '../mission-capture-upload-data';
 
 type UseMissionCaptureUploadOptions = {
   capturedPhotoUri: string | null;
@@ -133,24 +135,9 @@ export function useMissionCaptureUpload({
         return;
       }
 
-      if (nextJudgeStatus === 'REJECTED') {
-        // TEMP: AI 실패 여부와 관계없이 업로드 이후 플로우를 테스트한다.
-        // setIsMissionComplete(true);
-        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
-        // setReturnCountdown(3);
+      if (nextJudgeStatus === 'REJECTED' || nextJudgeStatus === 'ERROR') {
         setIsMissionComplete(false);
-        setUploadMessage('AI 판정에 통과하지 못했어요. 다시 촬영해 주세요.');
-        setReturnCountdown(null);
-        return;
-      }
-
-      if (nextJudgeStatus === 'ERROR') {
-        // TEMP: AI 오류 사진도 성공 처리하던 테스트 우회 코드.
-        // setIsMissionComplete(true);
-        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
-        // setReturnCountdown(3);
-        setIsMissionComplete(false);
-        setUploadMessage('AI 확인 중 문제가 발생했어요. 다시 촬영해 주세요.');
+        setUploadMessage(getJudgementFailureMessage(nextJudgeStatus));
         setReturnCountdown(null);
         return;
       }
@@ -227,41 +214,6 @@ export function useMissionCaptureUpload({
     setSubmittedSubmissionId(null);
   };
 
-  const ensureCurrentUserCanSubmit = async (uploadSessionId: string) => {
-    const currentUserId = getAuthItem('user_id');
-
-    if (!currentUserId) {
-      return;
-    }
-
-    const currentSession = await getMissionSession(uploadSessionId);
-    const activeSubmission = [...currentSession.submissions].reverse().find((submission) => submission.userId === currentUserId && !isRetryableJudgementStatus(submission.judgeStatus));
-
-    if (activeSubmission) {
-      throw new Error('이미 수행한 미션이에요. 한 미션은 한 번만 제출할 수 있어요.');
-    }
-  };
-
-  const resolveUploadSessionId = async () => {
-    if (sessionId) {
-      try {
-        const currentSession = await getMissionSession(sessionId);
-        return currentSession.id;
-      } catch (error) {
-        if (!isMissionSessionNotFoundError(error) || !scheduleId || !scheduleMissionId) {
-          throw error;
-        }
-      }
-    }
-
-    if (!scheduleId || !scheduleMissionId) {
-      throw new Error('미션 세션 정보가 없습니다.');
-    }
-
-    const latestSession = await getLatestMissionSession(scheduleId, scheduleMissionId);
-    return latestSession.id;
-  };
-
   const handleComplete = async () => {
     if (!capturedPhotoUri || isUploading || isUploadExpired) {
       return;
@@ -275,7 +227,7 @@ export function useMissionCaptureUpload({
       setJudgeReason(null);
       setJudgeStatus(null);
       setSubmittedSubmissionId(null);
-      const uploadSessionId = await resolveUploadSessionId();
+      const uploadSessionId = await resolveMissionUploadSessionId({ scheduleId, scheduleMissionId, sessionId });
       const uploadSession = await getMissionSession(uploadSessionId);
       setSession(uploadSession);
       const deadlineMs = getRemainingMs(uploadSession.photoUploadEndsAt ?? uploadSession.shootingEndsAt, Date.now());
@@ -283,7 +235,7 @@ export function useMissionCaptureUpload({
         throw new Error('제한 시간이 종료되어 업로드할 수 없어요.');
       }
       setUploadMessage('제출 가능 여부를 확인하는 중이에요.');
-      await ensureCurrentUserCanSubmit(uploadSessionId);
+      await ensureCurrentUserCanSubmit(uploadSessionId, getAuthItem('user_id'));
       setUploadMessage('사진을 업로드하는 중이에요.');
       const uploadedSubmission: MissionSubmission = await runWithNetworkRetry(() => uploadMissionSessionPhoto(uploadSessionId, capturedPhotoUri), 1);
       const nextJudgeStatus = uploadedSubmission.judgeStatus ?? null;
@@ -296,24 +248,9 @@ export function useMissionCaptureUpload({
         return;
       }
 
-      if (nextJudgeStatus === 'REJECTED') {
-        // TEMP: AI 실패 여부와 관계없이 업로드 이후 플로우를 테스트한다.
-        // setIsMissionComplete(true);
-        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
-        // setReturnCountdown(3);
+      if (nextJudgeStatus === 'REJECTED' || nextJudgeStatus === 'ERROR') {
         setIsMissionComplete(false);
-        setUploadMessage('AI 판정에 통과하지 못했어요. 다시 촬영해 주세요.');
-        setReturnCountdown(null);
-        return;
-      }
-
-      if (nextJudgeStatus === 'ERROR') {
-        // TEMP: AI 오류 사진도 성공 처리하던 테스트 우회 코드.
-        // setIsMissionComplete(true);
-        // setUploadMessage('테스트용으로 사진 업로드를 완료했어요.');
-        // setReturnCountdown(3);
-        setIsMissionComplete(false);
-        setUploadMessage('AI 확인 중 문제가 발생했어요. 다시 촬영해 주세요.');
+        setUploadMessage(getJudgementFailureMessage(nextJudgeStatus));
         setReturnCountdown(null);
         return;
       }
@@ -349,9 +286,6 @@ export function useMissionCaptureUpload({
     setJudgeReason,
     setJudgeStatus,
     setSubmittedSubmissionId,
-    setUploadMessage,
-    setReturnCountdown,
-    setJudgementSessionId,
     setIsMissionComplete,
     submittedSubmissionId,
     uploadMessage,

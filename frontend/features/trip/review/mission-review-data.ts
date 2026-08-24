@@ -15,12 +15,5 @@ export function getCommentParticipantIds(session: MissionSession | null | undefi
 }
 
 export function shouldSkipMissionVote(session: MissionSession | null | undefined, submissions: MissionSubmission[]) {
-  if (submissions.length !== 1) {
-    return false;
-  }
-
-  const commentParticipantIds = getCommentParticipantIds(session);
-  const onlySubmissionOwnerId = submissions[0]?.userId;
-
-  return !Array.from(commentParticipantIds).some((userId) => userId !== onlySubmissionOwnerId);
+  return session?.members.length === 1 && submissions.length === 1;
 }

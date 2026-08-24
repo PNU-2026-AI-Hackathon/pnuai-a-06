@@ -188,11 +188,14 @@ export function useActiveSchedule({
         }
       };
 
-      void syncSchedule();
       void syncActiveMissionSession();
+      const scheduleTimer = setInterval(() => {
+        void syncSchedule();
+      }, 1500);
 
       return () => {
         isActive = false;
+        clearInterval(scheduleTimer);
       };
     }, [rememberFeedSession, scheduleId, setSchedule])
   );
