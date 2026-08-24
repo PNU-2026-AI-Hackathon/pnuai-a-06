@@ -13,10 +13,6 @@ export const INVITE_COMPANIONS = [
 
 export type TripInviteStatus = 'idle' | 'loading' | 'ready' | 'accepting' | 'success' | 'error' | 'acceptError';
 
-export function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 export function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message;

@@ -4,7 +4,7 @@ import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } 
 import { getAuthItem } from '@/lib/auth-storage';
 import { connectMissionSessionSocket, getLatestMissionSession, getMissionSession, type MissionSession } from '@/lib/mission-session-api';
 import { getTripSchedule, type TripScheduleMission } from '@/lib/trip-schedule-api';
-import { isRetryableJudgementStatus } from '../mission-capture-data';
+import { getMissionDeadline } from '../mission-capture-data';
 
 type UseMissionCaptureSessionOptions = {
   capturedPhotoUri: string | null;
@@ -99,20 +99,7 @@ export function useMissionCaptureSession({
         return;
       }
 
-      if (hasTimedOut && nextSession.members.length === 1) {
-        if (hasNavigatedAwayRef.current) {
-          return;
-        }
-
-        hasNavigatedAwayRef.current = true;
-        router.replace({
-          pathname: '/trip/active',
-          ...(scheduleId ? { params: { scheduleId } } : {}),
-        });
-        return;
-      }
-
-      if (hasTimedOut && ['REVEALED', 'VOTING', 'COMPLETED'].includes(nextSession.status)) {
+      if (hasTimedOut) {
         if (hasNavigatedAwayRef.current) {
           return;
         }
@@ -123,6 +110,7 @@ export function useMissionCaptureSession({
           params: {
             ...(scheduleId ? { scheduleId } : {}),
             sessionId: nextSession.id,
+            ...(nextSession.members.length === 1 ? { mode: 'mission-timeout' } : {}),
           },
         });
       }
@@ -160,9 +148,7 @@ export function useMissionCaptureSession({
       return;
     }
 
-    const deadline = capturedPhotoUri
-      ? session.photoUploadEndsAt ?? session.shootingEndsAt
-      : session.shootingEndsAt ?? session.photoUploadEndsAt;
+    const deadline = getMissionDeadline(session.shootingEndsAt, session.photoUploadEndsAt);
     const refreshKey = `${session.id}:${capturedPhotoUri ? 'upload' : 'shooting'}:${deadline ?? 'unknown'}`;
     if (timeoutRefreshKeyRef.current === refreshKey) {
       return;
@@ -173,15 +159,27 @@ export function useMissionCaptureSession({
       setSession(nextSession);
 
       const currentUserId = getAuthItem('user_id');
-      const hasActiveSubmission = nextSession.submissions.some((submission) => (
-        submission.userId === currentUserId && !isRetryableJudgementStatus(submission.judgeStatus)
-      ));
+      const myMember = nextSession.members.find((member) => member.userId === currentUserId);
+      const isNonParticipant = !myMember || myMember.participationStatus === 'SKIPPED' || myMember.participationStatus === 'LOCKED_OUT';
 
-      if (nextSession.members.length === 1 && !hasActiveSubmission && !hasNavigatedAwayRef.current) {
+      if ((nextSession.status === 'CANCELLED' || isNonParticipant) && !hasNavigatedAwayRef.current) {
         hasNavigatedAwayRef.current = true;
         router.replace({
           pathname: '/trip/active',
           ...(scheduleId ? { params: { scheduleId } } : {}),
+        });
+        return;
+      }
+
+      if (!hasNavigatedAwayRef.current) {
+        hasNavigatedAwayRef.current = true;
+        router.replace({
+          pathname: '/trip/review',
+          params: {
+            ...(scheduleId ? { scheduleId } : {}),
+            sessionId: nextSession.id,
+            ...(nextSession.members.length === 1 ? { mode: 'mission-timeout' } : {}),
+          },
         });
       }
     }).catch(() => undefined);

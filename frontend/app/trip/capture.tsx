@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MissionCaptureCameraView } from '@/features/trip/capture/components/mission-capture-camera-view';
 import { MissionCapturePermissionState } from '@/features/trip/capture/components/mission-capture-permission-state';
 import { MissionCaptureReview } from '@/features/trip/capture/components/mission-capture-review';
-import { getParamValue, getRemainingMs } from '@/features/trip/capture/mission-capture-data';
+import { getMissionDeadline } from '@/features/trip/capture/mission-capture-data';
 import { useMissionCaptureCamera } from '@/features/trip/capture/hooks/use-mission-capture-camera';
 import { useMissionCaptureSession } from '@/features/trip/capture/hooks/use-mission-capture-session';
 import { useMissionCaptureUpload } from '@/features/trip/capture/hooks/use-mission-capture-upload';
+import { getParamValue, getRemainingMs } from '@/features/trip/trip-data';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
 import type { MissionSession } from '@/lib/mission-session-api';
@@ -29,17 +30,20 @@ export default function MissionCaptureScreen() {
   const [missionError, setMissionError] = useState('');
   const [now, setNow] = useState(() => Date.now());
 
-  const shootingRemainingMs = getRemainingMs(session?.shootingEndsAt ?? session?.photoUploadEndsAt, now);
-  const uploadRemainingMs = getRemainingMs(session?.photoUploadEndsAt ?? session?.shootingEndsAt, now);
+  const missionDeadline = getMissionDeadline(session?.shootingEndsAt, session?.photoUploadEndsAt);
+  const missionRemainingMs = getRemainingMs(missionDeadline, now);
+  const shootingRemainingMs = missionRemainingMs;
+  const uploadRemainingMs = missionRemainingMs;
   const isShootingExpired = shootingRemainingMs !== null && shootingRemainingMs <= 0;
   const isUploadExpired = uploadRemainingMs !== null && uploadRemainingMs <= 0;
   const myMember = session?.members.find((member) => member.userId === getAuthItem('user_id'));
-  const canShoot = Boolean(!session || (['SHOOTING', 'UPLOADING'].includes(session.status) && myMember?.participationStatus === 'PARTICIPATING'));
+  const isNonParticipant = Boolean(session && (!myMember || myMember.participationStatus === 'SKIPPED' || myMember.participationStatus === 'LOCKED_OUT'));
 
   const {
     handleComplete,
     handleRetake,
     isMissionComplete,
+    isTransitioningToResult,
     isUploading,
     isWaitingForJudgement,
     judgeReason,
@@ -83,6 +87,18 @@ export default function MissionCaptureScreen() {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!isNonParticipant || isTransitioningToResult || hasNavigatedAway.current) {
+      return;
+    }
+
+    hasNavigatedAway.current = true;
+    router.replace({
+      pathname: '/trip/active',
+      ...(scheduleId ? { params: { scheduleId } } : {}),
+    });
+  }, [isNonParticipant, isTransitioningToResult, scheduleId]);
+
   const handlePhotoCaptured = useCallback((uri: string) => {
     setCapturedPhotoUri(uri);
     setIsMissionComplete(false);
@@ -96,12 +112,12 @@ export default function MissionCaptureScreen() {
     return <MissionCapturePermissionState bottomSafeInset={bottomSafeInset} onClose={() => router.back()} topSafeInset={topSafeInset} variant="loading" />;
   }
 
-  if (session && !canShoot) {
-    return <MissionCapturePermissionState bottomSafeInset={bottomSafeInset} onClose={() => router.back()} topSafeInset={topSafeInset} variant="notParticipant" />;
-  }
-
   if (!camera.permission.granted) {
     return <MissionCapturePermissionState bottomSafeInset={bottomSafeInset} onClose={() => router.back()} onRequestPermission={camera.requestPermission} topSafeInset={topSafeInset} variant="denied" />;
+  }
+
+  if (isNonParticipant) {
+    return null;
   }
 
   if (capturedPhotoUri) {

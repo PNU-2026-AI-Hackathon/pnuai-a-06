@@ -194,7 +194,6 @@ export function useTripEdit({ onSaveSuccess, scheduleId }: UseTripEditOptions) {
 
   return {
     busyCompanionId,
-    busyMissionId,
     canManageMissions,
     canSubmit,
     confirmRemoveCompanion,
@@ -219,7 +218,6 @@ export function useTripEdit({ onSaveSuccess, scheduleId }: UseTripEditOptions) {
     isStartDateChanged,
     isTripStarted,
     message,
-    missionDatePickerId,
     missionForDatePicker,
     missionListVisible,
     schedule,

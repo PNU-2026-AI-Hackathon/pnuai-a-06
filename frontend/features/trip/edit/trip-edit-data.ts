@@ -4,10 +4,6 @@ import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 import type { TripInvite } from '@/lib/trip-invite-api';
 
-export function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 export function parseDate(value: string | null | undefined) {
   if (!value) return null;
   const [year, month, day] = value.split('-').map(Number);

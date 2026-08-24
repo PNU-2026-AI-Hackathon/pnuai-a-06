@@ -3,18 +3,19 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard } from 'react-native';
 
-import { getAuthItem } from '@/lib/auth-storage';
 import { connectMissionSessionSocket, completeMissionSession, getMissionSession, getPassedMissionSubmissions, mergeMissionSessions, MissionSessionApiError, postMissionSessionComment, type MissionSession } from '@/lib/mission-session-api';
-import { getCommentParticipantIds, getRemainingMs } from '../mission-review-data';
+import { getCommentParticipantIds, shouldSkipMissionVote } from '../mission-review-data';
+import { getRemainingMs } from '../../trip-data';
 
 type UseMissionReviewOptions = {
   currentUserId: string | null;
+  isMissionTimeout?: boolean;
   scheduleId?: string;
   sessionId?: string;
 };
 
 // review 화면의 세션 동기화, 댓글 제출, 진행 상태와 다음 화면 이동을 담당합니다.
-export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMissionReviewOptions) {
+export function useMissionReview({ currentUserId, isMissionTimeout = false, scheduleId, sessionId }: UseMissionReviewOptions) {
   const [session, setSession] = useState<MissionSession | null>(null);
   const [commentText, setCommentText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -99,8 +100,12 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
 
   useFocusEffect(
     useCallback(() => {
+      if (isMissionTimeout) {
+        return;
+      }
+
       refreshSession();
-    }, [refreshSession])
+    }, [isMissionTimeout, refreshSession])
   );
 
   const navigateToResult = useCallback(() => {
@@ -153,7 +158,7 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
   }, [scheduleId, sessionId]);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || isMissionTimeout) {
       return;
     }
 
@@ -169,7 +174,7 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
           }, 700);
         } else if (type === 'voting_started' || nextSession?.status === 'VOTING') {
           setTimeout(() => {
-            if (nextSession && getPassedMissionSubmissions(nextSession).length === 1) {
+            if (nextSession && shouldSkipMissionVote(nextSession, getPassedMissionSubmissions(nextSession))) {
               void completeSingleSubmission();
             } else {
               navigateToVote();
@@ -182,7 +187,7 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
     return () => {
       socket.close();
     };
-  }, [applySession, completeSingleSubmission, navigateToResult, navigateToVote, sessionId]);
+  }, [applySession, completeSingleSubmission, isMissionTimeout, navigateToResult, navigateToVote, sessionId]);
 
   const commentParticipantIds = useMemo(() => getCommentParticipantIds(session), [session]);
   const passedSubmissions = useMemo(() => {
@@ -205,6 +210,7 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
     return nextIndex >= 0 ? nextIndex : Math.max(0, passedSubmissions.length - 1);
   }, [passedSubmissions, requiredCommentsPerPhoto, transitionSubmissionId]);
   const currentSubmission = passedSubmissions[currentSubmissionIndex] ?? null;
+  const shouldSkipVoting = useMemo(() => shouldSkipMissionVote(session, passedSubmissions), [passedSubmissions, session]);
   const commentRemainingMs = getRemainingMs(session?.commentEndsAt, now);
   const isCommentExpired = commentRemainingMs !== null && commentRemainingMs <= 0;
   const hasCommentedCurrentPhoto = Boolean(currentUserId && currentSubmission?.comments.some((comment) => comment.userId === currentUserId));
@@ -213,7 +219,7 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
   const isAllCommentsComplete = Boolean(session && passedSubmissions.length > 0 && session.members.length > 0 && requiredCommentCount > 0 && commentProgress >= requiredCommentCount);
 
   useEffect(() => {
-    if (!transitionSubmissionId || transitionCountdown === null) {
+    if (isMissionTimeout || !transitionSubmissionId || transitionCountdown === null) {
       return;
     }
 
@@ -224,7 +230,7 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
       setCommentText('');
 
       if (isAllCommentsComplete) {
-        if (passedSubmissions.length === 1) {
+        if (shouldSkipVoting) {
           void completeSingleSubmission();
         } else {
           navigateToVote();
@@ -236,15 +242,15 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
 
     const timer = setTimeout(() => setTransitionCountdown((countdown) => countdown === null ? null : countdown - 1), 1000);
     return () => clearTimeout(timer);
-  }, [completeSingleSubmission, isAllCommentsComplete, navigateToVote, passedSubmissions.length, transitionCountdown, transitionSubmissionId]);
+  }, [completeSingleSubmission, isAllCommentsComplete, isMissionTimeout, navigateToVote, shouldSkipVoting, transitionCountdown, transitionSubmissionId]);
 
   useEffect(() => {
-    if (!isAllCommentsComplete || transitionSubmissionId) {
+    if (isMissionTimeout || !isAllCommentsComplete || transitionSubmissionId) {
       return;
     }
 
     const timer = setTimeout(() => {
-      if (passedSubmissions.length === 1) {
+      if (shouldSkipVoting) {
         void completeSingleSubmission();
       } else {
         navigateToVote();
@@ -254,7 +260,7 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
     return () => {
       clearTimeout(timer);
     };
-  }, [completeSingleSubmission, isAllCommentsComplete, navigateToVote, passedSubmissions.length, transitionSubmissionId]);
+  }, [completeSingleSubmission, isAllCommentsComplete, isMissionTimeout, navigateToVote, shouldSkipVoting, transitionSubmissionId]);
 
   const handleSubmitComment = async () => {
     const content = commentText.trim();
@@ -282,7 +288,7 @@ export function useMissionReview({ currentUserId, scheduleId, sessionId }: UseMi
   };
 
   const goNext = () => {
-    if (passedSubmissions.length === 1) {
+    if (shouldSkipVoting) {
       void completeSingleSubmission();
       return;
     }

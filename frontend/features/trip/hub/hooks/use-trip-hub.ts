@@ -5,7 +5,6 @@ import { Alert } from 'react-native';
 import { getAuthItem } from '@/lib/auth-storage';
 import { deleteTripSchedule, getCachedTripSchedules, listTripSchedules, updateTripScheduleOrder, type TripSchedule } from '@/lib/trip-schedule-api';
 import {
-  CARD_DRAG_STEP,
   CARD_SHIFT_DISTANCE,
   getDragIndexOffset,
   getPinnedScheduleCount,

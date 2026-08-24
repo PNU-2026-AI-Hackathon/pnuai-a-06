@@ -18,10 +18,6 @@ export type CalendarDay = DateParts & {
 
 export const weekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
 
-export function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 export const formatDateValue = (date: Date) => {
   const year = date.getFullYear();
   const month = date.getMonth() + 1;

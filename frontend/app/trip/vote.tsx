@@ -6,7 +6,7 @@ import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useMissionVote } from '@/features/trip/vote/hooks/use-mission-vote';
-import { getParamValue } from '@/features/trip/vote/mission-vote-data';
+import { getParamValue } from '@/features/trip/trip-data';
 import { styles } from '@/features/trip/vote/mission-vote-styles';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';

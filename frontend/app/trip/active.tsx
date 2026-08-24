@@ -10,7 +10,7 @@ import { ActiveMissionListModal } from '@/features/trip/active/components/active
 import { ActiveMissionStartModal } from '@/features/trip/active/components/active-mission-start-modal';
 import { ActiveMissionStrip } from '@/features/trip/active/components/active-mission-strip';
 import { ActiveTripHeader } from '@/features/trip/active/components/active-trip-header';
-import { getParamValue } from '@/features/trip/active/active-data';
+import { getParamValue } from '@/features/trip/trip-data';
 import { styles } from '@/features/trip/active/active-screen-styles';
 import { useActiveInvite } from '@/features/trip/active/hooks/use-active-invite';
 import { useActiveMissionActions } from '@/features/trip/active/hooks/use-active-mission-actions';

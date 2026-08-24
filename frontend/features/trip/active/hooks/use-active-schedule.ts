@@ -126,7 +126,7 @@ export function useActiveSchedule({
     return () => {
       isActive = false;
     };
-  }, [initialSessionId, onScheduleMissing, onScheduleSessionCacheLoaded, rememberFeedSession, refreshSession, scheduleId, setMessage]);
+  }, [initialSessionId, onScheduleMissing, onScheduleSessionCacheLoaded, rememberFeedSession, refreshSession, scheduleId, setIsLoading, setMessage, setSchedule]);
 
   useFocusEffect(refreshSchedule);
 
@@ -194,7 +194,7 @@ export function useActiveSchedule({
       return () => {
         isActive = false;
       };
-    }, [rememberFeedSession, scheduleId])
+    }, [rememberFeedSession, scheduleId, setSchedule])
   );
 
   const reloadCurrentSchedule = useCallback(async () => {
@@ -206,7 +206,7 @@ export function useActiveSchedule({
     setSchedule(nextSchedule);
 
     return nextSchedule;
-  }, [scheduleId]);
+  }, [scheduleId, setSchedule]);
 
   return {
     reloadCurrentSchedule,

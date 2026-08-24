@@ -1,10 +1,6 @@
-import type { MissionSession } from '@/lib/mission-session-api';
+import type { MissionSession, MissionSubmission } from '@/lib/mission-session-api';
 
 // review 화면에서 사용하는 댓글 참여자 판정과 시간 계산을 담당합니다.
-export function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 export function getUserLabel(index: number) {
   return `익명 ${index + 1}`;
 }
@@ -18,11 +14,13 @@ export function getCommentParticipantIds(session: MissionSession | null | undefi
   );
 }
 
-export function getRemainingMs(deadline: string | null | undefined, now: number) {
-  if (!deadline) {
-    return null;
+export function shouldSkipMissionVote(session: MissionSession | null | undefined, submissions: MissionSubmission[]) {
+  if (submissions.length !== 1) {
+    return false;
   }
 
-  const deadlineTime = new Date(deadline).getTime();
-  return Number.isFinite(deadlineTime) ? deadlineTime - now : null;
+  const commentParticipantIds = getCommentParticipantIds(session);
+  const onlySubmissionOwnerId = submissions[0]?.userId;
+
+  return !Array.from(commentParticipantIds).some((userId) => userId !== onlySubmissionOwnerId);
 }

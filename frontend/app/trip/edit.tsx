@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 import { TripEditForm } from '@/features/trip/edit/components/trip-edit-form';
-import { getParamValue } from '@/features/trip/edit/trip-edit-data';
+import { getParamValue } from '@/features/trip/trip-data';
 import { useTripEdit } from '@/features/trip/edit/hooks/use-trip-edit';
 import { styles } from '@/features/trip/edit/trip-edit-styles';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';

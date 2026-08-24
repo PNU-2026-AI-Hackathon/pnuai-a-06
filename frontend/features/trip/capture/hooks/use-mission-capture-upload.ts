@@ -3,10 +3,10 @@ import { useCallback, useEffect, useState, type Dispatch, type MutableRefObject,
 
 import { getAuthItem } from '@/lib/auth-storage';
 import { completeMissionSession, connectMissionSessionSocket, getLatestMissionSession, getMissionSession, isMissionSessionNotFoundError, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
+import { getRemainingMs } from '@/features/trip/trip-data';
 import {
   getJudgementWaitingMessage,
   getMyLatestSubmission,
-  getRemainingMs,
   isDuplicateSubmissionError,
   isRetryableJudgementStatus,
   isWaitingJudgementStatus,
@@ -36,6 +36,7 @@ export function useMissionCaptureUpload({
   setSession,
 }: UseMissionCaptureUploadOptions) {
   const [isMissionComplete, setIsMissionComplete] = useState(false);
+  const [isTransitioningToResult, setIsTransitioningToResult] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
@@ -65,13 +66,13 @@ export function useMissionCaptureUpload({
       return;
     }
 
-    hasNavigatedAwayRef.current = true;
-    setJudgementSessionId(null);
-    setIsMissionComplete(true);
-
     const isSoloMission = passedSession?.members.length === 1;
 
     if (isSoloMission) {
+      hasNavigatedAwayRef.current = true;
+      setIsTransitioningToResult(true);
+      setJudgementSessionId(null);
+      setIsMissionComplete(true);
       setUploadMessage('AI 판독이 완료됐어요. 결과를 준비하고 있어요.');
 
       try {
@@ -91,14 +92,9 @@ export function useMissionCaptureUpload({
       return;
     }
 
-    setUploadMessage('AI 판독이 완료됐어요. 댓글 화면으로 이동합니다.');
-    router.replace({
-      pathname: '/trip/review',
-      params: {
-        ...(scheduleId ? { scheduleId } : {}),
-        sessionId: passedSessionId,
-      },
-    });
+    setJudgementSessionId(null);
+    setIsMissionComplete(true);
+    setUploadMessage('AI 판독이 완료됐어요. 60초가 끝나면 댓글 화면으로 이동합니다.');
   }, [hasNavigatedAwayRef, scheduleId, setSession]);
 
   useEffect(() => {
@@ -222,6 +218,7 @@ export function useMissionCaptureUpload({
   const handleRetake = () => {
     setCapturedPhotoUri(null);
     setIsMissionComplete(false);
+    setIsTransitioningToResult(false);
     setUploadMessage('');
     setReturnCountdown(null);
     setJudgementSessionId(null);
@@ -341,6 +338,7 @@ export function useMissionCaptureUpload({
     handleComplete,
     handleRetake,
     isMissionComplete,
+    isTransitioningToResult,
     isUploading,
     isWaitingForJudgement,
     judgeReason,

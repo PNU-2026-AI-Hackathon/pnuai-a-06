@@ -20,7 +20,6 @@ const greyChevronIcon = require('@/assets/svg/active/inv_chevron_grey.svg');
 type TripEditFormProps = {
   bottomSafeInset: number;
   busyCompanionId: string | null;
-  busyMissionId: string | null;
   canManageMissions: boolean;
   canSubmit: boolean;
   confirmRemoveCompanion: (participant: TripScheduleUser) => void;
@@ -44,7 +43,6 @@ type TripEditFormProps = {
   isStartDateChanged: boolean;
   isTripStarted: boolean;
   message: string;
-  missionDatePickerId: string | null;
   missionForDatePicker?: TripScheduleMission;
   missionListVisible: boolean;
   schedule: TripSchedule | null;
@@ -62,7 +60,6 @@ type TripEditFormProps = {
 export function TripEditForm({
   bottomSafeInset,
   busyCompanionId,
-  busyMissionId,
   canManageMissions,
   canSubmit,
   confirmRemoveCompanion,
@@ -86,7 +83,6 @@ export function TripEditForm({
   isStartDateChanged,
   isTripStarted,
   message,
-  missionDatePickerId,
   missionForDatePicker,
   missionListVisible,
   schedule,

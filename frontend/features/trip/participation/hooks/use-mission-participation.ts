@@ -83,21 +83,49 @@ export function useMissionParticipation({
     });
   }, [currentUserId, scheduleId]);
 
+  const navigateToReview = useCallback((nextSession: MissionSession) => {
+    if (!scheduleId || !nextSession.id || hasNavigated.current) {
+      return;
+    }
+
+    hasNavigated.current = true;
+    router.replace({
+      pathname: '/trip/review',
+      params: {
+        scheduleId,
+        sessionId: nextSession.id,
+        ...(nextSession.members.length === 1 ? { mode: 'mission-timeout' } : {}),
+      },
+    });
+  }, [scheduleId]);
+
   const applySession = useCallback((nextSession: MissionSession) => {
     setSession(nextSession);
-    if (nextSession.status === 'COMPLETED' || nextSession.status === 'CANCELLED') {
+    if (nextSession.status === 'CANCELLED') {
       returnToActiveAfterMissingSession();
       return;
     }
     const nextMember = nextSession.members.find((member) => member.userId === currentUserId);
+    if (nextMember?.participationStatus === 'TIMED_OUT') {
+      navigateToReview(nextSession);
+      return;
+    }
+    if (nextSession.status === 'COMPLETED') {
+      returnToActiveAfterMissingSession();
+      return;
+    }
     if (hasLeftParticipation(nextMember?.participationStatus)) {
+      returnToActiveAfterMissingSession();
+      return;
+    }
+    if (['SHOOTING', 'UPLOADING'].includes(nextSession.status) && !isParticipating(nextMember?.participationStatus)) {
       returnToActiveAfterMissingSession();
       return;
     }
     if (nextSession.status === 'SHOOTING' || nextSession.status === 'UPLOADING') {
       navigateToCapture(nextSession);
     }
-  }, [currentUserId, navigateToCapture, returnToActiveAfterMissingSession]);
+  }, [currentUserId, navigateToCapture, navigateToReview, returnToActiveAfterMissingSession]);
 
   useEffect(() => {
     if (

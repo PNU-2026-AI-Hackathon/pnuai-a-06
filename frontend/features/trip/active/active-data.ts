@@ -12,10 +12,6 @@ import {
 import type { TripInvite } from '@/lib/trip-invite-api';
 import type { TripSchedule, TripScheduleMission } from '@/lib/trip-schedule-api';
 
-export function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 function createFallbackInviteUrl(inviteToken: string) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     const url = new URL('/trip/invite', window.location.origin);

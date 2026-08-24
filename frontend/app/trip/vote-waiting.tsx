@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import { View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
-import { getParamValue } from '@/features/trip/vote-waiting/mission-vote-waiting-data';
+import { getParamValue } from '@/features/trip/trip-data';
 import { useMissionVoteWaiting } from '@/features/trip/vote-waiting/hooks/use-mission-vote-waiting';
 import { styles } from '@/features/trip/vote-waiting/mission-vote-waiting-styles';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';

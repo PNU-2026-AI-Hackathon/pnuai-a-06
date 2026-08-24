@@ -8,8 +8,9 @@ import { TripCreateCalendar } from '@/features/trip/create/components/trip-creat
 import { TripCreateNameForm } from '@/features/trip/create/components/trip-create-name-form';
 import { TripInviteModal } from '@/features/trip/create/components/trip-invite-modal';
 import { useTripCreate } from '@/features/trip/create/hooks/use-trip-create';
-import { getParamValue, shiftMonth } from '@/features/trip/create/trip-create-data';
+import { shiftMonth } from '@/features/trip/create/trip-create-data';
 import { styles } from '@/features/trip/create/trip-create-styles';
+import { getParamValue } from '@/features/trip/trip-data';
 import { ScalePressable } from '@/components/scale-pressable';
 import { TopBar } from '@/components/top-bar';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';

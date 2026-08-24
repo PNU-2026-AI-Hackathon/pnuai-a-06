@@ -11,7 +11,7 @@ type MissionCapturePermissionStateProps = {
   onClose: () => void;
   onRequestPermission?: () => void;
   topSafeInset: number;
-  variant: 'loading' | 'notParticipant' | 'denied';
+  variant: 'loading' | 'denied';
 };
 
 // 카메라 권한과 촬영 참여 가능 여부에 따른 상태 화면입니다.
@@ -21,18 +21,6 @@ export function MissionCapturePermissionState({ bottomSafeInset, onClose, onRequ
       <View style={styles.stateScreen}>
         <StatusBar hidden />
         <ActivityIndicator color="#ffffff" />
-      </View>
-    );
-  }
-
-  if (variant === 'notParticipant') {
-    return (
-      <View style={styles.stateScreen}>
-        <StatusBar hidden />
-        <Text style={styles.permissionTitle}>이번 미션의 촬영 참여자가 아니에요.</Text>
-        <ScalePressable accessibilityLabel="돌아가기" onPress={onClose} pressedScale={0.96} style={styles.permissionButton}>
-          <Text style={styles.permissionButtonText}>돌아가기</Text>
-        </ScalePressable>
       </View>
     );
   }

@@ -5,7 +5,7 @@ import { LocalizedText as Text } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
 import { useMissionResult } from '@/features/trip/result/hooks/use-mission-result';
-import { getParamValue } from '@/features/trip/result/mission-result-data';
+import { getParamValue } from '@/features/trip/trip-data';
 import { styles } from '@/features/trip/result/mission-result-styles';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 

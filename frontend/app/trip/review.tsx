@@ -5,9 +5,11 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, View } f
 import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
 
 import { ScalePressable } from '@/components/scale-pressable';
+import { MissionFailureView } from '@/features/trip/review/components/mission-failure-view';
 import { useMissionReview } from '@/features/trip/review/hooks/use-mission-review';
-import { getParamValue, getUserLabel } from '@/features/trip/review/mission-review-data';
+import { getUserLabel } from '@/features/trip/review/mission-review-data';
 import { styles } from '@/features/trip/review/mission-review-styles';
+import { getParamValue } from '@/features/trip/trip-data';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
 
@@ -15,9 +17,11 @@ const nextArrowIcon = require('@/assets/svg/active/next_arrow.svg');
 
 // 미션 review 화면의 댓글 UI와 결과 이동 화면을 담당합니다.
 export default function MissionReviewScreen() {
-  const params = useLocalSearchParams<{ scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const params = useLocalSearchParams<{ mode?: string | string[]; scheduleId?: string | string[]; sessionId?: string | string[] }>();
+  const mode = getParamValue(params.mode);
   const scheduleId = getParamValue(params.scheduleId);
   const sessionId = getParamValue(params.sessionId);
+  const isMissionTimeout = mode === 'mission-timeout';
   const currentUserId = getAuthItem('user_id');
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const {
@@ -39,7 +43,11 @@ export default function MissionReviewScreen() {
     setCommentText,
     transitionCountdown,
     transitionSubmissionId,
-  } = useMissionReview({ currentUserId, scheduleId, sessionId });
+  } = useMissionReview({ currentUserId, isMissionTimeout, scheduleId, sessionId });
+
+  if (isMissionTimeout) {
+    return <MissionFailureView onGoBack={goBackToTrip} />;
+  }
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>

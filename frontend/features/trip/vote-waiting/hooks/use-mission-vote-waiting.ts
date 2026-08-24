@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 
+import { getEligibleVoterCount } from '@/features/trip/vote-waiting/mission-vote-waiting-data';
 import { completeMissionSession, getMissionSession, getPassedMissionSubmissions } from '@/lib/mission-session-api';
 
 type UseMissionVoteWaitingOptions = {
@@ -10,7 +11,6 @@ type UseMissionVoteWaitingOptions = {
 
 // 투표 대기 화면의 투표 완료 감시, 세션 완료 처리와 결과 이동을 담당합니다.
 export function useMissionVoteWaiting({ scheduleId, sessionId }: UseMissionVoteWaitingOptions) {
-  const [requiredVoterCount, setRequiredVoterCount] = useState(0);
   const [resultCountdown, setResultCountdown] = useState<number | null>(null);
   const hasNavigated = useRef(false);
   const isCompleting = useRef(false);
@@ -50,36 +50,12 @@ export function useMissionVoteWaiting({ scheduleId, sessionId }: UseMissionVoteW
       return;
     }
 
-    let active = true;
-    void (async () => {
-      try {
-        const session = await getMissionSession(sessionId);
-        const completedMemberCount = session.members.filter((member) => member.participationStatus === 'COMPLETED').length;
-        const count = completedMemberCount || session.members.length;
-
-        if (active) {
-          setRequiredVoterCount(count);
-        }
-      } catch {
-        // 폴링에서 다시 확인한다.
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [scheduleId, sessionId]);
-
-  useEffect(() => {
-    if (!sessionId) {
-      return;
-    }
-
     const refresh = async () => {
       try {
         const session = await getMissionSession(sessionId);
-        const completedMemberCount = session.members.filter((member) => member.participationStatus === 'COMPLETED').length;
-        const voterCount = Math.max(requiredVoterCount, completedMemberCount || session.members.length);
-        const votes = getPassedMissionSubmissions(session).reduce((sum, submission) => sum + submission.likeCount, 0);
+        const submissions = getPassedMissionSubmissions(session);
+        const voterCount = getEligibleVoterCount(session, submissions);
+        const votes = submissions.reduce((sum, submission) => sum + submission.likeCount, 0);
 
         if (session.status === 'COMPLETED') {
           startResultCountdown();
@@ -103,7 +79,7 @@ export function useMissionVoteWaiting({ scheduleId, sessionId }: UseMissionVoteW
     void refresh();
     const timer = setInterval(refresh, 1500);
     return () => clearInterval(timer);
-  }, [requiredVoterCount, scheduleId, sessionId]);
+  }, [scheduleId, sessionId]);
 
   return { resultCountdown };
 }

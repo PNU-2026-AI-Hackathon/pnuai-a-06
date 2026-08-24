@@ -2,7 +2,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
 
 import { MissionParticipationView } from '@/features/trip/participation/components/mission-participation-view';
-import { getParamValue } from '@/features/trip/participation/mission-participation-data';
+import { getParamValue } from '@/features/trip/trip-data';
 import { useMissionParticipation } from '@/features/trip/participation/hooks/use-mission-participation';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';

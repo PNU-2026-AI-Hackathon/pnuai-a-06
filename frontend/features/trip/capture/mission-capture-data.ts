@@ -7,10 +7,6 @@ export const MISSION_CARD_WIDTH = 350;
 export const MISSION_CARD_HEIGHT = Math.round(MISSION_CARD_WIDTH * (MISSION_CARD_SOURCE_HEIGHT / MISSION_CARD_SOURCE_WIDTH));
 export const MISSION_CARD_COLLAPSED_VISIBLE_HEIGHT = 66;
 
-export function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 export function wait(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -26,13 +22,8 @@ export function formatRemainingTime(ms: number) {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function getRemainingMs(deadline: string | null | undefined, now: number) {
-  if (!deadline) {
-    return null;
-  }
-
-  const deadlineTime = new Date(deadline).getTime();
-  return Number.isFinite(deadlineTime) ? deadlineTime - now : null;
+export function getMissionDeadline(shootingEndsAt: string | null | undefined, photoUploadEndsAt: string | null | undefined) {
+  return shootingEndsAt ?? photoUploadEndsAt;
 }
 
 export async function runWithNetworkRetry<T>(task: () => Promise<T>, retries = 1): Promise<T> {

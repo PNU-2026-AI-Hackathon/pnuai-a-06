@@ -6,7 +6,7 @@ import { FlowButton, FlowScreen } from '@/components/flow-screen';
 import { TopBar } from '@/components/top-bar';
 import { TripInviteCreate } from '@/features/trip/invite/components/trip-invite-create';
 import { TripInvitePreview } from '@/features/trip/invite/components/trip-invite-preview';
-import { getParamValue } from '@/features/trip/invite/trip-invite-data';
+import { getParamValue } from '@/features/trip/trip-data';
 import { useTripInvite } from '@/features/trip/invite/hooks/use-trip-invite';
 import { styles } from '@/features/trip/invite/trip-invite-styles';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';

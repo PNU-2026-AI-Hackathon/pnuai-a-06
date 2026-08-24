@@ -1,16 +1,12 @@
 import { MissionSessionApiError, type MissionParticipationStatus } from '@/lib/mission-session-api';
 
 // 미션 참여 화면에서 사용하는 상태 판정과 오류 메시지를 담당합니다.
-export function getParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 export function isParticipating(status: MissionParticipationStatus | null | undefined) {
   return status === 'PARTICIPATING' || status === 'COMPLETED';
 }
 
 export function hasLeftParticipation(status: MissionParticipationStatus | null | undefined) {
-  return status === 'SKIPPED' || status === 'LOCKED_OUT' || status === 'TIMED_OUT';
+  return status === 'SKIPPED' || status === 'LOCKED_OUT';
 }
 
 export function getParticipationErrorMessage(error: unknown) {
