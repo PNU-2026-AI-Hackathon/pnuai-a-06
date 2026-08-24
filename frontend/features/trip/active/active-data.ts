@@ -35,6 +35,7 @@ export function getInviteUrl(invite: TripInvite | null) {
 }
 
 const REVEALED_SESSION_CACHE_PREFIX = 'trip_revealed_sessions:';
+const ROUTE_RECOMMENDATION_CACHE_KEY = 'trip_route_recommendations';
 
 function getRevealedSessionCacheKey(scheduleId: string) {
   return `${REVEALED_SESSION_CACHE_PREFIX}${scheduleId}`;
@@ -57,6 +58,56 @@ export function readCachedRevealedSessions(scheduleId: string) {
 
 export function saveCachedRevealedSessions(scheduleId: string, sessions: Record<string, MissionSession>) {
   setAuthItem(getRevealedSessionCacheKey(scheduleId), JSON.stringify(sessions));
+}
+
+function getRouteRecommendationCacheKey(scheduleId: string, plannedDate: string) {
+  return `${scheduleId}:${plannedDate}`;
+}
+
+function getMissionCompositionFingerprint(missions: TripScheduleMission[]) {
+  return JSON.stringify(
+    missions
+      .map((mission) => ({
+        missionId: mission.missionId,
+        plannedDate: mission.plannedDate,
+        scheduleMissionId: mission.scheduleMissionId,
+      }))
+      .sort((left, right) => left.scheduleMissionId.localeCompare(right.scheduleMissionId)),
+  );
+}
+
+export function saveRouteRecommendationSignature(scheduleId: string, plannedDate: string, missions: TripScheduleMission[]) {
+  let signatures: Record<string, string> = {};
+  const raw = getAuthItem(ROUTE_RECOMMENDATION_CACHE_KEY);
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        signatures = parsed;
+      }
+    } catch {
+      signatures = {};
+    }
+  }
+
+  signatures[getRouteRecommendationCacheKey(scheduleId, plannedDate)] = getMissionCompositionFingerprint(missions);
+  setAuthItem(ROUTE_RECOMMENDATION_CACHE_KEY, JSON.stringify(signatures));
+}
+
+export function hasSavedRouteRecommendation(scheduleId: string, plannedDate: string, missions: TripScheduleMission[]) {
+  const raw = getAuthItem(ROUTE_RECOMMENDATION_CACHE_KEY);
+
+  if (!raw) {
+    return false;
+  }
+
+  try {
+    const signatures = JSON.parse(raw) as Record<string, string>;
+    return signatures?.[getRouteRecommendationCacheKey(scheduleId, plannedDate)] === getMissionCompositionFingerprint(missions);
+  } catch {
+    return false;
+  }
 }
 
 export function getCompletedParticipantIds(session: MissionSession) {

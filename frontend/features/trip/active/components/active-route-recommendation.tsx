@@ -16,6 +16,7 @@ type ActiveRouteRecommendationProps = {
   canRecommendRoute: boolean;
   missionDateGroups: ActiveRouteMissionGroup[];
   onRecommendRoute: (plannedDate: string) => void;
+  recommendedDates: string[];
   recommendingDate: string | null;
 };
 
@@ -23,6 +24,7 @@ export function ActiveRouteRecommendation({
   canRecommendRoute,
   missionDateGroups,
   onRecommendRoute,
+  recommendedDates,
   recommendingDate,
 }: ActiveRouteRecommendationProps) {
   const groupsWithMissions = missionDateGroups.filter((group) => group.date !== 'UNPLANNED' && group.missions.length > 0);
@@ -39,6 +41,7 @@ export function ActiveRouteRecommendation({
       </View>
       {groupsWithMissions.map((group) => {
         const isRecommending = recommendingDate === group.date;
+        const isAlreadyRecommended = recommendedDates.includes(group.date);
         const isDisabled = Boolean(recommendingDate);
         const canRecommend = canRecommendRoute && group.missions.length >= 2;
 
@@ -49,13 +52,13 @@ export function ActiveRouteRecommendation({
               {canRecommend ? (
                 <ScalePressable
                   accessibilityRole="button"
-                  accessibilityLabel={`${getMissionDateLabel(group.date)} 경로 생성`}
-                  disabled={isDisabled}
+                  accessibilityLabel={`${getMissionDateLabel(group.date)} ${isAlreadyRecommended ? '경로 생성 완료' : '경로 생성'}`}
+                  disabled={isDisabled || isAlreadyRecommended}
                   onPress={() => onRecommendRoute(group.date)}
                   pressedScale={0.96}
-                  style={[styles.routeButton, isRecommending && styles.routeButtonBusy, isDisabled && !isRecommending && styles.disabledButton]}>
-                  {isRecommending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons color="#FFFFFF" name="navigate-outline" size={15} />}
-                  <Text style={styles.routeButtonText}>{isRecommending ? '추천 중' : '경로 생성'}</Text>
+                  style={[styles.routeButton, (isRecommending || isAlreadyRecommended) && styles.routeButtonBusy, (isDisabled || isAlreadyRecommended) && !isRecommending && styles.disabledButton]}>
+                  {isRecommending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons color="#FFFFFF" name={isAlreadyRecommended ? 'checkmark' : 'navigate-outline'} size={15} />}
+                  <Text style={styles.routeButtonText}>{isRecommending ? '추천 중' : isAlreadyRecommended ? '생성 완료' : '경로 생성'}</Text>
                 </ScalePressable>
               ) : null}
             </View>

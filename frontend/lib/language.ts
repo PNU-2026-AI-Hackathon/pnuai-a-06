@@ -131,6 +131,8 @@ const translations: Record<string, string> = {
   '날짜별 경로': 'Routes by date',
   '미션 순서를 추천받아 보세요': 'Get a recommended mission order',
   '경로 생성': 'Create route',
+  '경로 생성 완료': 'Route created',
+  '생성 완료': 'Created',
   '추천 중': 'Recommending',
   '동선 추천에 실패했습니다. 잠시 후 다시 시도해 주세요.': 'Route recommendation failed. Please try again later.',
   '날짜 선택': 'Select a date',

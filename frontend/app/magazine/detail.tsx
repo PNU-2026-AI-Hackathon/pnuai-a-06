@@ -137,7 +137,11 @@ export default function MagazineDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: topSafeInset + 12, paddingHorizontal: horizontalPadding }]}>
+      <View
+        style={[
+          styles.header,
+          { marginBottom: 14, marginTop: 14, paddingTop: topSafeInset + 12, paddingHorizontal: horizontalPadding },
+        ]}>
         <Pressable accessibilityLabel="뒤로 가기" hitSlop={12} onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹</Text>
         </Pressable>
@@ -253,16 +257,16 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   selectionContent: {
-    paddingTop: 16,
+    paddingTop: 36,
   },
   selectionTitle: {
     color: '#252B30',
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   selectionSubtitle: {
     color: '#6E767B',
-    fontSize: 14,
+    fontSize: 12,
     marginBottom: 16,
     marginTop: 6,
   },
@@ -314,14 +318,14 @@ const styles = StyleSheet.create({
   },
   checkText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   createButton: {
     alignItems: 'center',
     backgroundColor: '#409CB7',
     borderRadius: 999,
-    marginTop: 10,
+    marginTop: 20,
     paddingVertical: 16,
   },
   disabledCreateButton: {
@@ -329,7 +333,7 @@ const styles = StyleSheet.create({
   },
   createButtonText: {
     color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

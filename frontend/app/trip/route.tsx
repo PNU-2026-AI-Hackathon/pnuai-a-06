@@ -6,7 +6,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { TopBar } from '@/components/top-bar';
 import { ActiveRouteRecommendation, type ActiveRouteMissionGroup } from '@/features/trip/active/components/active-route-recommendation';
-import { getScheduleDateOptions, sortMissionsByVisitOrder } from '@/features/trip/active/active-data';
+import { getScheduleDateOptions, hasSavedRouteRecommendation, saveRouteRecommendationSignature, sortMissionsByVisitOrder } from '@/features/trip/active/active-data';
 import { getParamValue } from '@/features/trip/trip-data';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { getAuthItem } from '@/lib/auth-storage';
@@ -64,6 +64,7 @@ export default function RouteRecommendationScreen() {
   const [message, setMessage] = useState('');
   const [recommendingDate, setRecommendingDate] = useState<string | null>(null);
   const [recommendationMessage, setRecommendationMessage] = useState('');
+  const [recommendedDates, setRecommendedDates] = useState<string[]>([]);
   const missionDateGroups = useMemo(() => getMissionDateGroups(schedule), [schedule]);
   const isScheduleCreator = Boolean(schedule?.creatorId && currentUserId && schedule.creatorId === currentUserId);
 
@@ -84,6 +85,13 @@ export default function RouteRecommendationScreen() {
         if (isActive) {
           setSchedule(nextSchedule);
           setMessage('');
+          setRecommendedDates(getScheduleDateOptions(nextSchedule).filter((date) => (
+            hasSavedRouteRecommendation(
+              nextSchedule.scheduleId,
+              date,
+              nextSchedule.missions.filter((mission) => mission.plannedDate === date),
+            )
+          )));
         }
       })
       .catch((error) => {
@@ -111,6 +119,8 @@ export default function RouteRecommendationScreen() {
       setRecommendingDate(plannedDate);
       setRecommendationMessage('');
       const result = await recommendMissionOrder(schedule.scheduleId, plannedDate);
+      saveRouteRecommendationSignature(schedule.scheduleId, result.plannedDate, result.missions);
+      setRecommendedDates((currentDates) => currentDates.includes(result.plannedDate) ? currentDates : [...currentDates, result.plannedDate]);
 
       setSchedule((currentSchedule) => currentSchedule ? {
         ...currentSchedule,
@@ -159,6 +169,7 @@ export default function RouteRecommendationScreen() {
               canRecommendRoute={isScheduleCreator}
               missionDateGroups={missionDateGroups}
               onRecommendRoute={(plannedDate) => void handleRecommendRoute(plannedDate)}
+              recommendedDates={recommendedDates}
               recommendingDate={recommendingDate}
             />
             {missionDateGroups.every((group) => group.missions.length === 0) ? (
