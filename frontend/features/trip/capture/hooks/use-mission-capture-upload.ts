@@ -1,8 +1,8 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import { getAuthItem } from '@/lib/auth-storage';
-import { completeMissionSession, connectMissionSessionSocket, getMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
+import { completeMissionSession, connectMissionSessionSocket, getMissionSession, hasAllPassedMissionParticipants, revealMissionSession, uploadMissionSessionPhoto, type MissionJudgementStatus, type MissionSession, type MissionSubmission } from '@/lib/mission-session-api';
 import { getRemainingMs } from '@/features/trip/trip-data';
 import {
   getJudgementFailureMessage,
@@ -42,11 +42,14 @@ export function useMissionCaptureUpload({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
+  const [completionSessionId, setCompletionSessionId] = useState<string | null>(null);
   const [judgementSessionId, setJudgementSessionId] = useState<string | null>(null);
   const [submittedSubmissionId, setSubmittedSubmissionId] = useState<string | null>(null);
   const [judgeReason, setJudgeReason] = useState<string | null>(null);
   const [judgeStatus, setJudgeStatus] = useState<MissionJudgementStatus | null>(null);
   const [judgementDotCount, setJudgementDotCount] = useState(1);
+  const revealRequestedRef = useRef(false);
+  const revealRequestInFlightRef = useRef(false);
   const isWaitingForJudgement = isWaitingJudgementStatus(judgeStatus);
   const needsRetakeAfterJudgement = isRetryableJudgementStatus(judgeStatus);
 
@@ -96,8 +99,91 @@ export function useMissionCaptureUpload({
 
     setJudgementSessionId(null);
     setIsMissionComplete(true);
-    setUploadMessage('AI 판독이 완료됐어요. 60초가 끝나면 댓글 화면으로 이동합니다.');
+    setCompletionSessionId(passedSessionId);
+    setUploadMessage('AI 판독이 완료됐어요. 다른 참여자의 결과를 기다리고 있어요.');
   }, [hasNavigatedAwayRef, scheduleId, setSession]);
+
+  useEffect(() => {
+    if (!completionSessionId || !isMissionComplete || hasNavigatedAwayRef.current) {
+      return;
+    }
+
+    let isActive = true;
+
+    const navigateToReview = () => {
+      if (!isActive || hasNavigatedAwayRef.current) {
+        return;
+      }
+
+      hasNavigatedAwayRef.current = true;
+      router.replace({
+        pathname: '/trip/review',
+        params: {
+          ...(scheduleId ? { scheduleId } : {}),
+          sessionId: completionSessionId,
+        },
+      });
+    };
+
+    const syncCompletionSession = async (nextSession?: MissionSession) => {
+      const currentSession = nextSession ?? await getMissionSession(completionSessionId);
+
+      if (!isActive) {
+        return;
+      }
+
+      setSession(currentSession);
+
+      if (currentSession.status === 'REVEALED') {
+        navigateToReview();
+        return;
+      }
+
+      if (!hasAllPassedMissionParticipants(currentSession) || revealRequestedRef.current || revealRequestInFlightRef.current) {
+        return;
+      }
+
+      revealRequestInFlightRef.current = true;
+      try {
+        const revealedSession = await revealMissionSession(completionSessionId);
+        if (!isActive) {
+          return;
+        }
+
+        setSession(revealedSession);
+        if (revealedSession.status === 'REVEALED') {
+          revealRequestedRef.current = true;
+          navigateToReview();
+        }
+      } catch {
+        // Keep polling; the server remains the source of truth for the reveal transition.
+      } finally {
+        revealRequestInFlightRef.current = false;
+      }
+    };
+
+    const socket = connectMissionSessionSocket(completionSessionId, {
+      onError: () => {
+        void syncCompletionSession().catch(() => undefined);
+      },
+      onMessage: ({ session: nextSession }) => {
+        if (nextSession) {
+          void syncCompletionSession(nextSession).catch(() => undefined);
+        }
+      },
+    });
+    const timer = setInterval(() => {
+      void syncCompletionSession().catch(() => undefined);
+    }, 1500);
+
+    void syncCompletionSession().catch(() => undefined);
+
+    return () => {
+      isActive = false;
+      clearInterval(timer);
+      socket.close();
+    };
+  }, [completionSessionId, hasNavigatedAwayRef, isMissionComplete, scheduleId, setSession]);
 
   useEffect(() => {
     if (!judgementSessionId) {
@@ -208,6 +294,9 @@ export function useMissionCaptureUpload({
     setIsTransitioningToResult(false);
     setUploadMessage('');
     setReturnCountdown(null);
+    setCompletionSessionId(null);
+    revealRequestedRef.current = false;
+    revealRequestInFlightRef.current = false;
     setJudgementSessionId(null);
     setJudgeReason(null);
     setJudgeStatus(null);

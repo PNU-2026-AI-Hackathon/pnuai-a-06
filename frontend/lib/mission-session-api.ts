@@ -313,6 +313,32 @@ export function getPassedMissionSubmissions(session: MissionSession | null | und
   return session?.submissions.filter((submission) => submission.judgeStatus === 'PASSED' || (allowFailedJudgementsForTesting && (submission.judgeStatus === 'REJECTED' || submission.judgeStatus === 'ERROR'))) ?? [];
 }
 
+export function hasAllPassedMissionParticipants(session: MissionSession | null | undefined) {
+  if (!session) {
+    return false;
+  }
+
+  const participantIds = new Set(
+    session.members
+      .filter((member) => ['PARTICIPATING', 'COMPLETED', 'TIMED_OUT'].includes(member.participationStatus ?? ''))
+      .map((member) => member.userId)
+      .filter(Boolean),
+  );
+
+  if (participantIds.size === 0) {
+    return false;
+  }
+
+  const passedUserIds = new Set(
+    session.submissions
+      .filter((submission) => submission.judgeStatus === 'PASSED')
+      .map((submission) => submission.userId)
+      .filter(Boolean),
+  );
+
+  return Array.from(participantIds).every((userId) => passedUserIds.has(userId));
+}
+
 export function getReviewMissionSubmissions(session: MissionSession | null | undefined) {
   return session?.submissions.filter((submission) => Boolean(submission.imageUrl) && submission.judgeStatus !== 'REJECTED' && submission.judgeStatus !== 'ERROR') ?? [];
 }
