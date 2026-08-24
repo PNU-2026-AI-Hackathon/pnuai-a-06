@@ -1,6 +1,8 @@
 // 미션을 담을 일정과 여행 날짜를 선택하는 모달 UI입니다.
 
-import { ActivityIndicator, Modal, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Modal, ScrollView, View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
 import type { TripSchedule } from '@/lib/trip-schedule-api';

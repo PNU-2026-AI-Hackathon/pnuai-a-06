@@ -29,7 +29,7 @@ export default function MainHomeScreen() {
   return (
     <View style={[styles.container, { paddingBottom: bottomActionInset, paddingHorizontal: horizontalPadding }]}>
       <MainHeader
-        onOpenLogin={() => router.replace('/login')}
+        onOpenLogin={() => router.push('/main/waiting')}
         onOpenProfile={() => router.push('/main/profile')}
         profileEmoji={main.profileEmoji}
         profileImageUrl={main.profileImageUrl}

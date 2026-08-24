@@ -1,8 +1,9 @@
 // 프로필 이미지 선택·업로드·삭제 시트를 담당합니다.
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Animated, ActivityIndicator, Modal, Pressable, View } from 'react-native';
+import { ActivityIndicator, Animated, Modal, View } from 'react-native';
 
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import type { ProfileIconKey } from '@/components/profile-avatar';

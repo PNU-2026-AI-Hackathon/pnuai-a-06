@@ -1,7 +1,8 @@
 // 프로필 이미지와 닉네임을 수정하는 입력 영역입니다.
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';

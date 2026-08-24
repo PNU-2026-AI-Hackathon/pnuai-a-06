@@ -1,6 +1,8 @@
 // 지도 이미지와 구역별 터치 영역 및 상태 메시지를 담당합니다.
 import { Image } from 'expo-image';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 
 import { LocalizedText as Text } from '@/components/localized-text';
 

@@ -1,14 +1,15 @@
 import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams, usePathname, type Href } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { getAuthItem } from '@/lib/auth-storage';
 import { getActiveMissionSession, type MissionSession } from '@/lib/mission-session-api';
 import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
 
-const hiddenPathnames = ['/', '/login', '/auth/callback', '/trip/participation', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result', '/trip/edit'];
+const hiddenPathnames = ['/', '/login', '/auth/callback', '/main/waiting', '/trip/participation', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result', '/trip/edit'];
 
 type FeatherIconName = React.ComponentProps<typeof Feather>['name'];
 

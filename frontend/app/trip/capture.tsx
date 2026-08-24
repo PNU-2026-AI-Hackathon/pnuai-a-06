@@ -46,6 +46,7 @@ export default function MissionCaptureScreen() {
     isTransitioningToResult,
     isUploading,
     isWaitingForJudgement,
+    isWaitingForReview,
     judgeReason,
     judgementDotCount,
     needsRetakeAfterJudgement,
@@ -132,6 +133,7 @@ export default function MissionCaptureScreen() {
         isUploadExpired={isUploadExpired}
         isUploading={isUploading}
         isWaitingForJudgement={isWaitingForJudgement}
+        isWaitingForReview={isWaitingForReview}
         judgeReason={judgeReason}
         judgementDotCount={judgementDotCount}
         missionDescription={mission?.description}

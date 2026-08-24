@@ -6,6 +6,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
 import { formatRemainingTime } from '@/features/trip/capture/mission-capture-data';
+import { MissionReviewWaitingView } from '@/features/trip/review/components/mission-review-waiting-view';
 import { styles } from '@/features/trip/capture/mission-capture-styles';
 
 type MissionCaptureReviewProps = {
@@ -18,6 +19,7 @@ type MissionCaptureReviewProps = {
   isUploadExpired: boolean;
   isUploading: boolean;
   isWaitingForJudgement: boolean;
+  isWaitingForReview: boolean;
   judgeReason: string | null;
   judgementDotCount: number;
   missionDescription?: string;
@@ -40,6 +42,7 @@ export function MissionCaptureReview({
   isUploadExpired,
   isUploading,
   isWaitingForJudgement,
+  isWaitingForReview,
   judgeReason,
   judgementDotCount,
   missionDescription,
@@ -73,6 +76,10 @@ export function MissionCaptureReview({
         </ScalePressable>
       </View>
     );
+  }
+
+  if (isMissionComplete && isWaitingForReview) {
+    return <MissionReviewWaitingView bottomSafeInset={bottomSafeInset} topSafeInset={topSafeInset} />;
   }
 
   return (

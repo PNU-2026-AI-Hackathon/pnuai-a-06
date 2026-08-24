@@ -1,4 +1,6 @@
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 
 import { FlowButton } from '@/components/flow-screen';
 import { LocalizedText as Text } from '@/components/localized-text';

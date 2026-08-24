@@ -1,6 +1,8 @@
 // 일정 생성 후 동행자 초대 링크를 공유하는 모달 UI입니다.
 
-import { ActivityIndicator, Modal, Pressable, View } from 'react-native';
+import { ActivityIndicator, Modal, View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text } from '@/components/localized-text';
 
 import { styles } from '../trip-create-styles';

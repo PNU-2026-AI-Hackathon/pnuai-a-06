@@ -26,6 +26,8 @@ type UseMissionCaptureUploadOptions = {
   setSession: Dispatch<SetStateAction<MissionSession | null>>;
 };
 
+const SUCCESS_FEEDBACK_DURATION_MS = 1200;
+
 // capture 화면의 사진 업로드, AI 판정 동기화와 결과 화면 이동을 담당합니다.
 export function useMissionCaptureUpload({
   capturedPhotoUri,
@@ -38,6 +40,7 @@ export function useMissionCaptureUpload({
   setSession,
 }: UseMissionCaptureUploadOptions) {
   const [isMissionComplete, setIsMissionComplete] = useState(false);
+  const [isWaitingForReview, setIsWaitingForReview] = useState(false);
   const [isTransitioningToResult, setIsTransitioningToResult] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
@@ -52,6 +55,19 @@ export function useMissionCaptureUpload({
   const revealRequestInFlightRef = useRef(false);
   const isWaitingForJudgement = isWaitingJudgementStatus(judgeStatus);
   const needsRetakeAfterJudgement = isRetryableJudgementStatus(judgeStatus);
+
+  useEffect(() => {
+    if (!isMissionComplete) {
+      setIsWaitingForReview(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setIsWaitingForReview(true);
+    }, SUCCESS_FEEDBACK_DURATION_MS);
+
+    return () => clearTimeout(timer);
+  }, [isMissionComplete]);
 
   useEffect(() => {
     if (!isWaitingForJudgement) {
@@ -99,6 +115,7 @@ export function useMissionCaptureUpload({
 
     setJudgementSessionId(null);
     setIsMissionComplete(true);
+    setIsWaitingForReview(false);
     setCompletionSessionId(passedSessionId);
     setUploadMessage('AI 판독이 완료됐어요. 다른 참여자의 결과를 기다리고 있어요.');
   }, [hasNavigatedAwayRef, scheduleId, setSession]);
@@ -292,6 +309,7 @@ export function useMissionCaptureUpload({
     setCapturedPhotoUri(null);
     setIsMissionComplete(false);
     setIsTransitioningToResult(false);
+    setIsWaitingForReview(false);
     setUploadMessage('');
     setReturnCountdown(null);
     setCompletionSessionId(null);
@@ -367,6 +385,7 @@ export function useMissionCaptureUpload({
     isTransitioningToResult,
     isUploading,
     isWaitingForJudgement,
+    isWaitingForReview,
     judgeReason,
     judgeStatus,
     judgementDotCount,

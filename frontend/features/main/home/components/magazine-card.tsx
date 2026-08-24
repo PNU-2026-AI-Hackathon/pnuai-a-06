@@ -1,6 +1,8 @@
 // 완료된 여행 사진으로 매거진 카드를 보여주는 화면입니다.
 import { Image } from 'expo-image';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { ClipPath, Defs, Ellipse, Image as SvgImage, Svg } from 'react-native-svg';
 
 import { styles } from '../styles';

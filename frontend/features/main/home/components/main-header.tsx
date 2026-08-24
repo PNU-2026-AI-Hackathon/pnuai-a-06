@@ -1,6 +1,8 @@
 // main 홈의 로고와 프로필 진입 영역을 담당합니다.
 import { Image } from 'expo-image';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 
 import { ProfileAvatar } from '@/components/profile-avatar';
 

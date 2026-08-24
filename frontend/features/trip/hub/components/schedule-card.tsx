@@ -1,7 +1,9 @@
 // 일정 목록에서 개별 일정의 정보, 삭제, 드래그, 열기 동작을 표시하는 카드입니다.
 
 import { Image } from 'expo-image';
-import { ActivityIndicator, Animated, PanResponder, Pressable, View } from 'react-native';
+import { ActivityIndicator, Animated, PanResponder, View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { useEffect, useRef } from 'react';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';

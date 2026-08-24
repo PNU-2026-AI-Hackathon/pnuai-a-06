@@ -1,6 +1,8 @@
 // 일정 생성 화면에서 여행 날짜를 선택하는 캘린더 UI입니다.
 
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text } from '@/components/localized-text';
 
 import { createDateValue, weekdayLabels, type CalendarDay, type DateParts } from '../trip-create-data';

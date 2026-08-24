@@ -1,6 +1,8 @@
 // 일정 생성 두 번째 단계의 일정 이름 입력 UI입니다.
 
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text, LocalizedTextInput as TextInput } from '@/components/localized-text';
 
 import { styles } from '../trip-create-styles';
