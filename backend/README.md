@@ -68,15 +68,84 @@ Signup and verification flow:
 POST /auth/email/register
 POST /auth/email/verify
 POST /auth/email/login
+POST /auth/email/password-reset/request
+POST /auth/email/password-reset/confirm
 POST /auth/token/refresh
 GET /auth/me
+DELETE /auth/me
 ```
 
 `POST /auth/email/register` accepts `email`, `password`, and `name`, creates a 6-digit verification code, and sends it by SMTP when configured. `POST /auth/email/verify` verifies the code and returns `access_token` and `refresh_token`. `POST /auth/email/login` returns the same token pair after the email is verified. `POST /auth/token/refresh` accepts `refresh_token` and returns a new token pair.
 
+Password reset is a two-step flow. `POST /auth/email/password-reset/request`
+accepts `{ "email": "user@example.com" }`. Verified email accounts receive a
+six-digit code; when SMTP is disabled locally, the response contains
+`dev_verification_code`. An unknown email returns `404 EMAIL_NOT_REGISTERED`, and
+an unverified signup returns `409 EMAIL_NOT_VERIFIED`.
+
+`POST /auth/email/password-reset/confirm` accepts:
+
+```json
+{
+  "email": "user@example.com",
+  "code": "123456",
+  "new_password": "new-password"
+}
+```
+
+The code expires after `EMAIL_VERIFICATION_EXPIRE_MINUTES`, is single-use, and is
+invalidated after five incorrect attempts. After success, log in through
+`POST /auth/email/login` with the new password.
+
+`DELETE /auth/me` permanently deletes the authenticated service account. For a
+Kakao account, the backend first calls Kakao's unlink API and deletes the local
+account only after unlink succeeds. Configure `KAKAO_ADMIN_KEY` with the Admin
+key from the Kakao Developers app. If it is missing or Kakao rejects the unlink
+request, the endpoint returns an error and keeps the local account.
+
 Kakao login code is still in the backend, but its route decorators are commented out while email login is active.
 
 ## Mission APIs
+
+### Korean and English responses
+
+The endpoint paths stay the same. Add `lang=en` to any localized content request,
+or send `Accept-Language: en`. The query parameter wins when both are present.
+Korean remains the default and any untranslated field falls back to its Korean value.
+
+```text
+GET /missions?lang=en
+GET /missions?district_code=HAEUNDAE&lang=en
+GET /mission-sets/2?lang=en
+GET /schedules/1?lang=en
+GET /schedules/1/magazine/draft?lang=en
+WS  /mission-sessions/10/ws?token=...&lang=en
+```
+
+Localized responses include `Content-Language`. Schedule titles, participant names,
+and comments are user-created content and are returned exactly as entered.
+
+English mission, basket, and GPS labels can be edited in the local admin at
+`http://<server-host>:8197/translations`.
+
+### Date-specific mission order recommendation
+
+The schedule creator can ask the backend to reorder only one planned day:
+
+```text
+POST /schedules/{schedule_id}/days/{planned_date}/recommend-order
+Authorization: Bearer <access-token>
+```
+
+Use an ISO date such as `2026-08-24`. The request has no JSON body. The backend
+sends that day's mission place names, detailed addresses, and configured GPS
+coordinates to OpenAI, validates that every scheduled mission id appears exactly
+once, and persists the returned one-based `visit_order`. Missions assigned to
+other dates are not changed. Schedule mission arrays are returned in
+`planned_date`, then `visit_order` order.
+
+The endpoint returns `409` when the date has no missions, `502` when a valid
+recommendation cannot be generated, and `503` when `OPENAI_API_KEY` is missing.
 
 Current mission APIs are split by purpose:
 
@@ -113,7 +182,7 @@ Returns the actual mission photo file. Example: `GET /missions/MTN_B01/photo`.
 GET /mission-sets
 ```
 
-Returns the three backend-created basket themes: mountain, sea, and city. Use this for home/map basket cards.
+Returns the three regular basket themes (mountain, sea, and city) and the separate `DEMO` category. Use `DEMO` only for presentation missions; it can also be queried with `GET /missions?theme=DEMO`.
 Basket themes do not have district tags. District filtering belongs to `GET /missions`.
 
 ```text
