@@ -8,6 +8,7 @@ class Theme(str, Enum):
     MOUNTAIN = "MOUNTAIN"
     SEA = "SEA"
     CITY = "CITY"
+    DEMO = "DEMO"
 
 
 class MissionType(str, Enum):
@@ -38,7 +39,7 @@ class MissionResponse(BaseModel):
     id: int = Field(description="Internal mission numeric id.")
     mission_set_id: int = Field(description="Basket theme id that owns this mission.")
     code: str = Field(description="Stable mission code, also used as the image filename.")
-    theme: Theme = Field(description="Basket theme: MOUNTAIN, SEA, or CITY.")
+    theme: Theme = Field(description="Mission category: MOUNTAIN, SEA, CITY, or DEMO.")
     district_code: str = Field(
         description="Structured Busan district code for map/filter use, e.g. YEONGDO or ALL_BUSAN."
     )
@@ -46,6 +47,9 @@ class MissionResponse(BaseModel):
         description="Human-readable Busan district label, e.g. 영도구 or 부산 전역."
     )
     place_label: str | None = Field(description="Specific mission place label, e.g. 황령산 봉수대.")
+    address: str | None = Field(
+        description="Detailed street address for the mission place, if configured."
+    )
     type: MissionType = Field(description="Mission category: BASIC, RARE, or SIDE.")
     title: str = Field(description="Mission title shown to users.")
     description: str = Field(description="Mission instruction shown to users.")
@@ -91,7 +95,7 @@ class MissionSetResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(description="Internal basket theme numeric id.")
-    theme: Theme = Field(description="Basket theme: MOUNTAIN, SEA, or CITY.")
+    theme: Theme = Field(description="Mission category: MOUNTAIN, SEA, CITY, or DEMO.")
     title: str = Field(description="Basket title shown to users.")
     region_label: str = Field(description="Short theme/category label for the basket, not a district.")
     description: str | None = Field(description="Basket description shown on list/detail screens.")

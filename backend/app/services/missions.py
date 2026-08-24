@@ -1,12 +1,16 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.missions import Mission, MissionSet
+from app.models.missions import Mission, MissionLocation, MissionSet
 from app.schemas.missions import MissionType, Theme
 
 
 def list_mission_sets(db: Session) -> list[MissionSet]:
-    stmt = select(MissionSet).order_by(MissionSet.sort_order, MissionSet.id)
+    stmt = (
+        select(MissionSet)
+        .options(selectinload(MissionSet.translations))
+        .order_by(MissionSet.sort_order, MissionSet.id)
+    )
     return list(db.scalars(stmt).all())
 
 
@@ -37,7 +41,10 @@ def list_missions(
     theme: Theme | None = None,
     mission_type: MissionType | None = None,
 ) -> list[Mission]:
-    stmt = select(Mission).options(selectinload(Mission.locations))
+    stmt = select(Mission).options(
+        selectinload(Mission.translations),
+        selectinload(Mission.locations).selectinload(MissionLocation.translations),
+    )
     if district_code:
         stmt = stmt.where(Mission.district_code == district_code)
     if theme:
@@ -52,7 +59,10 @@ def get_mission_by_code(db: Session, mission_code: str) -> Mission | None:
     stmt = (
         select(Mission)
         .where(Mission.code == mission_code)
-        .options(selectinload(Mission.locations))
+        .options(
+            selectinload(Mission.translations),
+            selectinload(Mission.locations).selectinload(MissionLocation.translations),
+        )
     )
     return db.scalar(stmt)
 
@@ -62,7 +72,11 @@ def get_mission_set(db: Session, mission_set_id: int) -> MissionSet | None:
         select(MissionSet)
         .where(MissionSet.id == mission_set_id)
         .options(
-            selectinload(MissionSet.missions).selectinload(Mission.locations)
+            selectinload(MissionSet.translations),
+            selectinload(MissionSet.missions).selectinload(Mission.translations),
+            selectinload(MissionSet.missions)
+            .selectinload(Mission.locations)
+            .selectinload(MissionLocation.translations),
         )
     )
     mission_set = db.scalar(stmt)
