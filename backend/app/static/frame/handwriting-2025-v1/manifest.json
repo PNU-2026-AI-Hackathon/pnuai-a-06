@@ -1,6 +1,10 @@
 {
   "key": "handwriting-2025-v1",
   "name": "교보 손글씨 2025",
+  "names": {
+    "ko": "교보 손글씨 2025",
+    "en": "Kyobo Handwriting 2025"
+  },
   "version": 2,
   "svg": "frame.svg",
   "width": 360,

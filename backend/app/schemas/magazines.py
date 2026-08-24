@@ -78,6 +78,7 @@ class MagazineSummaryResponse(BaseModel):
 
 class ScheduleMagazineResponse(BaseModel):
     version: int = 1
+    locale: str = "ko"
     schedule_id: int
     title: str
     start_date: date
@@ -126,6 +127,7 @@ class GeneratedMagazineResponse(BaseModel):
     id: int
     schedule_id: int
     template_key: str
+    locale: str
     template_version: int
     generation_number: int
     status: str
@@ -151,6 +153,7 @@ class MagazineMissionCandidateResponse(BaseModel):
 class MagazineCandidatesResponse(BaseModel):
     schedule_id: int
     template_key: str
+    locale: str = "ko"
     max_selectable: int
     selection_required: bool
     candidates: list[MagazineMissionCandidateResponse]

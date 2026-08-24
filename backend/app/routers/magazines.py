@@ -21,6 +21,7 @@ from app.services.magazines import (
     generate_schedule_magazine,
     get_generated_magazine,
 )
+from app.core.localization import resolve_locale
 
 
 router = APIRouter(tags=["magazines"])
@@ -31,11 +32,13 @@ router = APIRouter(tags=["magazines"])
     response_model=list[MagazineTemplateResponse],
     summary="List available magazine frames",
 )
-def list_magazine_templates() -> list[MagazineTemplateResponse]:
+def list_magazine_templates(
+    locale: str = Depends(resolve_locale),
+) -> list[MagazineTemplateResponse]:
     return [
         MagazineTemplateResponse(
             key=template.key,
-            name=template.name,
+            name=template.name_for(locale),
             version=template.version,
             width=template.width,
             height=template.height,
@@ -55,6 +58,7 @@ def list_magazine_templates() -> list[MagazineTemplateResponse]:
 def read_schedule_magazine_candidates(
     schedule_id: int,
     template_key: str = Query(default="handwriting-2025-v1"),
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MagazineCandidatesResponse:
@@ -62,7 +66,11 @@ def read_schedule_magazine_candidates(
     if template is None:
         raise HTTPException(status_code=404, detail="Magazine template not found.")
     result = build_magazine_candidates(
-        db, schedule_id=schedule_id, user_id=current_user.id, template=template
+        db,
+        schedule_id=schedule_id,
+        user_id=current_user.id,
+        template=template,
+        locale=locale,
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Mission schedule not found.")
@@ -70,6 +78,7 @@ def read_schedule_magazine_candidates(
     return MagazineCandidatesResponse(
         schedule_id=schedule_id,
         template_key=template.key,
+        locale=locale,
         max_selectable=template.capacity,
         selection_required=len(candidates) > template.capacity,
         candidates=[MagazineMissionCandidateResponse(**candidate) for candidate in candidates],
@@ -83,10 +92,13 @@ def read_schedule_magazine_candidates(
 )
 def read_schedule_magazine_draft(
     schedule_id: int,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ScheduleMagazineResponse:
-    magazine = build_schedule_magazine(db, schedule_id=schedule_id, user_id=current_user.id)
+    magazine = build_schedule_magazine(
+        db, schedule_id=schedule_id, user_id=current_user.id, locale=locale
+    )
     if magazine is None:
         raise HTTPException(status_code=404, detail="Mission schedule not found.")
     return magazine
@@ -105,6 +117,7 @@ def read_schedule_magazine_draft(
 def create_schedule_magazine(
     schedule_id: int,
     payload: MagazineGenerateRequest,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> GeneratedMagazineResponse:
@@ -117,6 +130,7 @@ def create_schedule_magazine(
             schedule_id=schedule_id,
             user_id=current_user.id,
             template=template,
+            locale=locale,
             force=payload.force,
             schedule_mission_ids=payload.schedule_mission_ids,
         )
@@ -147,6 +161,7 @@ def create_schedule_magazine(
 def read_generated_schedule_magazine(
     schedule_id: int,
     template_key: str = Query(default="handwriting-2025-v1"),
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> GeneratedMagazineResponse:
@@ -155,6 +170,7 @@ def read_generated_schedule_magazine(
         schedule_id=schedule_id,
         user_id=current_user.id,
         template_key=template_key,
+        locale=locale,
     )
     if magazine is None:
         raise HTTPException(status_code=404, detail="Generated magazine not found.")

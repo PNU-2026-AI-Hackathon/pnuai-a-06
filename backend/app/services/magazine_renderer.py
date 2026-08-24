@@ -25,6 +25,7 @@ class MagazineRenderError(RuntimeError):
 class MagazineTemplate:
     key: str
     name: str
+    names: dict[str, str]
     version: int
     width: int
     height: int
@@ -46,6 +47,9 @@ class MagazineTemplate:
     def output_height(self) -> int:
         return self.height * self.render_scale
 
+    def name_for(self, locale: str) -> str:
+        return self.names.get(locale, self.name)
+
 
 def load_templates() -> dict[str, MagazineTemplate]:
     templates: dict[str, MagazineTemplate] = {}
@@ -57,6 +61,7 @@ def load_templates() -> dict[str, MagazineTemplate]:
         template = MagazineTemplate(
             key=data["key"],
             name=data["name"],
+            names=data.get("names", {}),
             version=int(data["version"]),
             width=int(data["width"]),
             height=int(data["height"]),
@@ -174,19 +179,23 @@ def _render_one(template: MagazineTemplate, source: dict, pages: list[dict], out
     meta_font = _font(font_path, 10, scale)
     participant_font = _font(font_path, 11, scale)
     draw.text((16 * scale, 154 * scale), source["title"], font=title_font, fill=accent)
+    locale = source.get("locale", "ko")
+    date_label = "Trip Dates" if locale == "en" else "일정 기간"
+    people_label = "Travelers" if locale == "en" else "함께한 사람"
+    user_label = "Traveler" if locale == "en" else "사용자"
     draw.text(
         (16 * scale, 224 * scale),
-        f'일정 기간 | {source["start_date"]}  ~  {source["end_date"]}',
+        f'{date_label} | {source["start_date"]}  ~  {source["end_date"]}',
         font=meta_font,
         fill=accent,
     )
     names = " · ".join(
         participant.get("nickname")
         or (participant.get("email") or "").split("@", 1)[0]
-        or f'사용자 {participant["id"]}'
+        or f'{user_label} {participant["id"]}'
         for participant in source.get("participants", [])
     )
-    participant_text = f"함께한 사람 | {names}" if names else "함께한 사람 | -"
+    participant_text = f"{people_label} | {names}" if names else f"{people_label} | -"
     _draw_lines(
         draw,
         _wrap(draw, participant_text, participant_font, 255 * scale, 2),
@@ -337,15 +346,21 @@ def render_magazine(template: MagazineTemplate, source: dict, schedule_id: int) 
     pages = source.get("pages") or []
     if not pages:
         raise MagazineRenderError("At least one completed mission with a passed photo is required.")
-    output_directory = OUTPUT_DIR / str(schedule_id) / template.key
+    locale = source.get("locale", "ko")
+    output_directory = OUTPUT_DIR / str(schedule_id) / template.key / locale
     output_directory.mkdir(parents=True, exist_ok=True)
     urls: list[str] = []
     chunks = [pages[i : i + template.capacity] for i in range(0, len(pages), template.capacity)]
     for page_number, chunk in enumerate(chunks, start=1):
         output_path = output_directory / f"page-{page_number}.webp"
         _render_one(template, source, chunk, output_path)
-        urls.append(f"/static/magazines/{schedule_id}/{template.key}/{output_path.name}")
+        urls.append(
+            f"/static/magazines/{schedule_id}/{template.key}/{locale}/{output_path.name}"
+        )
     for stale in output_directory.glob("page-*.webp"):
-        if f"/static/magazines/{schedule_id}/{template.key}/{stale.name}" not in urls:
+        if (
+            f"/static/magazines/{schedule_id}/{template.key}/{locale}/{stale.name}"
+            not in urls
+        ):
             stale.unlink()
     return urls
