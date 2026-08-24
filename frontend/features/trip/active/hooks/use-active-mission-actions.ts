@@ -8,6 +8,7 @@ import {
 } from '@/features/trip/active/active-data';
 import { getCurrentParticipationLocation } from '@/lib/mission-location';
 import {
+  cancelMissionSession,
   chooseMissionParticipation,
   createMissionSession,
   type MissionSession,
@@ -227,13 +228,27 @@ export function useActiveMissionActions({
       leaderStartingMissionRef.current = true;
       const createdSession = await createMissionSession(schedule.scheduleId, mission.scheduleMissionId);
       createdSessionId = createdSession.id;
-      const nextSession = requiresGps
-        ? await chooseMissionParticipation(
-          createdSession.id,
-          'PARTICIPATE',
-          location,
-        )
-        : createdSession;
+      let nextSession = createdSession;
+
+      if (requiresGps) {
+        try {
+          nextSession = await chooseMissionParticipation(
+            createdSession.id,
+            'PARTICIPATE',
+            location,
+          );
+        } catch (error) {
+          // 세션 생성 후 위치 검증이 실패하면 서버에 WAITING 세션이 남지 않도록 정리합니다.
+          try {
+            await cancelMissionSession(createdSession.id);
+          } catch {
+            // 원래 위치 검증 오류를 사용자에게 보여주고, 서버 정리는 백엔드 만료 처리에 맡깁니다.
+          }
+
+          clearMissionState(mission.scheduleMissionId);
+          throw error;
+        }
+      }
 
       rememberFeedSession(nextSession, mission.scheduleMissionId);
       pendingMissionLocationRef.current = null;

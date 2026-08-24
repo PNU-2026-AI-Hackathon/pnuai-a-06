@@ -7,7 +7,6 @@ import { Platform, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { BottomNavigationBar } from '@/components/bottom-navigation-bar';
-import { MissionCompletionAlert } from '@/components/mission-completion-alert';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { LanguageProvider } from '@/hooks/use-language';
 import { saveAuthTokens } from '@/lib/auth-api';
@@ -107,7 +106,6 @@ export default function RootLayout() {
             </Stack>
           </View>
           <BottomNavigationBar />
-          <MissionCompletionAlert />
         </View>
       </LanguageProvider>
       <StatusBar style="auto" />
