@@ -116,8 +116,21 @@ export function useActiveMissionSockets({
         }
       },
     });
+    const syncActiveMissionSession = () => {
+      void getActiveMissionSession(scheduleId)
+        .then((nextSession) => {
+          rememberFeedSession(nextSession);
+          openParticipation(nextSession);
+        })
+        .catch(() => {
+          // There may be no active mission session while the schedule is idle.
+        });
+    };
+    syncActiveMissionSession();
+    const timer = setInterval(syncActiveMissionSession, 1500);
 
     return () => {
+      clearInterval(timer);
       socket.close();
     };
   }, [currentUserId, isFocused, leaderStartingMissionRef, openingParticipationSessionIdRef, rememberFeedSession, schedule, scheduleId, suppressedLeaderSessionIdsRef, suppressedParticipationSessionId]);

@@ -1,6 +1,6 @@
 import { useIsFocused } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 
@@ -24,11 +24,15 @@ import type { TripSchedule } from '@/lib/trip-schedule-api';
 // 진행 중인 여행의 미션·초대·세션 화면을 조합하는 라우트입니다.
 export default function ActiveTripScreen() {
   const params = useLocalSearchParams<{
+    cancelledScheduleMissionId?: string | string[];
+    cancelledSessionId?: string | string[];
     scheduleId?: string | string[];
     sessionId?: string | string[];
     suppressedParticipationSessionId?: string | string[];
   }>();
   const scheduleId = getParamValue(params.scheduleId);
+  const cancelledScheduleMissionId = getParamValue(params.cancelledScheduleMissionId);
+  const cancelledSessionId = getParamValue(params.cancelledSessionId);
   const initialSessionId = getParamValue(params.sessionId);
   const suppressedParticipationSessionId = getParamValue(params.suppressedParticipationSessionId);
   const currentUserId = getAuthItem('user_id');
@@ -39,13 +43,31 @@ export default function ActiveTripScreen() {
   const [message, setMessage] = useState('');
   const requiredScheduleMemberCount = schedule?.participants.length ?? 0;
   const isScheduleCreator = Boolean(schedule?.creatorId && currentUserId && schedule.creatorId === currentUserId);
-  const missionState = useActiveMissionState({ currentUserId, requiredScheduleMemberCount, schedule, scheduleId });
+  const missionState = useActiveMissionState({ currentUserId, ignoredSessionId: cancelledSessionId, requiredScheduleMemberCount, schedule, scheduleId });
   const {
     handleScheduleMissing: resetMissionState,
     handleScheduleSessionCacheLoaded: loadMissionSessionCache,
+    clearMissionState,
+    missionSessions,
+    revealedSessions,
     refreshSession,
     rememberFeedSession,
   } = missionState;
+
+  useEffect(() => {
+    if (!cancelledSessionId) {
+      return;
+    }
+
+    const cancelledSession = [
+      ...Object.values(missionSessions),
+      ...Object.values(revealedSessions),
+    ].find((session) => session.id === cancelledSessionId);
+
+    if (cancelledSession) {
+      clearMissionState(cancelledScheduleMissionId ?? cancelledSession.scheduleMissionId);
+    }
+  }, [cancelledScheduleMissionId, cancelledSessionId, clearMissionState, missionSessions, revealedSessions]);
 
   const handleScheduleMissing = useCallback(() => {
     resetMissionState();
@@ -98,12 +120,14 @@ export default function ActiveTripScreen() {
     isScheduleCreator,
     isTemporaryMission: missionState.isTemporaryMission,
     leaderStartingMissionRef: missionState.leaderStartingMissionRef,
+    missionSessions: missionState.missionSessions,
     onMessage: setMessage,
     reloadCurrentSchedule,
     rememberFeedSession: missionState.rememberFeedSession,
     requiredScheduleMemberCount,
     schedule,
     scheduleId,
+    suppressedParticipationSessionId,
     suppressedLeaderSessionIdsRef: missionState.suppressedLeaderSessionIdsRef,
   });
   const canAddMission = schedule?.permissions.canAddMission ?? false;

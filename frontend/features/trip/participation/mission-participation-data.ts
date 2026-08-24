@@ -6,7 +6,7 @@ export function isParticipating(status: MissionParticipationStatus | null | unde
 }
 
 export function hasLeftParticipation(status: MissionParticipationStatus | null | undefined) {
-  return status === 'SKIPPED' || status === 'LOCKED_OUT';
+  return status === 'LOCKED_OUT';
 }
 
 export function getParticipationErrorMessage(error: unknown) {

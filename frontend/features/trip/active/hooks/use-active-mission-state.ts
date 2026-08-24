@@ -23,13 +23,14 @@ import type { TripSchedule, TripScheduleMission } from '@/lib/trip-schedule-api'
 
 type UseActiveMissionStateOptions = {
   currentUserId: string | null;
+  ignoredSessionId?: string;
   requiredScheduleMemberCount: number;
   schedule: TripSchedule | null;
   scheduleId?: string;
 };
 
 // active 화면의 미션 세션 캐시·파생 목록·실시간 세션 병합을 담당합니다.
-export function useActiveMissionState({ currentUserId, requiredScheduleMemberCount, schedule, scheduleId }: UseActiveMissionStateOptions) {
+export function useActiveMissionState({ currentUserId, ignoredSessionId, requiredScheduleMemberCount, schedule, scheduleId }: UseActiveMissionStateOptions) {
   const [revealedSessions, setRevealedSessions] = useState<Record<string, MissionSession>>({});
   const [missionSessions, setMissionSessions] = useState<Record<string, MissionSession>>({});
   const missionSessionsRef = useRef<Record<string, MissionSession>>({});
@@ -80,6 +81,10 @@ export function useActiveMissionState({ currentUserId, requiredScheduleMemberCou
   }, []);
 
   const rememberFeedSession = useCallback((nextSession: MissionSession, fallbackScheduleMissionId?: string) => {
+    if (ignoredSessionId && nextSession.id === ignoredSessionId) {
+      return;
+    }
+
     const scheduleMissionId = nextSession.scheduleMissionId || fallbackScheduleMissionId;
 
     if (!scheduleMissionId) {
@@ -147,7 +152,7 @@ export function useActiveMissionState({ currentUserId, requiredScheduleMemberCou
 
       return nextRevealedSessions;
     });
-  }, [requiredScheduleMemberCount, scheduleId]);
+  }, [ignoredSessionId, requiredScheduleMemberCount, scheduleId]);
 
   const refreshSession = useCallback(async (sessionId: string) => {
     const nextSession = await getMissionSession(sessionId);

@@ -52,7 +52,7 @@ export function MissionParticipationView({
   return (
     <View style={styles.container}>
       <View style={[styles.closeHeader, { paddingTop: topSafeInset + 14, paddingHorizontal: horizontalPadding }]}>
-        {isMissionLeader || participantCount === 0 ? (
+        {isMissionLeader ? (
           <ScalePressable accessibilityLabel={isMissionLeader ? '미션 취소' : '미션 참여 닫기'} disabled={isSubmitting} onPress={() => void handleClose()} pressedScale={0.86} style={styles.closeButton}>
             <Ionicons color="#1D252B" name="close" size={32} />
           </ScalePressable>

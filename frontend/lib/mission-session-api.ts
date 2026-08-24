@@ -247,6 +247,7 @@ async function requestJson<T>(path: string, method: 'GET' | 'POST', body?: Recor
   try {
     const res = await fetchWithAuth(`${API_BASE_URL}${path}`, {
       body: body ? JSON.stringify(body) : undefined,
+      cache: method === 'GET' ? 'no-store' : undefined,
       headers: {
         Authorization: `Bearer ${token}`,
         ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -379,6 +380,8 @@ export function mergeMissionSessions(current: MissionSession | null | undefined,
 
 function normalizeSession(data: ApiMissionSession): MissionSession {
   const sessionId = data.id ?? data.session_id;
+  const rawStatus = String(data.status ?? 'WAITING').toUpperCase();
+  const status = rawStatus === 'CANCELED' ? 'CANCELLED' : rawStatus;
 
   if (sessionId === undefined || sessionId === null) {
     throw new Error('미션 세션 응답에 id가 없습니다.');
@@ -406,7 +409,7 @@ function normalizeSession(data: ApiMissionSession): MissionSession {
     scheduleMissionId: String(data.schedule_mission_id ?? ''),
     shootingEndsAt: pickFirstDateValue(data.shooting_ends_at, data.shooting_deadline_at, data.shooting_expires_at),
     startedAt: data.started_at,
-    status: data.status ?? 'WAITING',
+    status: status as MissionSessionStatus,
     submissions: (data.submissions ?? []).map(normalizeSubmission).filter((submission) => submission.photoUrl),
     verificationType: data.mission?.verification_type ?? null,
     winnerUserId: data.winner_user_id === null || data.winner_user_id === undefined ? null : String(data.winner_user_id),
@@ -438,10 +441,16 @@ export function connectMissionSessionSocket(
 
   socket.onmessage = (event) => {
     try {
-      const message = JSON.parse(String(event.data)) as { payload?: { session?: ApiMissionSession }; type?: string };
+      const message = JSON.parse(String(event.data)) as {
+        event?: string;
+        payload?: { session?: ApiMissionSession; type?: string };
+        session?: ApiMissionSession;
+        type?: string;
+      };
+      const rawSession = message.payload?.session ?? message.session;
       handlers.onMessage({
-        session: message.payload?.session ? normalizeSession(message.payload.session) : undefined,
-        type: message.type,
+        session: rawSession ? normalizeSession(rawSession) : undefined,
+        type: message.type ?? message.payload?.type ?? message.event,
       });
     } catch {
       // Ignore malformed socket payloads and recover through GET refresh.
@@ -466,10 +475,16 @@ export function connectScheduleMissionSessionSocket(
 
   socket.onmessage = (event) => {
     try {
-      const message = JSON.parse(String(event.data)) as { payload?: { session?: ApiMissionSession }; type?: string };
+      const message = JSON.parse(String(event.data)) as {
+        event?: string;
+        payload?: { session?: ApiMissionSession; type?: string };
+        session?: ApiMissionSession;
+        type?: string;
+      };
+      const rawSession = message.payload?.session ?? message.session;
       handlers.onMessage({
-        session: message.payload?.session ? normalizeSession(message.payload.session) : undefined,
-        type: message.type,
+        session: rawSession ? normalizeSession(rawSession) : undefined,
+        type: message.type ?? message.payload?.type ?? message.event,
       });
     } catch {
       // Ignore malformed socket payloads and recover through the normal schedule polling.

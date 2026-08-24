@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { chooseMissionParticipation, cancelMissionSession, connectMissionSessionSocket, getMissionSession, isMissionSessionNotFoundError, startMissionSession, type MissionSession } from '@/lib/mission-session-api';
+import { chooseMissionParticipation, cancelMissionSession, connectMissionSessionSocket, connectScheduleMissionSessionSocket, getActiveMissionSession, getMissionSession, isMissionSessionNotFoundError, startMissionSession, type MissionSession } from '@/lib/mission-session-api';
 import { getCurrentParticipationLocation } from '@/lib/mission-location';
 import { getParticipationErrorMessage, hasLeftParticipation, isParticipating } from '../mission-participation-data';
 
@@ -43,19 +43,26 @@ export function useMissionParticipation({
   const canChangeParticipation = Boolean(!isMissionLeader && session && ['WAITING', 'READY'].includes(session.status) && myMember && myMember.participationStatus !== 'LOCKED_OUT');
   const requiresGps = (session?.verificationType ?? routeVerificationType)?.toUpperCase() === 'GPS_PHOTO';
 
-  const goBack = useCallback(() => {
+  const goBack = useCallback((suppressParticipationSession = true, isCancellation = false, refreshSessionId?: string) => {
     if (scheduleId) {
       router.replace({
         pathname: '/trip/active',
         params: {
           scheduleId,
-          ...(sessionId ? { suppressedParticipationSessionId: sessionId } : {}),
+          ...(refreshSessionId ? { sessionId: refreshSessionId } : {}),
+          ...(suppressParticipationSession && sessionId ? { suppressedParticipationSessionId: sessionId } : {}),
+          ...(isCancellation && sessionId
+            ? {
+              cancelledSessionId: sessionId,
+              ...(session?.scheduleMissionId ? { cancelledScheduleMissionId: session.scheduleMissionId } : {}),
+            }
+            : {}),
         },
       });
     } else {
       router.back();
     }
-  }, [scheduleId, sessionId]);
+  }, [scheduleId, session?.scheduleMissionId, sessionId]);
 
   const returnToActiveAfterMissingSession = useCallback(() => {
     if (!isFocused || hasNavigated.current) {
@@ -63,7 +70,7 @@ export function useMissionParticipation({
     }
 
     hasNavigated.current = true;
-    goBack();
+    goBack(true, true);
   }, [goBack, isFocused]);
 
   const returnToActiveAfterCancellation = useCallback(() => {
@@ -72,7 +79,7 @@ export function useMissionParticipation({
     }
 
     hasNavigated.current = true;
-    goBack();
+    goBack(true, true);
   }, [goBack]);
 
   const navigateToCapture = useCallback((nextSession: MissionSession) => {
@@ -257,33 +264,76 @@ export function useMissionParticipation({
       return;
     }
 
-    const socket = connectMissionSessionSocket(sessionId, {
-      onError: () => {
-        void getMissionSession(sessionId).then(applySession).catch((error) => {
-          if (isMissionSessionNotFoundError(error)) {
-            returnToActiveAfterMissingSession();
-          }
-        });
-      },
-      onMessage: ({ session: nextSession }) => {
-        if (nextSession) {
-          applySession(nextSession);
+    const syncSession = async () => {
+      try {
+        const nextSession = await getMissionSession(sessionId);
+        applySession(nextSession);
+      } catch (error) {
+        if (isMissionSessionNotFoundError(error)) {
+          returnToActiveAfterMissingSession();
+          return;
         }
-      },
-    });
-    const timer = setInterval(() => {
-      void getMissionSession(sessionId).then(applySession).catch((error) => {
+      }
+
+      if (!scheduleId || hasNavigated.current) {
+        return;
+      }
+
+      try {
+        const activeSession = await getActiveMissionSession(scheduleId);
+        if (activeSession.id !== sessionId) {
+          returnToActiveAfterCancellation();
+        }
+      } catch (error) {
         if (isMissionSessionNotFoundError(error)) {
           returnToActiveAfterMissingSession();
         }
-      });
+      }
+    };
+
+    const socket = connectMissionSessionSocket(sessionId, {
+      onError: () => {
+        void syncSession();
+      },
+      onMessage: ({ session: nextSession, type }) => {
+        if (nextSession) {
+          applySession(nextSession);
+          return;
+        }
+
+        if (type?.toLowerCase().includes('cancel')) {
+          returnToActiveAfterCancellation();
+          return;
+        }
+
+        void syncSession();
+      },
+    });
+    const scheduleSocket = scheduleId
+      ? connectScheduleMissionSessionSocket(scheduleId, {
+        onError: () => {
+          void syncSession();
+        },
+        onMessage: ({ session: nextSession }) => {
+          if (nextSession?.id === sessionId) {
+            applySession(nextSession);
+            return;
+          }
+
+          void syncSession();
+        },
+      })
+      : null;
+    const timer = setInterval(() => {
+      void syncSession();
     }, 1500);
 
     return () => {
       clearInterval(timer);
       socket.close();
+      scheduleSocket?.close();
     };
-  }, [applySession, returnToActiveAfterMissingSession, sessionId]);
+  }, [applySession, returnToActiveAfterCancellation, returnToActiveAfterMissingSession, scheduleId, sessionId]);
 
   const handleParticipation = async (decision: 'PARTICIPATE' | 'PASS') => {
     if (!sessionId || !canChangeParticipation || isSubmitting) {

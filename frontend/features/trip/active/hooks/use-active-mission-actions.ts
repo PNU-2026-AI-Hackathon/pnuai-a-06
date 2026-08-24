@@ -22,12 +22,14 @@ type UseActiveMissionActionsOptions = {
   isMissionLockedForEdit: (mission: TripScheduleMission) => boolean;
   isTemporaryMission: (mission: TripScheduleMission) => boolean;
   leaderStartingMissionRef: React.MutableRefObject<boolean>;
+  missionSessions: Record<string, MissionSession>;
   onMessage: (message: string) => void;
   reloadCurrentSchedule: () => Promise<TripSchedule | null>;
   rememberFeedSession: (session: MissionSession, fallbackScheduleMissionId?: string) => void;
   requiredScheduleMemberCount: number;
   schedule: TripSchedule | null;
   scheduleId?: string;
+  suppressedParticipationSessionId?: string;
   suppressedLeaderSessionIdsRef: React.MutableRefObject<Set<string>>;
 };
 
@@ -39,12 +41,14 @@ export function useActiveMissionActions({
   isMissionLockedForEdit,
   isTemporaryMission,
   leaderStartingMissionRef,
+  missionSessions,
   onMessage,
   reloadCurrentSchedule,
   rememberFeedSession,
   requiredScheduleMemberCount,
   schedule,
   scheduleId,
+  suppressedParticipationSessionId,
   suppressedLeaderSessionIdsRef,
 }: UseActiveMissionActionsOptions) {
   const [isSessionBusy, setIsSessionBusy] = useState(false);
@@ -141,6 +145,26 @@ export function useActiveMissionActions({
 
     onMessage('');
     setMissionListVisible(false);
+
+    const existingSession = missionSessions[mission.scheduleMissionId];
+    if (
+      existingSession
+      && existingSession.id !== suppressedParticipationSessionId
+      && ['WAITING', 'READY'].includes(existingSession.status)
+    ) {
+      router.push({
+        pathname: '/trip/participation',
+        params: {
+          scheduleId: schedule.scheduleId,
+          scheduleMissionId: mission.scheduleMissionId,
+          sessionId: existingSession.id,
+          ...(existingSession.verificationType || mission.verificationType
+            ? { verificationType: existingSession.verificationType ?? mission.verificationType ?? '' }
+            : {}),
+        },
+      });
+      return;
+    }
 
     if (isScheduleCreator && mission.verificationType?.toUpperCase() === 'GPS_PHOTO') {
       setIsSessionBusy(true);

@@ -132,8 +132,7 @@ export function isParticipatingMissionMember(member: MissionSession['members'][n
 }
 
 export function hasLeftMissionParticipation(member: MissionSession['members'][number] | undefined) {
-  return member?.participationStatus === 'SKIPPED'
-    || member?.participationStatus === 'LOCKED_OUT'
+  return member?.participationStatus === 'LOCKED_OUT'
     || member?.participationStatus === 'TIMED_OUT';
 }
 
