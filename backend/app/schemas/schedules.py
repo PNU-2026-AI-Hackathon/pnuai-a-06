@@ -200,7 +200,7 @@ class ScheduleShareInvitationResponse(BaseModel):
 
 
 class ScheduleBasketResponse(BaseModel):
-    theme: str = Field(description="Basket theme: MOUNTAIN, SEA, or CITY.")
+    theme: str = Field(description="Mission category: MOUNTAIN, SEA, CITY, or DEMO.")
     status: ScheduleBasketStatus = Field(description="Theme basket state inside this schedule.")
     mission_count: int = Field(description="Number of missions added for this theme.")
 
@@ -213,11 +213,22 @@ class ScheduleMissionResponse(BaseModel):
     added_by_user_id: int = Field(description="User who added this mission.")
     status: ScheduleMissionStatus = Field(description="Schedule mission progress status.")
     planned_date: date | None = Field(description="Planned execution date within the schedule range.")
+    visit_order: int = Field(
+        ge=1,
+        description="One-based visit order among missions planned for the same date.",
+    )
     mission: MissionResponse = Field(description="Mission detail.")
     created_at: datetime
     updated_at: datetime
     winner_user_id: int | None = Field(description="User id with the most likes after mission completion.")
     winner: ScheduleUserResponse | None = Field(description="Winner profile after mission completion.")
+
+
+class ScheduleMissionOrderRecommendationResponse(BaseModel):
+    planned_date: date = Field(description="Date whose mission order was updated.")
+    missions: list[ScheduleMissionResponse] = Field(
+        description="Missions for the date in the newly persisted visit order."
+    )
 
 
 class MissionScheduleResponse(BaseModel):

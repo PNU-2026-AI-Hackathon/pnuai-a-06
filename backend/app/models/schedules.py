@@ -9,6 +9,7 @@ from sqlalchemy import (
     String,
     Text,
     Float,
+    Index,
     UniqueConstraint,
     func,
 )
@@ -201,6 +202,12 @@ class ScheduleMission(Base):
     __tablename__ = "schedule_missions"
     __table_args__ = (
         UniqueConstraint("schedule_id", "mission_id", name="uq_schedule_missions_schedule_mission"),
+        Index(
+            "ix_schedule_missions_schedule_date_visit_order",
+            "schedule_id",
+            "planned_date",
+            "visit_order",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -223,6 +230,12 @@ class ScheduleMission(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     planned_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    visit_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="ADDED")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

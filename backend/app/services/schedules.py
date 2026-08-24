@@ -1,10 +1,10 @@
 from datetime import date, datetime, timedelta, timezone
 from secrets import token_urlsafe
 
-from sqlalchemy import or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models.missions import Mission
+from app.models.missions import Mission, MissionLocation
 from app.models.schedules import (
     MissionSession,
     MissionSchedule,
@@ -58,10 +58,17 @@ def _display_name(user: User) -> str:
 
 def _schedule_load_options():
     return (
-        selectinload(MissionSchedule.creator),
-        selectinload(MissionSchedule.members).selectinload(ScheduleMember.user),
-        selectinload(MissionSchedule.schedule_missions).selectinload(ScheduleMission.mission),
-        selectinload(MissionSchedule.schedule_missions).selectinload(ScheduleMission.winner),
+        joinedload(MissionSchedule.creator),
+        selectinload(MissionSchedule.members).joinedload(ScheduleMember.user),
+        selectinload(MissionSchedule.schedule_missions).joinedload(ScheduleMission.mission),
+        selectinload(MissionSchedule.schedule_missions)
+        .joinedload(ScheduleMission.mission)
+        .joinedload(Mission.translations),
+        selectinload(MissionSchedule.schedule_missions)
+        .joinedload(ScheduleMission.mission)
+        .joinedload(Mission.locations)
+        .joinedload(MissionLocation.translations),
+        selectinload(MissionSchedule.schedule_missions).joinedload(ScheduleMission.winner),
     )
 
 
@@ -71,11 +78,32 @@ def _sort_schedule_children(schedule: MissionSchedule) -> MissionSchedule:
         key=lambda item: (
             item.planned_date is None,
             item.planned_date or date.max,
+            item.visit_order,
             item.created_at,
             item.id,
         )
     )
     return schedule
+
+
+def _next_schedule_mission_visit_order(
+    db: Session,
+    *,
+    schedule_id: int,
+    planned_date: date | None,
+) -> int:
+    date_condition = (
+        ScheduleMission.planned_date.is_(None)
+        if planned_date is None
+        else ScheduleMission.planned_date == planned_date
+    )
+    current_max = db.scalar(
+        select(func.max(ScheduleMission.visit_order)).where(
+            ScheduleMission.schedule_id == schedule_id,
+            date_condition,
+        )
+    )
+    return int(current_max or 0) + 1
 
 
 def _load_schedule(db: Session, schedule_id: int) -> MissionSchedule | None:
@@ -674,6 +702,11 @@ def add_schedule_mission(
             added_by_user_id=user_id,
             status=ScheduleMissionStatus.ADDED.value,
             planned_date=planned_date,
+            visit_order=_next_schedule_mission_visit_order(
+                db,
+                schedule_id=schedule_id,
+                planned_date=planned_date,
+            ),
         )
         db.add(schedule_mission)
 
@@ -682,7 +715,12 @@ def add_schedule_mission(
     return db.scalar(
         select(ScheduleMission)
         .where(ScheduleMission.id == schedule_mission.id)
-        .options(selectinload(ScheduleMission.mission))
+        .options(
+            selectinload(ScheduleMission.mission).selectinload(Mission.translations),
+            selectinload(ScheduleMission.mission)
+            .selectinload(Mission.locations)
+            .selectinload(MissionLocation.translations),
+        )
     ), None
 
 
@@ -708,12 +746,24 @@ def update_schedule_mission_date(
     )
     if schedule_mission is None:
         return None, "schedule_mission_not_found"
-    schedule_mission.planned_date = planned_date
+    if schedule_mission.planned_date != planned_date:
+        schedule_mission.planned_date = planned_date
+        schedule_mission.visit_order = _next_schedule_mission_visit_order(
+            db,
+            schedule_id=schedule_id,
+            planned_date=planned_date,
+        )
     db.commit()
     return db.scalar(
         select(ScheduleMission)
         .where(ScheduleMission.id == schedule_mission.id)
-        .options(selectinload(ScheduleMission.mission), selectinload(ScheduleMission.winner))
+        .options(
+            selectinload(ScheduleMission.mission).selectinload(Mission.translations),
+            selectinload(ScheduleMission.mission)
+            .selectinload(Mission.locations)
+            .selectinload(MissionLocation.translations),
+            selectinload(ScheduleMission.winner),
+        )
     ), None
 
 
