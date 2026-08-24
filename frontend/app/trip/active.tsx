@@ -165,6 +165,11 @@ export default function ActiveTripScreen() {
           horizontalPadding={horizontalPadding}
           isMissionBlockedForPlay={actions.isMissionBlockedForPlay}
           onOpenMissionDetail={actions.openMissionDetail}
+          onOpenRouteRecommendation={() => {
+            if (schedule?.scheduleId) {
+              router.push({ pathname: '/trip/route', params: { scheduleId: schedule.scheduleId } });
+            }
+          }}
           onOpenMissionSession={actions.openMissionSession}
         />
         {inviteMessage && !inviteSheetVisible ? <Text style={styles.inlineMessage}>{inviteMessage}</Text> : null}

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { router } from 'expo-router';
 
@@ -58,10 +58,48 @@ export function useActiveMissionActions({
   const [busyScheduleMissionId, setBusyScheduleMissionId] = useState<string | null>(null);
   const [missionListMessage, setMissionListMessage] = useState('');
   const pendingMissionLocationRef = useRef<MissionParticipationLocation | null>(null);
+  const pendingMissionLocationPromiseRef = useRef<Promise<MissionParticipationLocation> | null>(null);
+  const pendingMissionLocationRequestIdRef = useRef(0);
 
   const isMissionBlockedForPlay = useCallback((mission: TripScheduleMission) => {
     return Boolean(activeBlockingSession?.scheduleMissionId && activeBlockingSession.scheduleMissionId !== mission.scheduleMissionId);
   }, [activeBlockingSession]);
+
+  const preparePendingMissionLocation = useCallback((mission: TripScheduleMission) => {
+    const requiresGps = isScheduleCreator && mission.verificationType?.toUpperCase() === 'GPS_PHOTO';
+    pendingMissionLocationRef.current = null;
+    pendingMissionLocationPromiseRef.current = null;
+    const requestId = ++pendingMissionLocationRequestIdRef.current;
+
+    if (!requiresGps) {
+      return;
+    }
+
+    const locationPromise = getCurrentParticipationLocation();
+    pendingMissionLocationPromiseRef.current = locationPromise;
+    void locationPromise
+      .then((location) => {
+        if (pendingMissionLocationRequestIdRef.current === requestId) {
+          pendingMissionLocationRef.current = location;
+        }
+      })
+      .catch((error) => {
+        if (pendingMissionLocationRequestIdRef.current === requestId) {
+          onMessage(getMissionStartErrorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (pendingMissionLocationRequestIdRef.current === requestId) {
+          pendingMissionLocationPromiseRef.current = null;
+        }
+      });
+  }, [isScheduleCreator, onMessage]);
+
+  useEffect(() => {
+    if (pendingMission) {
+      preparePendingMissionLocation(pendingMission);
+    }
+  }, [pendingMission, preparePendingMissionLocation]);
 
   const handleChangeMissionDate = async (mission: TripScheduleMission, plannedDate: string) => {
     if (!schedule?.scheduleId || busyScheduleMissionId || plannedDate === mission.plannedDate) {
@@ -166,22 +204,7 @@ export function useActiveMissionActions({
       return;
     }
 
-    if (isScheduleCreator && mission.verificationType?.toUpperCase() === 'GPS_PHOTO') {
-      setIsSessionBusy(true);
-      void getCurrentParticipationLocation()
-        .then((location) => {
-          pendingMissionLocationRef.current = location;
-          setPendingMission(mission);
-        })
-        .catch((error) => {
-          onMessage(getMissionStartErrorMessage(error));
-        })
-        .finally(() => {
-          setIsSessionBusy(false);
-        });
-      return;
-    }
-
+    // 모달을 먼저 표시하고, 렌더링이 끝난 뒤 GPS 위치 확인을 시작합니다.
     setPendingMission(mission);
   };
 
@@ -197,6 +220,10 @@ export function useActiveMissionActions({
     try {
       setIsSessionBusy(true);
       onMessage('');
+      const location = requiresGps
+        ? pendingMissionLocationRef.current
+          ?? await (pendingMissionLocationPromiseRef.current ?? getCurrentParticipationLocation())
+        : undefined;
       leaderStartingMissionRef.current = true;
       const createdSession = await createMissionSession(schedule.scheduleId, mission.scheduleMissionId);
       createdSessionId = createdSession.id;
@@ -204,7 +231,7 @@ export function useActiveMissionActions({
         ? await chooseMissionParticipation(
           createdSession.id,
           'PARTICIPATE',
-          pendingMissionLocationRef.current ?? await getCurrentParticipationLocation(),
+          location,
         )
         : createdSession;
 
@@ -265,6 +292,8 @@ export function useActiveMissionActions({
     missionListMessage,
     missionListVisible,
     onClosePendingMission: () => {
+      pendingMissionLocationRequestIdRef.current += 1;
+      pendingMissionLocationPromiseRef.current = null;
       pendingMissionLocationRef.current = null;
       setPendingMission(null);
     },

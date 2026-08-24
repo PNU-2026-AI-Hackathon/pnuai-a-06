@@ -281,7 +281,7 @@ export function useMissionParticipation({
 
       try {
         const activeSession = await getActiveMissionSession(scheduleId);
-        if (activeSession.id !== sessionId) {
+        if (activeSession.status === 'CANCELLED' || activeSession.id !== sessionId) {
           returnToActiveAfterCancellation();
         }
       } catch (error) {

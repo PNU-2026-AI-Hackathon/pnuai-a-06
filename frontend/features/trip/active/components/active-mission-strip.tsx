@@ -17,6 +17,7 @@ type ActiveMissionStripProps = {
   horizontalPadding: number;
   isMissionBlockedForPlay: (mission: TripScheduleMission) => boolean;
   onOpenMissionDetail: () => void;
+  onOpenRouteRecommendation: () => void;
   onOpenMissionSession: (mission: TripScheduleMission) => void;
 };
 
@@ -28,11 +29,18 @@ export function ActiveMissionStrip({
   horizontalPadding,
   isMissionBlockedForPlay,
   onOpenMissionDetail,
+  onOpenRouteRecommendation,
   onOpenMissionSession,
 }: ActiveMissionStripProps) {
   return (
     <>
-      <Text style={styles.sectionLabel}>미션 리스트</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionLabel}>미션 리스트</Text>
+        <ScalePressable accessibilityLabel="날짜별 경로 추천 열기" disabled={!hasSchedule} onPress={onOpenRouteRecommendation} pressedScale={0.9} style={styles.routeLink}>
+          <Text style={styles.routeLinkText}>날짜별 경로</Text>
+          <Text style={styles.routeLinkArrow}>›</Text>
+        </ScalePressable>
+      </View>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}

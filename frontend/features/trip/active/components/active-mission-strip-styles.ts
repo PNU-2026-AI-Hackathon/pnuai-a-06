@@ -2,11 +2,33 @@ import { StyleSheet } from 'react-native';
 
 // active 여행 화면의 미션 가로 목록 타일 스타일입니다.
 export const styles = StyleSheet.create({
+  sectionHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   sectionLabel: {
     color: '#8A9194',
     fontSize: 12,
     fontWeight: '500',
-    marginBottom: 12,
+  },
+  routeLink: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 2,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  routeLinkText: {
+    color: '#409CB7',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  routeLinkArrow: {
+    color: '#409CB7',
+    fontSize: 24,
+    lineHeight: 20,
   },
   photoStrip: {
     alignItems: 'center',

@@ -148,6 +148,41 @@ export function getMissionLocation(mission: TripScheduleMission) {
   return mission.placeLabel ?? mission.districtLabel ?? '부산';
 }
 
+export function sortMissionsByVisitOrder(missions: TripScheduleMission[]) {
+  return missions
+    .map((mission, index) => ({ index, mission }))
+    .sort((left, right) => {
+      const leftOrder = left.mission.visitOrder ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = right.mission.visitOrder ?? Number.MAX_SAFE_INTEGER;
+
+      return leftOrder - rightOrder || left.index - right.index;
+    })
+    .map(({ mission }) => mission);
+}
+
+export function sortMissionsByDateProximity(missions: TripScheduleMission[], referenceDate = new Date()) {
+  const referenceDay = getCalendarDayNumber(referenceDate);
+
+  return missions
+    .map((mission, index) => ({ index, mission }))
+    .sort((left, right) => {
+      const leftDate = parseDateValue(left.mission.plannedDate);
+      const rightDate = parseDateValue(right.mission.plannedDate);
+      const leftDistance = leftDate ? getCalendarDayNumber(leftDate) - referenceDay : Number.MAX_SAFE_INTEGER;
+      const rightDistance = rightDate ? getCalendarDayNumber(rightDate) - referenceDay : Number.MAX_SAFE_INTEGER;
+
+      if (leftDistance !== rightDistance) {
+        return leftDistance - rightDistance;
+      }
+
+      const leftOrder = left.mission.visitOrder ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = right.mission.visitOrder ?? Number.MAX_SAFE_INTEGER;
+
+      return leftOrder - rightOrder || left.index - right.index;
+    })
+    .map(({ mission }) => mission);
+}
+
 export function getMissionStartErrorMessage(error: unknown) {
   if (error instanceof MissionSessionApiError) {
     switch (error.code) {
@@ -266,6 +301,7 @@ export function getScheduleSyncSignature(schedule: TripSchedule) {
       scheduleMissionId: mission.scheduleMissionId,
       status: mission.status,
       title: mission.title,
+      visitOrder: mission.visitOrder,
     })),
     participants: schedule.participants.map((participant) => participant.id),
     startDate: schedule.startDate,

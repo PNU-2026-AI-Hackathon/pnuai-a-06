@@ -13,6 +13,8 @@ import {
   isStartedMissionSession,
   parseDateValue,
   saveCachedRevealedSessions,
+  sortMissionsByDateProximity,
+  sortMissionsByVisitOrder,
 } from '@/features/trip/active/active-data';
 import {
   getMissionSession,
@@ -45,22 +47,22 @@ export function useActiveMissionState({ currentUserId, ignoredSessionId, require
 
     return !isCompletedScheduleMission(mission) && !isFinishedSession(session);
   });
-  const activeMissions = visibleMissions.filter((mission) => {
+  const activeMissions = sortMissionsByDateProximity(visibleMissions.filter((mission) => {
     const plannedDay = parseDateValue(mission.plannedDate);
 
     return !plannedDay || getCalendarDayNumber(plannedDay) >= todayDay;
-  });
+  }));
   const scheduleDateOptions = useMemo(() => getScheduleDateOptions(schedule), [schedule]);
   const tripDayLabel = useMemo(() => getTripDayLabel(schedule), [schedule]);
   const missionDateGroups = useMemo(() => {
     const groups = scheduleDateOptions.map((date) => ({
       date,
-      missions: visibleMissions.filter((mission) => mission.plannedDate === date),
+      missions: sortMissionsByVisitOrder(visibleMissions.filter((mission) => mission.plannedDate === date)),
     }));
     const unplannedMissions = visibleMissions.filter((mission) => !mission.plannedDate || !scheduleDateOptions.includes(mission.plannedDate));
 
     if (unplannedMissions.length > 0) {
-      groups.push({ date: 'UNPLANNED', missions: unplannedMissions });
+      groups.push({ date: 'UNPLANNED', missions: sortMissionsByVisitOrder(unplannedMissions) });
     }
 
     return groups;
@@ -168,11 +170,15 @@ export function useActiveMissionState({ currentUserId, ignoredSessionId, require
   }, []);
 
   const handleScheduleSessionCacheLoaded = useCallback((cachedSessions: Record<string, MissionSession>) => {
-    revealedSessionsRef.current = cachedSessions;
-    missionSessionsRef.current = cachedSessions;
-    setRevealedSessions(cachedSessions);
-    setMissionSessions(cachedSessions);
-  }, []);
+    const filteredSessions = ignoredSessionId
+      ? Object.fromEntries(Object.entries(cachedSessions).filter(([, session]) => session.id !== ignoredSessionId))
+      : cachedSessions;
+
+    revealedSessionsRef.current = filteredSessions;
+    missionSessionsRef.current = filteredSessions;
+    setRevealedSessions(filteredSessions);
+    setMissionSessions(filteredSessions);
+  }, [ignoredSessionId]);
 
   const clearMissionState = useCallback((scheduleMissionId: string) => {
     const nextMissionSessions = { ...missionSessionsRef.current };
