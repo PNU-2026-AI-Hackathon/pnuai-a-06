@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import math
 import re
 import secrets
@@ -16,7 +17,10 @@ from app.models.missions import (
     Mission,
     MissionDeveloperLocation,
     MissionLocation,
+    MissionLocationTranslation,
     MissionSet,
+    MissionSetTranslation,
+    MissionTranslation,
 )
 
 
@@ -27,6 +31,7 @@ EMOJI_DIR = Path("app/static/mission-emoji")
 INDEX_FILE = BASE_DIR / "index.html"
 LOCATIONS_FILE = BASE_DIR / "locations.html"
 DEVELOPER_LOCATIONS_FILE = BASE_DIR / "developer_locations.html"
+TRANSLATIONS_FILE = BASE_DIR / "translations.html"
 SESSION_COOKIE = "mission_admin_session"
 ADMIN_PASSWORD = dotenv_values(".env").get("MISSION_ADMIN_PASSWORD") or "admin8197"
 ADMIN_SESSIONS: set[str] = set()
@@ -38,6 +43,13 @@ BUSAN_DISTRICTS = [
     ("YEONGDO", "영도구"), ("YEONJE", "연제구"), ("JUNG", "중구"),
     ("HAEUNDAE", "해운대구"),
 ]
+MISSION_THEME_PREFIXES = {
+    "MOUNTAIN": "MTN",
+    "SEA": "SEA",
+    "CITY": "CITY",
+    "DEMO": "DEMO",
+}
+MISSION_TYPE_PREFIXES = {"BASIC": "B", "RARE": "R", "SIDE": "S"}
 
 
 def _authorized(session: str | None) -> bool:
@@ -45,8 +57,11 @@ def _authorized(session: str | None) -> bool:
 
 
 def _next_code(db, theme: str, mission_type: str) -> str:
-    theme_prefix = {"MOUNTAIN": "MTN", "SEA": "SEA", "CITY": "CITY"}[theme]
-    type_prefix = {"BASIC": "B", "RARE": "R", "SIDE": "S"}[mission_type]
+    try:
+        theme_prefix = MISSION_THEME_PREFIXES[theme]
+        type_prefix = MISSION_TYPE_PREFIXES[mission_type]
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail="지원하지 않는 미션 카테고리 또는 타입입니다.") from exc
     pattern = re.compile(rf"^{theme_prefix}_{type_prefix}(\d+)$")
     numbers = [
         int(match.group(1))
@@ -103,6 +118,21 @@ def _developer_location_payload(location: MissionDeveloperLocation) -> dict:
     }
 
 
+def _translation_locale(locale: str) -> str:
+    locale = locale.strip().lower().replace("_", "-").split("-", 1)[0]
+    if locale != "en":
+        raise HTTPException(status_code=400, detail="현재 관리 가능한 번역 언어는 en입니다.")
+    return locale
+
+
+def _district_label_for(code: str) -> tuple[str, str]:
+    normalized = code.strip().upper()
+    label = dict(BUSAN_DISTRICTS).get(normalized)
+    if label is None:
+        raise HTTPException(status_code=400, detail="지원하지 않는 지역 코드입니다.")
+    return normalized, label
+
+
 @app.get("/", include_in_schema=False)
 def index() -> FileResponse:
     return FileResponse(INDEX_FILE)
@@ -116,6 +146,11 @@ def locations_page() -> FileResponse:
 @app.get("/developer-locations", include_in_schema=False)
 def developer_locations_page() -> FileResponse:
     return FileResponse(DEVELOPER_LOCATIONS_FILE)
+
+
+@app.get("/translations", include_in_schema=False)
+def translations_page() -> FileResponse:
+    return FileResponse(TRANSLATIONS_FILE)
 
 
 @app.post("/api/login")
@@ -149,12 +184,78 @@ def options(session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) ->
         }
     return {
         "mission_sets": [
-            {"id": item.id, "theme": item.theme, "title": item.title}
+            {
+                "id": item.id,
+                "theme": item.theme,
+                "title": item.title,
+                "is_demo": item.theme == "DEMO",
+            }
             for item in sets
         ],
         "districts": [{"code": code, "label": label} for code, label in BUSAN_DISTRICTS],
         "next_codes": next_codes,
     }
+
+
+@app.get("/api/missions")
+def list_editable_missions(
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict:
+    _require_authorized(session)
+    with SessionLocal() as db:
+        missions = list(
+            db.scalars(
+                select(Mission).order_by(Mission.theme, Mission.sort_order, Mission.id)
+            ).all()
+        )
+        return {
+            "missions": [
+                {
+                    "id": mission.id,
+                    "code": mission.code,
+                    "theme": mission.theme,
+                    "type": mission.type,
+                    "district_code": mission.district_code,
+                    "district_label": mission.district_label,
+                    "place_label": mission.place_label,
+                    "address": mission.address,
+                    "title": mission.title,
+                    "description": mission.description,
+                    "unlock_condition": mission.unlock_condition,
+                }
+                for mission in missions
+            ]
+        }
+
+
+@app.put("/api/missions/{mission_id}")
+def update_mission(
+    mission_id: int,
+    district_code: str = Form(...),
+    place_label: str = Form(""),
+    address: str = Form(""),
+    title: str = Form(...),
+    description: str = Form(...),
+    unlock_condition: str = Form(""),
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict:
+    _require_authorized(session)
+    if not title.strip() or not description.strip():
+        raise HTTPException(status_code=400, detail="제목과 내용은 필수입니다.")
+    district_code, district_label = _district_label_for(district_code)
+    with SessionLocal() as db:
+        mission = db.get(Mission, mission_id)
+        if mission is None:
+            raise HTTPException(status_code=404, detail="미션을 찾을 수 없습니다.")
+        mission.district_code = district_code
+        mission.district_label = district_label
+        mission.place_label = place_label.strip() or None
+        mission.address = address.strip() or None
+        mission.title = title.strip()
+        mission.description = description.strip()
+        mission.unlock_condition = unlock_condition.strip() or None
+        db.commit()
+        return {"id": mission.id, "code": mission.code, "message": "미션이 수정되었습니다."}
 
 
 @app.post("/api/missions")
@@ -164,9 +265,14 @@ async def create_mission(
     district_code: str = Form(...),
     district_label: str = Form(...),
     place_label: str = Form(""),
+    address: str = Form(""),
     mission_type: str = Form(...),
     title: str = Form(...),
     description: str = Form(...),
+    title_en: str = Form(""),
+    description_en: str = Form(""),
+    place_label_en: str = Form(""),
+    address_en: str = Form(""),
     unlock_condition: str = Form(""),
     verification_type: str = Form("PHOTO"),
     target_keyword: str = Form(""),
@@ -177,6 +283,9 @@ async def create_mission(
 ) -> dict:
     _require_authorized(session)
     code = code.strip().upper()
+    mission_type = mission_type.strip().upper()
+    if mission_type not in MISSION_TYPE_PREFIXES:
+        raise HTTPException(status_code=400, detail="지원하지 않는 미션 타입입니다.")
     if not title.strip() or not description.strip():
         raise HTTPException(
             status_code=400,
@@ -203,6 +312,7 @@ async def create_mission(
             district_code=district_code.strip().upper(),
             district_label=district_label.strip(),
             place_label=place_label.strip() or None,
+            address=address.strip() or None,
             type=mission_type,
             title=title.strip(),
             description=description.strip(),
@@ -217,6 +327,23 @@ async def create_mission(
             sort_order=sort_order,
         )
         db.add(mission)
+        db.flush()
+        if (
+            title_en.strip()
+            or description_en.strip()
+            or place_label_en.strip()
+            or address_en.strip()
+        ):
+            db.add(
+                MissionTranslation(
+                    mission_id=mission.id,
+                    locale="en",
+                    title=title_en.strip() or None,
+                    description=description_en.strip() or None,
+                    place_label=place_label_en.strip() or None,
+                    address=address_en.strip() or None,
+                )
+            )
         db.commit()
         db.refresh(mission)
 
@@ -227,6 +354,217 @@ async def create_mission(
         EMOJI_DIR.mkdir(parents=True, exist_ok=True)
         (EMOJI_DIR / f"{code}_e.png").write_bytes(await emoji_file.read())
     return {"id": mission.id, "code": mission.code, "message": "Mission created."}
+
+
+@app.get("/api/translations")
+def list_translations(
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict:
+    _require_authorized(session)
+    with SessionLocal() as db:
+        mission_sets = list(
+            db.scalars(
+                select(MissionSet)
+                .options(selectinload(MissionSet.translations))
+                .order_by(MissionSet.sort_order, MissionSet.id)
+            ).all()
+        )
+        missions = list(
+            db.scalars(
+                select(Mission)
+                .options(
+                    selectinload(Mission.translations),
+                    selectinload(Mission.locations).selectinload(
+                        MissionLocation.translations
+                    ),
+                )
+                .order_by(Mission.theme, Mission.sort_order, Mission.id)
+            ).all()
+        )
+
+        def translation_for(items, locale: str):
+            return next((item for item in items if item.locale == locale), None)
+
+        return {
+            "locale": "en",
+            "mission_sets": [
+                {
+                    "id": item.id,
+                    "theme": item.theme,
+                    "base": {
+                        "title": item.title,
+                        "region_label": item.region_label,
+                        "description": item.description,
+                    },
+                    "translation": (
+                        {
+                            "title": translation.title,
+                            "region_label": translation.region_label,
+                            "description": translation.description,
+                        }
+                        if (translation := translation_for(item.translations, "en"))
+                        else {}
+                    ),
+                }
+                for item in mission_sets
+            ],
+            "missions": [
+                {
+                    "id": item.id,
+                    "code": item.code,
+                    "theme": item.theme,
+                    "base": {
+                        "title": item.title,
+                        "description": item.description,
+                        "unlock_condition": item.unlock_condition,
+                        "place_label": item.place_label,
+                        "address": item.address,
+                        "target_keyword": item.target_keyword,
+                        "judgement_rules": item.judgement_rules,
+                        "reward_item_name": item.reward_item_name,
+                    },
+                    "translation": (
+                        {
+                            "title": translation.title,
+                            "description": translation.description,
+                            "unlock_condition": translation.unlock_condition,
+                            "place_label": translation.place_label,
+                            "address": translation.address,
+                            "target_keyword": translation.target_keyword,
+                            "judgement_rules": translation.judgement_rules,
+                            "reward_item_name": translation.reward_item_name,
+                        }
+                        if (translation := translation_for(item.translations, "en"))
+                        else {}
+                    ),
+                    "locations": [
+                        {
+                            "id": location.id,
+                            "base_label": location.label,
+                            "label": location_translation.label
+                            if (
+                                location_translation := translation_for(
+                                    location.translations, "en"
+                                )
+                            )
+                            else None,
+                        }
+                        for location in item.locations
+                    ],
+                }
+                for item in missions
+            ],
+        }
+
+
+@app.put("/api/mission-sets/{mission_set_id}/translations/{locale}")
+def upsert_mission_set_translation(
+    mission_set_id: int,
+    locale: str,
+    title: str = Form(""),
+    region_label: str = Form(""),
+    description: str = Form(""),
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict:
+    _require_authorized(session)
+    locale = _translation_locale(locale)
+    with SessionLocal() as db:
+        if db.get(MissionSet, mission_set_id) is None:
+            raise HTTPException(status_code=404, detail="미션 세트를 찾을 수 없습니다.")
+        translation = db.scalar(
+            select(MissionSetTranslation).where(
+                MissionSetTranslation.mission_set_id == mission_set_id,
+                MissionSetTranslation.locale == locale,
+            )
+        )
+        if translation is None:
+            translation = MissionSetTranslation(
+                mission_set_id=mission_set_id, locale=locale
+            )
+            db.add(translation)
+        translation.title = title.strip() or None
+        translation.region_label = region_label.strip() or None
+        translation.description = description.strip() or None
+        db.commit()
+    return {"message": "미션 세트 영문 번역이 저장되었습니다."}
+
+
+@app.put("/api/missions/{mission_id}/translations/{locale}")
+def upsert_mission_translation(
+    mission_id: int,
+    locale: str,
+    title: str = Form(""),
+    description: str = Form(""),
+    unlock_condition: str = Form(""),
+    place_label: str = Form(""),
+    address: str = Form(""),
+    target_keyword: str = Form(""),
+    reward_item_name: str = Form(""),
+    judgement_rules: str = Form(""),
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict:
+    _require_authorized(session)
+    locale = _translation_locale(locale)
+    parsed_rules = None
+    if judgement_rules.strip():
+        try:
+            parsed_rules = json.loads(judgement_rules)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"판정 규칙 JSON이 올바르지 않습니다: {exc.msg}"
+            ) from exc
+        if not isinstance(parsed_rules, dict):
+            raise HTTPException(status_code=400, detail="판정 규칙은 JSON 객체여야 합니다.")
+    with SessionLocal() as db:
+        if db.get(Mission, mission_id) is None:
+            raise HTTPException(status_code=404, detail="미션을 찾을 수 없습니다.")
+        translation = db.scalar(
+            select(MissionTranslation).where(
+                MissionTranslation.mission_id == mission_id,
+                MissionTranslation.locale == locale,
+            )
+        )
+        if translation is None:
+            translation = MissionTranslation(mission_id=mission_id, locale=locale)
+            db.add(translation)
+        translation.title = title.strip() or None
+        translation.description = description.strip() or None
+        translation.unlock_condition = unlock_condition.strip() or None
+        translation.place_label = place_label.strip() or None
+        translation.address = address.strip() or None
+        translation.target_keyword = target_keyword.strip() or None
+        translation.reward_item_name = reward_item_name.strip() or None
+        translation.judgement_rules = parsed_rules
+        db.commit()
+    return {"message": "미션 영문 번역이 저장되었습니다."}
+
+
+@app.put("/api/mission-locations/{location_id}/translations/{locale}")
+def upsert_mission_location_translation(
+    location_id: int,
+    locale: str,
+    label: str = Form(""),
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict:
+    _require_authorized(session)
+    locale = _translation_locale(locale)
+    with SessionLocal() as db:
+        if db.get(MissionLocation, location_id) is None:
+            raise HTTPException(status_code=404, detail="GPS 위치를 찾을 수 없습니다.")
+        translation = db.scalar(
+            select(MissionLocationTranslation).where(
+                MissionLocationTranslation.mission_location_id == location_id,
+                MissionLocationTranslation.locale == locale,
+            )
+        )
+        if translation is None:
+            translation = MissionLocationTranslation(
+                mission_location_id=location_id, locale=locale
+            )
+            db.add(translation)
+        translation.label = label.strip() or None
+        db.commit()
+    return {"message": "GPS 위치 영문 번역이 저장되었습니다."}
 
 
 @app.get("/api/location-missions")
@@ -252,6 +590,7 @@ def list_location_missions(
                     "type": mission.type,
                     "district_label": mission.district_label,
                     "place_label": mission.place_label,
+                    "address": mission.address,
                     "verification_type": mission.verification_type,
                     "locations": [
                         _location_payload(location) for location in mission.locations

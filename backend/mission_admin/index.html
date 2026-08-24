@@ -8,7 +8,7 @@
     :root { color-scheme: light; font-family: system-ui, sans-serif; }
     body { max-width: 900px; margin: 32px auto; padding: 0 20px; color: #18202a; background: #f7f8fa; }
     nav { display: flex; gap: 8px; margin-bottom: 24px; } nav a { padding: 9px 13px; border-radius: 999px; color: #475569; background: #e8edf4; text-decoration: none; font-size: 14px; font-weight: 700; } nav a.active { color: white; background: #2563eb; }
-    h1 { margin-bottom: 8px; } p { color: #687386; }
+    h1 { margin-bottom: 8px; } h2 { margin-top: 32px; } p { color: #687386; }
     form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; background: white; padding: 22px; border-radius: 16px; box-shadow: 0 4px 20px #18202a12; }
     label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; } .wide { grid-column: 1 / -1; }
     input, select, textarea { box-sizing: border-box; width: 100%; border: 1px solid #d8dee8; border-radius: 8px; padding: 10px; font: inherit; }
@@ -18,78 +18,153 @@
   </style>
 </head>
 <body>
-  <nav><a href="/" class="active">미션 등록</a><a href="/locations">GPS 위치 관리</a><a href="/developer-locations">개발 테스트 위치</a></nav>
+  <nav><a href="/" class="active">미션 관리</a><a href="/locations">GPS 위치 관리</a><a href="/translations">영문 번역</a><a href="/developer-locations">개발 테스트 위치</a></nav>
   <section id="login-panel">
     <h1>관리자 로그인</h1>
-    <p>미션 등록 페이지에 접속하려면 관리자 비밀번호가 필요합니다.</p>
+    <p>미션 관리 페이지에 접속하려면 관리자 비밀번호가 필요합니다.</p>
     <form id="login-form">
       <label>비밀번호<input name="password" type="password" autocomplete="current-password" required /></label>
       <button type="submit">접속</button>
     </form>
   </section>
   <section id="admin-panel" hidden>
-    <h1>미션 등록</h1>
-  <p>로컬 운영용 페이지입니다. 예시 사진은 JPEG 파일로 업로드하세요.</p>
+    <h1>미션 관리</h1>
+  <p>신규 미션을 등록하거나 기존 미션의 장소명과 상세주소를 수정할 수 있습니다.</p>
+  <h2>신규 미션 등록</h2>
   <form id="mission-form">
-    <label>미션 세트<select name="mission_set_id" id="mission-set" required></select></label>
+    <label>카테고리 / 미션 세트<select name="mission_set_id" id="mission-set" required></select><span class="hint">시연용은 DEMO로 별도 저장됩니다.</span></label>
     <label>미션 타입<select name="mission_type" id="mission-type"><option>BASIC</option><option>RARE</option><option>SIDE</option></select></label>
     <label>지역 선택<select name="district_code" id="district-code" required></select></label>
     <label>지역 이름<input name="district_label" id="district-label" placeholder="해운대구" readonly required /></label>
     <label>장소 이름<input name="place_label" placeholder="송정해수욕장" /></label>
     <label>자동 생성 미션 코드<input name="code" id="mission-code" readonly /></label>
+    <label class="wide">상세주소<input name="address" placeholder="부산광역시 해운대구 송정해변로 62" /></label>
     <label class="wide">제목<input name="title" required /></label>
     <label class="wide">내용<textarea name="description" required></textarea></label>
+    <label class="wide">영문 제목 (선택)<input name="title_en" lang="en" /></label>
+    <label class="wide">영문 내용 (선택)<textarea name="description_en" lang="en"></textarea></label>
+    <label class="wide">영문 장소 이름 (선택)<input name="place_label_en" lang="en" /></label>
+    <label class="wide">영문 상세주소 (선택)<input name="address_en" lang="en" /></label>
     <label>미션 이모지 PNG <span class="hint">mission-emoji/{코드}_e.png로 자동 저장</span><input name="emoji_file" type="file" accept="image/png" required /></label>
     <label class="wide">예시 사진 <span class="hint">JPEG · app/static/mission-photos/{code}.jpg로 자동 저장</span><input name="target_photo" type="file" accept="image/jpeg" required /></label>
     <button type="submit">미션 등록</button>
+  </form>
+  <h2>기존 미션 수정</h2>
+  <p>코드·카테고리·타입은 유지하고 화면에 표시되는 기본 정보만 수정합니다. 영문 정보는 영문 번역 메뉴에서 따로 수정하세요.</p>
+  <form id="edit-mission-form">
+    <label class="wide">수정할 미션<select id="edit-mission-select" required></select></label>
+    <label>미션 코드<input id="edit-code" readonly /></label>
+    <label>카테고리 / 타입<input id="edit-category" readonly /></label>
+    <label>지역 선택<select name="district_code" id="edit-district-code" required></select></label>
+    <label>지역 이름<input id="edit-district-label" readonly /></label>
+    <label class="wide">장소 이름<input name="place_label" id="edit-place-label" placeholder="송정해수욕장" /></label>
+    <label class="wide">상세주소<input name="address" id="edit-address" placeholder="부산광역시 해운대구 송정해변로 62" /></label>
+    <label class="wide">제목<input name="title" id="edit-title" required /></label>
+    <label class="wide">내용<textarea name="description" id="edit-description" required></textarea></label>
+    <label class="wide">해금 조건 (선택)<textarea name="unlock_condition" id="edit-unlock-condition"></textarea></label>
+    <button type="submit">선택한 미션 수정</button>
   </form>
   <button id="logout" type="button" style="margin-top:12px;background:#64748b">로그아웃</button>
   </section>
   <div id="message"></div>
   <script>
     const form = document.querySelector('#mission-form');
+    const editForm = document.querySelector('#edit-mission-form');
     const loginForm = document.querySelector('#login-form');
     const loginPanel = document.querySelector('#login-panel');
     const adminPanel = document.querySelector('#admin-panel');
     const message = document.querySelector('#message');
     let nextCodes = {};
     let districtLabels = {};
-    function showAdmin() { loginPanel.hidden = true; adminPanel.hidden = false; loadOptions(); }
+    let missions = [];
+    const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    function setMessage(text, ok = false) { message.textContent = text; message.style.color = ok ? '#15803d' : '#b91c1c'; }
+    async function responseBody(response) { try { return await response.json(); } catch (_) { return {}; } }
+    async function showAdmin() { loginPanel.hidden = true; adminPanel.hidden = false; await loadOptions(); await loadMissions(); }
     async function loadOptions() {
       const data = await fetch('/api/options').then(r => r.json());
       nextCodes = data.next_codes;
       districtLabels = Object.fromEntries(data.districts.map(x => [x.code, x.label]));
-      document.querySelector('#mission-set').innerHTML = data.mission_sets.map(x => `<option value="${x.id}">${x.theme} · ${x.title}</option>`).join('');
+      const regularSets = data.mission_sets.filter(x => !x.is_demo);
+      const demoSets = data.mission_sets.filter(x => x.is_demo);
+      document.querySelector('#mission-set').innerHTML = `
+        <optgroup label="기존 카테고리">
+          ${regularSets.map(x => `<option value="${x.id}" data-theme="${x.theme}">${x.theme} · ${x.title}</option>`).join('')}
+        </optgroup>
+        <optgroup label="시연용 카테고리">
+          ${demoSets.map(x => `<option value="${x.id}" data-theme="${x.theme}">${x.theme} · ${x.title}</option>`).join('')}
+        </optgroup>`;
       document.querySelector('#district-code').innerHTML = data.districts.map(x => `<option value="${x.code}">${x.label} (${x.code})</option>`).join('');
+      document.querySelector('#edit-district-code').innerHTML = data.districts.map(x => `<option value="${x.code}">${x.label} (${x.code})</option>`).join('');
       updateCode();
       updateDistrictLabel();
+    }
+    async function loadMissions() {
+      const response = await fetch('/api/missions');
+      const body = await responseBody(response);
+      if (!response.ok) throw new Error(body.detail || '미션 목록을 불러오지 못했습니다.');
+      const selectedId = Number(document.querySelector('#edit-mission-select').value || 0);
+      missions = body.missions;
+      const regular = missions.filter(x => x.theme !== 'DEMO');
+      const demo = missions.filter(x => x.theme === 'DEMO');
+      const options = items => items.map(x => `<option value="${x.id}">${escapeHtml(x.code)} · ${escapeHtml(x.title)}</option>`).join('');
+      document.querySelector('#edit-mission-select').innerHTML = `<optgroup label="기존 카테고리">${options(regular)}</optgroup><optgroup label="시연용 카테고리">${options(demo)}</optgroup>`;
+      if (missions.some(x => x.id === selectedId)) document.querySelector('#edit-mission-select').value = String(selectedId);
+      populateEditMission();
+    }
+    function populateEditMission() {
+      const id = Number(document.querySelector('#edit-mission-select').value);
+      const mission = missions.find(x => x.id === id);
+      if (!mission) return;
+      document.querySelector('#edit-code').value = mission.code;
+      document.querySelector('#edit-category').value = `${mission.theme} / ${mission.type}`;
+      document.querySelector('#edit-district-code').value = mission.district_code;
+      document.querySelector('#edit-district-label').value = mission.district_label;
+      document.querySelector('#edit-place-label').value = mission.place_label || '';
+      document.querySelector('#edit-address').value = mission.address || '';
+      document.querySelector('#edit-title').value = mission.title;
+      document.querySelector('#edit-description').value = mission.description;
+      document.querySelector('#edit-unlock-condition').value = mission.unlock_condition || '';
     }
     function updateCode() {
       const set = document.querySelector('#mission-set');
       const type = document.querySelector('#mission-type').value;
-      const theme = set.options[set.selectedIndex]?.textContent.split(' · ')[0];
+      const theme = set.options[set.selectedIndex]?.dataset.theme;
       document.querySelector('#mission-code').value = nextCodes[`${theme}:${type}`] || '';
     }
     function updateDistrictLabel() {
       document.querySelector('#district-label').value = districtLabels[document.querySelector('#district-code').value] || '';
     }
+    function updateEditDistrictLabel() {
+      document.querySelector('#edit-district-label').value = districtLabels[document.querySelector('#edit-district-code').value] || '';
+    }
     document.querySelector('#mission-set').addEventListener('change', updateCode);
     document.querySelector('#mission-type').addEventListener('change', updateCode);
     document.querySelector('#district-code').addEventListener('change', updateDistrictLabel);
+    document.querySelector('#edit-mission-select').addEventListener('change', populateEditMission);
+    document.querySelector('#edit-district-code').addEventListener('change', updateEditDistrictLabel);
     loginForm.addEventListener('submit', async event => {
       event.preventDefault();
       const response = await fetch('/api/login', { method: 'POST', body: new FormData(loginForm) });
-      const body = await response.json();
-      if (response.ok) { message.textContent = ''; showAdmin(); }
-      else { message.textContent = body.detail || '로그인 실패'; message.style.color = '#b91c1c'; }
+      const body = await responseBody(response);
+      if (response.ok) { message.textContent = ''; await showAdmin(); }
+      else { setMessage(body.detail || '로그인 실패'); }
     });
     form.addEventListener('submit', async event => {
       event.preventDefault(); message.textContent = '등록 중...'; message.style.color = '#2563eb';
       const response = await fetch('/api/missions', { method: 'POST', body: new FormData(form) });
-      const body = await response.json();
-      message.textContent = response.ok ? `${body.code} 등록 완료` : (body.detail || '등록 실패');
-      message.style.color = response.ok ? '#15803d' : '#b91c1c';
-      if (response.ok) { form.reset(); updateCode(); updateDistrictLabel(); }
+      const body = await responseBody(response);
+      setMessage(response.ok ? `${body.code} 등록 완료` : (body.detail || '등록 실패'), response.ok);
+      if (response.ok) { form.reset(); await loadOptions(); await loadMissions(); }
+    });
+    editForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const missionId = document.querySelector('#edit-mission-select').value;
+      setMessage('수정 중...');
+      const response = await fetch(`/api/missions/${missionId}`, { method: 'PUT', body: new FormData(editForm) });
+      const body = await responseBody(response);
+      setMessage(response.ok ? body.message : (body.detail || '수정 실패'), response.ok);
+      if (response.ok) await loadMissions();
     });
     document.querySelector('#logout').addEventListener('click', async () => {
       await fetch('/api/logout', { method: 'POST' }); location.reload();
