@@ -322,8 +322,8 @@ export async function loadSavedLanguage() {
   return currentLanguage;
 }
 
-export function getLanguageHeaders() {
-  return { 'Accept-Language': getCurrentLanguage() };
+export function getLanguageHeaders(language: AppLanguage = getCurrentLanguage()) {
+  return { 'Accept-Language': language };
 }
 
 export function translateText(value: string, params: TranslationParams = {}) {

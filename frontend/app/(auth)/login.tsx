@@ -12,7 +12,7 @@ import { useAuthFlow } from '@/features/auth/hooks/use-auth-flow';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 export default function LoginScreen() {
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; returnTo?: string }>();
   const { bottomActionInset, bottomSafeInset, horizontalPadding, topInset } = useResponsiveLayout();
   const auth = useAuthFlow({
     initialMode: params.mode === 'reset' ? 'resetRequest' : 'home',
@@ -37,6 +37,14 @@ export default function LoginScreen() {
   const isVerifyMode = auth.mode === 'verify';
   const isPasswordResetRequestMode = auth.mode === 'resetRequest';
   const isPasswordResetConfirmMode = auth.mode === 'resetConfirm';
+  const handleBack = () => {
+    if (params.returnTo === 'profile' && isPasswordResetRequestMode) {
+      router.back();
+      return;
+    }
+
+    auth.handleBack();
+  };
 
   const submitAuth = isLoginMode
     ? auth.handleLogin
@@ -73,7 +81,7 @@ export default function LoginScreen() {
       isLoginMode={isLoginMode}
       isSubmitting={auth.isSubmitting}
       message={auth.message}
-      onBack={auth.handleBack}
+      onBack={handleBack}
       onKakaoLogin={auth.handleKakaoLogin}
       onOpenRegister={() => auth.openMode('register')}
       onSubmit={submitAuth}

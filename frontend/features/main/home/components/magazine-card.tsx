@@ -50,7 +50,7 @@ export function MagazineCard({ isLoading, onPress, photoUrls, scheduleId }: Maga
           </Svg>
           <Image source={magazineBlackEllipse} style={styles.singleMagazineDotTop} />
           <Image source={magazineBlackEllipse} style={styles.singleMagazineDotBottom} />
-          <Image source={{ uri: photoUrls[0] }} style={styles.singleMagazinePhotoBubble} contentFit="cover" />
+          <Image cachePolicy="memory-disk" source={{ uri: photoUrls[0] }} style={styles.singleMagazinePhotoBubble} contentFit="cover" />
           <Image source={singleMagazineNumber} style={styles.singleMagazineNumber} contentFit="contain" />
         </View>
       ) : (
@@ -61,7 +61,7 @@ export function MagazineCard({ isLoading, onPress, photoUrls, scheduleId }: Maga
           </View>
           <View style={styles.magazinePhotos}>
             {magazinePhotoSlots.map((photoUrl, index) => photoUrl ? (
-              <Image key={`${photoUrl}-${index}`} source={{ uri: photoUrl }} style={styles.magazinePhoto} contentFit="cover" />
+              <Image cachePolicy="memory-disk" key={`${photoUrl}-${index}`} source={{ uri: photoUrl }} style={styles.magazinePhoto} contentFit="cover" />
             ) : (
               <View key={`magazine-photo-placeholder-${index}`} style={styles.magazinePhotoPlaceholder} />
             ))}

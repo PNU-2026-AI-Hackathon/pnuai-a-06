@@ -61,7 +61,7 @@ export default function ProfileScreen() {
         isAccountActionInProgress={profile.isAccountActionInProgress}
         onDeleteAccount={profile.handleDeleteAccount}
         onLogout={profile.handleLogout}
-        onPasswordReset={() => router.push({ pathname: '/login', params: { mode: 'reset' } })}
+        onPasswordReset={() => router.push({ pathname: '/login', params: { mode: 'reset', returnTo: 'profile' } })}
       />
     </ScrollView>
   );

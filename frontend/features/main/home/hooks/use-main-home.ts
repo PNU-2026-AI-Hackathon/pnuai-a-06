@@ -4,10 +4,63 @@ import { Image } from 'expo-image';
 import { useCallback, useState } from 'react';
 
 import { fetchMe } from '@/lib/auth-api';
+import { getAuthItem } from '@/lib/auth-storage';
 import { getLatestMissionSession, type MissionSession } from '@/lib/mission-session-api';
 import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
 
 import { getResultPhotoUrl, getScheduleEndTime, isClosedSchedule } from '../main-home-data';
+
+type MagazineHomeCache = {
+  photoUrls: string[];
+  scheduleId: string;
+  userId: string;
+};
+
+let magazineHomeCache: MagazineHomeCache | null = null;
+const prefetchedMagazinePhotoUrls = new Set<string>();
+
+function getCachedMagazineHome() {
+  const userId = getAuthItem('user_id');
+
+  if (!userId || magazineHomeCache?.userId !== userId) {
+    return null;
+  }
+
+  return magazineHomeCache;
+}
+
+function cacheMagazineHome(scheduleId: string, photoUrls: string[]) {
+  const userId = getAuthItem('user_id');
+
+  if (!userId) {
+    return;
+  }
+
+  magazineHomeCache = { photoUrls, scheduleId, userId };
+}
+
+function clearMagazineHomeCache() {
+  magazineHomeCache = null;
+}
+
+function prefetchMagazinePhotos(photoUrls: string[]) {
+  const urlsToPrefetch = photoUrls.filter((photoUrl) => {
+    if (prefetchedMagazinePhotoUrls.has(photoUrl)) {
+      return false;
+    }
+
+    prefetchedMagazinePhotoUrls.add(photoUrl);
+    return true;
+  });
+
+  if (urlsToPrefetch.length === 0) {
+    return;
+  }
+
+  void Image.prefetch(urlsToPrefetch, 'memory-disk').catch(() => {
+    urlsToPrefetch.forEach((photoUrl) => prefetchedMagazinePhotoUrls.delete(photoUrl));
+  });
+}
 
 export function useMainHome() {
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
@@ -44,6 +97,14 @@ export function useMainHome() {
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
+      const cachedMagazine = getCachedMagazineHome();
+
+      if (cachedMagazine) {
+        setMagazineScheduleId(cachedMagazine.scheduleId);
+        setMagazinePhotoUrls(cachedMagazine.photoUrls);
+        setIsMagazineLoading(false);
+        setHasLoadedMagazine(true);
+      }
 
       const loadLatestMagazine = async () => {
         if (isActive) {
@@ -65,6 +126,7 @@ export function useMainHome() {
 
           if (!latestClosedSchedule) {
             if (isActive) {
+              clearMagazineHomeCache();
               setMagazineScheduleId(null);
               setMagazinePhotoUrls([]);
             }
@@ -80,14 +142,16 @@ export function useMainHome() {
             }
           }))).filter((photoUrl): photoUrl is string => Boolean(photoUrl)).slice(0, 3);
 
-          await Promise.all(photoUrls.map((photoUrl) => Image.prefetch(photoUrl, 'memory-disk'))).catch(() => undefined);
+          cacheMagazineHome(latestClosedSchedule.scheduleId, photoUrls);
+          prefetchMagazinePhotos(photoUrls);
 
           if (isActive) {
             setMagazineScheduleId(latestClosedSchedule.scheduleId);
             setMagazinePhotoUrls(photoUrls);
           }
         } catch {
-          if (isActive) {
+          if (isActive && !cachedMagazine) {
+            clearMagazineHomeCache();
             setMagazineScheduleId(null);
             setMagazinePhotoUrls([]);
           }
