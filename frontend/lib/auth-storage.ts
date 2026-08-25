@@ -1,9 +1,7 @@
 import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 
 const memoryStorage = new Map<string, string>();
-type SecureStoreModule = typeof import('expo-secure-store');
-
-let secureStore: SecureStoreModule | null | undefined;
 
 function getWebSessionStorage() {
   try {
@@ -19,20 +17,6 @@ function getWebPersistentStorage() {
   } catch {
     return null;
   }
-}
-
-function getSecureStore() {
-  if (secureStore !== undefined) {
-    return secureStore;
-  }
-
-  try {
-    secureStore = require('expo-secure-store') as SecureStoreModule;
-  } catch {
-    secureStore = null;
-  }
-
-  return secureStore;
 }
 
 export const MISSION_COMPLETION_PENDING_KEY = 'mission_completion_alert_pending';
@@ -72,14 +56,8 @@ export async function setPersistentAuthItem(key: string, value: string) {
 
   setAuthItem(key, value);
 
-  const store = getSecureStore();
-
-  if (!store) {
-    return;
-  }
-
   try {
-    await store.setItemAsync(key, value);
+    await SecureStore.setItemAsync(key, value);
   } catch {
     // Expo Go/dev clients without the native module still use memory storage.
   }
@@ -90,16 +68,10 @@ export async function getPersistentAuthItem(key: string) {
     return getWebPersistentStorage()?.getItem(key) ?? null;
   }
 
-  const store = getSecureStore();
-
-  if (!store) {
-    return getAuthItem(key);
-  }
-
   let value: string | null;
 
   try {
-    value = await store.getItemAsync(key);
+    value = await SecureStore.getItemAsync(key);
   } catch {
     return getAuthItem(key);
   }
@@ -120,14 +92,8 @@ export async function deletePersistentAuthItem(key: string) {
     return;
   }
 
-  const store = getSecureStore();
-
-  if (!store) {
-    return;
-  }
-
   try {
-    await store.deleteItemAsync(key);
+    await SecureStore.deleteItemAsync(key);
   } catch {
     // Ignore cleanup failures when the native module is unavailable.
   }
@@ -140,14 +106,8 @@ export async function clearPersistedAuthItem(key: string) {
     return;
   }
 
-  const store = getSecureStore();
-
-  if (!store) {
-    return;
-  }
-
   try {
-    await store.deleteItemAsync(key);
+    await SecureStore.deleteItemAsync(key);
   } catch {
     // Ignore cleanup failures when the native module is unavailable.
   }

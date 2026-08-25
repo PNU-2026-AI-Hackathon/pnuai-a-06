@@ -26,11 +26,13 @@ function prefetchMissionEmojiIcons(missions: MissionItem[]) {
 type UseMapScreenOptions = {
   frameWidth: number;
   language: string;
+  initialCategory?: CategoryValue;
+  tutorialMissionCode?: string;
 };
 
-export function useMapScreen({ frameWidth, language }: UseMapScreenOptions) {
+export function useMapScreen({ frameWidth, initialCategory, language, tutorialMissionCode }: UseMapScreenOptions) {
   const [isMissionDeckOpen, setIsMissionDeckOpen] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<CategoryValue>('MOUNTAIN');
+  const [selectedCategory, setSelectedCategory] = useState<CategoryValue>(initialCategory ?? 'MOUNTAIN');
   const [themeDistricts, setThemeDistricts] = useState(DEFAULT_THEME_DISTRICTS);
   const [isThemeDistrictLoading, setIsThemeDistrictLoading] = useState(false);
   const [themeDistrictError, setThemeDistrictError] = useState('');
@@ -40,6 +42,7 @@ export function useMapScreen({ frameWidth, language }: UseMapScreenOptions) {
   const [isDeckMissionLoading, setIsDeckMissionLoading] = useState(false);
   const [deckMissionError, setDeckMissionError] = useState('');
   const activeMissionIndexRef = useRef(0);
+  const tutorialMissionCodeRef = useRef(tutorialMissionCode);
   const isCardAnimatingRef = useRef(false);
   const cardTranslateX = useRef(new Animated.Value(0)).current;
   const selectedMissionTheme = selectedCategory !== 'ACQUIRED' ? selectedCategory : null;
@@ -57,6 +60,8 @@ export function useMapScreen({ frameWidth, language }: UseMapScreenOptions) {
   }, [selectedMissionTheme, themeDistricts]);
   const selectedTarget = mapPieceTargets.find((target) => target.number === selectedMapPiece) ?? null;
   const selectedDistrict = selectedTarget?.district ?? '강서구';
+
+  tutorialMissionCodeRef.current = tutorialMissionCode;
 
   useEffect(() => {
     if (!selectedMissionTheme) {
@@ -127,6 +132,12 @@ export function useMapScreen({ frameWidth, language }: UseMapScreenOptions) {
         ...(selectedMissionTheme ? { theme: selectedMissionTheme } : {}),
       });
       prefetchMissionEmojiIcons(missions);
+      const restoredMissionIndex = tutorialMissionCodeRef.current
+        ? missions.findIndex((mission) => mission.code === tutorialMissionCodeRef.current || mission.id === tutorialMissionCodeRef.current)
+        : -1;
+      const nextMissionIndex = restoredMissionIndex >= 0 ? restoredMissionIndex : 0;
+      activeMissionIndexRef.current = nextMissionIndex;
+      setActiveMissionIndex(nextMissionIndex);
       setDeckMissions(missions);
     } catch (error) {
       setDeckMissionError(error instanceof Error ? error.message : '미션 정보를 불러오지 못했습니다.');
@@ -202,6 +213,7 @@ export function useMapScreen({ frameWidth, language }: UseMapScreenOptions) {
   });
   const nextMissionIndex = (activeMissionIndex + 1) % missionDeckCount;
   const previousMissionIndex = (activeMissionIndex - 1 + missionDeckCount) % missionDeckCount;
+  const closeMissionDeck = useCallback(() => setIsMissionDeckOpen(false), []);
 
   return {
     activeDistrictKeys,
@@ -210,7 +222,7 @@ export function useMapScreen({ frameWidth, language }: UseMapScreenOptions) {
     cardPanResponder,
     cardRotate,
     cardTranslateX,
-    closeMissionDeck: () => setIsMissionDeckOpen(false),
+    closeMissionDeck,
     deckMissionError,
     deckMissions,
     hasThemeDistrictFilter,

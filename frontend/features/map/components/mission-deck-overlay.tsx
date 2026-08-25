@@ -1,5 +1,6 @@
 // 선택한 구의 미션 카드와 스와이프 오버레이를 담당합니다.
 import { Image } from 'expo-image';
+import { useEffect } from 'react';
 import { Animated, PanResponder, View } from 'react-native';
 
 import { getMissionCardLevel, MissionCard } from '@/components/mission-card';
@@ -51,8 +52,18 @@ export function MissionDeckOverlay({
   shouldShowNextFrame,
   shouldShowPreviousFrame,
 }: MissionDeckOverlayProps) {
-  const cardTarget = useTutorialTarget('mission-card', { height: frameHeight, offsetY: 20, onSwipe: onTutorialSwipe, width: frameWidth });
+  const cardTarget = useTutorialTarget('mission-card', {
+    height: frameHeight,
+    metadata: activeMission?.code ?? activeMission?.id,
+    offsetY: 20,
+    onSwipe: onTutorialSwipe,
+    width: frameWidth,
+  });
   const detailTarget = useTutorialTarget('mission-detail', { offsetY: 27, onPress: onOpenMissionDetail });
+
+  useEffect(() => {
+    cardTarget.onLayout();
+  }, [activeMission?.code, activeMission?.id, cardTarget.onLayout]);
 
   return (
     <View style={styles.overlay}>
