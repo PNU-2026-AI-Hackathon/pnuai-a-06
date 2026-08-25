@@ -1,14 +1,16 @@
 import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams, usePathname, type Href } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
+import { useTutorialTarget, type TutorialTargetId } from '@/components/tutorial-provider';
 import { getAuthItem } from '@/lib/auth-storage';
 import { getActiveMissionSession, type MissionSession } from '@/lib/mission-session-api';
 import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
 
-const hiddenPathnames = ['/', '/login', '/auth/callback', '/trip/participation', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result', '/trip/edit'];
+const hiddenPathnames = ['/', '/login', '/auth/callback', '/main/waiting', '/trip/participation', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result', '/trip/edit'];
 
 type FeatherIconName = React.ComponentProps<typeof Feather>['name'];
 
@@ -17,6 +19,7 @@ const navItems: {
   href: Href;
   icon: FeatherIconName;
   match: string[];
+  tutorialId?: TutorialTargetId;
   type: 'standard' | 'camera';
 }[] = [
   {
@@ -24,6 +27,7 @@ const navItems: {
     href: '/main',
     icon: 'home',
     match: ['/main'],
+    tutorialId: 'home-nav',
     type: 'standard',
   },
   {
@@ -31,6 +35,7 @@ const navItems: {
     href: '/map',
     icon: 'flag',
     match: ['/mission/detail', '/mission/locked', '/map', '/map/district'],
+    tutorialId: 'mission-nav',
     type: 'standard',
   },
   {
@@ -52,6 +57,7 @@ const navItems: {
     href: '/main/profile',
     icon: 'user',
     match: ['/main/profile', '/main/profile-edit'],
+    tutorialId: 'profile-nav',
     type: 'standard',
   },
 ];
@@ -121,6 +127,9 @@ export function BottomNavigationBar() {
   const bottomInset = Math.max(insets.bottom, 0);
   const [activeMission, setActiveMission] = useState<ActiveMissionTarget | null>(null);
   const [isCheckingMission, setIsCheckingMission] = useState(true);
+  const homeTarget = useTutorialTarget('home-nav', { height: 44, offsetY: 26, width: 44 });
+  const missionTarget = useTutorialTarget('mission-nav', { height: 44, offsetY: 26, width: 44 });
+  const profileTarget = useTutorialTarget('profile-nav', { height: 44, offsetY: 26, width: 44 });
 
   const refreshActiveMission = useCallback(async () => {
     if (!getAuthItem('access_token')) {
@@ -203,6 +212,13 @@ export function BottomNavigationBar() {
           const isCamera = item.type === 'camera';
           const isCameraEnabled = Boolean(activeMission) && !isCheckingMission;
           const color = isCamera ? isCameraEnabled ? '#ffffff' : '#E4E9EB' : isActive ? '#6EA4BF' : '#8A9194';
+          const tutorialTarget = item.tutorialId === 'home-nav'
+            ? homeTarget
+            : item.tutorialId === 'mission-nav'
+              ? missionTarget
+              : item.tutorialId === 'profile-nav'
+                ? profileTarget
+                : null;
 
           const handlePress = () => {
             if (isCamera) {
@@ -229,6 +245,8 @@ export function BottomNavigationBar() {
               hitSlop={10}
               key={item.accessibilityLabel}
               onPress={handlePress}
+              onLayout={tutorialTarget?.onLayout}
+              ref={tutorialTarget?.ref}
               style={[styles.item, isCamera && styles.cameraItem]}>
               <View style={[isCamera ? styles.cameraButton : styles.iconSlot, isCamera && !isCameraEnabled && styles.cameraButtonDisabled]}>
                 <Feather name={item.icon} size={isCamera ? 23 : 22} color={color} />

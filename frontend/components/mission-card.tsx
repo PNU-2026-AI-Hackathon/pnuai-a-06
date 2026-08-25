@@ -4,9 +4,9 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 
 const missionLevelFrames = [
-  require('../assets/svg/mission_level/standard_frame.svg'),
-  require('../assets/svg/mission_level/rare_frame.svg'),
-  require('../assets/svg/mission_level/side_frame.svg'),
+  require('@/assets/svg/mission_level/standard_frame.svg'),
+  require('@/assets/svg/mission_level/rare_frame.svg'),
+  require('@/assets/svg/mission_level/side_frame.svg'),
 ];
 
 const missionLevelByType = {

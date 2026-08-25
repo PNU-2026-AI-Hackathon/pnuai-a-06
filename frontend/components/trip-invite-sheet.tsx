@@ -1,11 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Modal, StyleSheet, View } from 'react-native';
+
+import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text } from '@/components/localized-text';
 
 import { type TripInvite } from '@/lib/trip-invite-api';
 
-const kakaoTalkIcon = require('../assets/svg/kakaotalk.svg');
+const kakaoTalkIcon = require('@/assets/svg/kakaotalk.svg');
 
 type TripInviteSheetProps = {
   bottomSafeInset: number;

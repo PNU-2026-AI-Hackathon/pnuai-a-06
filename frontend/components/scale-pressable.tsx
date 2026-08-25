@@ -1,4 +1,4 @@
-import { type PropsWithChildren, useRef } from 'react';
+import { type PropsWithChildren, useCallback, useRef } from 'react';
 import {
   Animated,
   Pressable,
@@ -7,6 +7,8 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+
+import { usePressGuard } from '@/lib/press-guard';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -29,6 +31,16 @@ export function ScalePressable({
   ...pressableProps
 }: ScalePressableProps) {
   const scale = useRef(new Animated.Value(1)).current;
+  const allowPress = usePressGuard();
+  const { onPress, ...restPressableProps } = pressableProps;
+  const guardedOnPress = useCallback<NonNullable<PressableProps['onPress']>>(
+    (event) => {
+      if (allowPress()) {
+        onPress?.(event);
+      }
+    },
+    [allowPress, onPress],
+  );
 
   const animateTo = (toValue: number) => {
     Animated.spring(scale, {
@@ -41,8 +53,9 @@ export function ScalePressable({
 
   return (
     <AnimatedPressable
-      {...pressableProps}
+      {...restPressableProps}
       disabled={disabled}
+      onPress={guardedOnPress}
       onPressIn={(event) => {
         if (!disabled) {
           animateTo(pressedScale);

@@ -1,7 +1,9 @@
 import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
+import { getPersistentAuthItem, setPersistentAuthItem } from '@/lib/auth-storage';
 import { getCurrentLanguage, getLanguageHeaders, type AppLanguage } from '@/lib/language';
 
 export const DEFAULT_MAGAZINE_TEMPLATE_KEY = 'handwriting-2025-v1';
+const MAGAZINE_SOURCE_LANGUAGE_KEY_PREFIX = 'magazine_source_language:';
 
 export type Magazine = {
   id: string;
@@ -43,6 +45,18 @@ export class MagazineApiError extends Error {
     super(message);
     this.name = 'MagazineApiError';
   }
+}
+
+function getMagazineSourceLanguageKey(scheduleId: string) {
+  return `${MAGAZINE_SOURCE_LANGUAGE_KEY_PREFIX}${scheduleId}`;
+}
+
+function isAppLanguage(value: string | null | undefined): value is AppLanguage {
+  return value === 'ko' || value === 'en';
+}
+
+function getOtherLanguage(language: AppLanguage): AppLanguage {
+  return language === 'ko' ? 'en' : 'ko';
 }
 
 type ApiMagazine = {
@@ -158,13 +172,11 @@ async function readResponse(response: Response, fallbackMessage: string) {
   return data;
 }
 
-export async function getMagazine(scheduleId: string, templateKey = DEFAULT_MAGAZINE_TEMPLATE_KEY) {
-  const language = getCurrentLanguage();
-
+async function getMagazineForLanguage(scheduleId: string, templateKey: string, language: AppLanguage) {
   const query = `?template_key=${encodeURIComponent(templateKey)}&lang=${encodeURIComponent(language)}`;
   const response = await fetchWithAuth(`${API_BASE_URL}/schedules/${encodeURIComponent(scheduleId)}/magazine${query}`, {
     headers: {
-      ...getLanguageHeaders(),
+      ...getLanguageHeaders(language),
     },
   });
   const text = await response.text();
@@ -181,6 +193,39 @@ export async function getMagazine(scheduleId: string, templateKey = DEFAULT_MAGA
   }
 
   return normalizeMagazine(data as ApiMagazine);
+}
+
+export async function getMagazine(scheduleId: string, templateKey = DEFAULT_MAGAZINE_TEMPLATE_KEY) {
+  const currentLanguage = getCurrentLanguage();
+  let sourceLanguage = currentLanguage;
+
+  try {
+    const savedSourceLanguage = await getPersistentAuthItem(getMagazineSourceLanguageKey(scheduleId));
+    if (isAppLanguage(savedSourceLanguage)) {
+      sourceLanguage = savedSourceLanguage;
+    }
+  } catch {
+    // Fall back to the current app language when persistent storage is unavailable.
+  }
+
+  const languagesToTry = [sourceLanguage, getOtherLanguage(sourceLanguage)];
+  let lastNotFoundError: MagazineApiError | null = null;
+
+  for (const language of languagesToTry) {
+    try {
+      const magazine = await getMagazineForLanguage(scheduleId, templateKey, language);
+      await setPersistentAuthItem(getMagazineSourceLanguageKey(scheduleId), language).catch(() => undefined);
+      return magazine;
+    } catch (error) {
+      if (!(error instanceof MagazineApiError) || error.status !== 404) {
+        throw error;
+      }
+
+      lastNotFoundError = error;
+    }
+  }
+
+  throw lastNotFoundError ?? new MagazineApiError('매거진을 불러오지 못했어요.', 404);
 }
 
 export async function getMagazineCandidates(scheduleId: string, templateKey = DEFAULT_MAGAZINE_TEMPLATE_KEY) {
@@ -227,5 +272,7 @@ export async function createMagazine(
   });
   const data = await readResponse(response, '매거진 생성에 실패했어요.');
 
-  return normalizeMagazine(data as ApiMagazine);
+  const magazine = normalizeMagazine(data as ApiMagazine);
+  await setPersistentAuthItem(getMagazineSourceLanguageKey(scheduleId), getCurrentLanguage()).catch(() => undefined);
+  return magazine;
 }

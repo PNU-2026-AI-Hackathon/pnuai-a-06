@@ -12,12 +12,12 @@ export type ProfileIconOption = {
 };
 
 export const profileIconOptions: ProfileIconOption[] = [
-  { key: 'people1', source: require('../assets/svg/profile_icon/people1.svg') },
-  { key: 'people2', source: require('../assets/svg/profile_icon/people2.svg') },
-  { key: 'people3', source: require('../assets/svg/profile_icon/people3.svg') },
-  { key: 'people4', source: require('../assets/svg/profile_icon/people4.svg') },
-  { key: 'people5', source: require('../assets/svg/profile_icon/people5.svg') },
-  { key: 'people6', source: require('../assets/svg/profile_icon/people6.svg') },
+  { key: 'people1', source: require('@/assets/svg/profile_icon/people1.svg') },
+  { key: 'people2', source: require('@/assets/svg/profile_icon/people2.svg') },
+  { key: 'people3', source: require('@/assets/svg/profile_icon/people3.svg') },
+  { key: 'people4', source: require('@/assets/svg/profile_icon/people4.svg') },
+  { key: 'people5', source: require('@/assets/svg/profile_icon/people5.svg') },
+  { key: 'people6', source: require('@/assets/svg/profile_icon/people6.svg') },
 ];
 
 let profileIconPrefetchPromise: Promise<void> | null = null;

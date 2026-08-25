@@ -10,6 +10,10 @@ function localizeChild(child: ReactNode): ReactNode {
   }
 
   if (Array.isArray(child)) {
+    if (child.every((item) => typeof item === 'string' || typeof item === 'number')) {
+      return translateText(child.map((item) => String(item)).join(''));
+    }
+
     return child.map(localizeChild);
   }
 

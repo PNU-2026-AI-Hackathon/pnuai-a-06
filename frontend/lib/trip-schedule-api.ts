@@ -1,6 +1,6 @@
 import { API_BASE_URL, fetchWithAuth } from '@/lib/auth-api';
 import { getAuthItem, setAuthItem } from '@/lib/auth-storage';
-import { getLanguageHeaders } from '@/lib/language';
+import { getCurrentLanguage, getLanguageHeaders } from '@/lib/language';
 
 type ScheduleInput = {
   endDate: string;
@@ -42,6 +42,12 @@ type ApiScheduleMission = {
   planned_date?: string | null;
   status?: string;
   updated_at?: string;
+  visit_order?: number | null;
+};
+
+type ApiMissionOrderRecommendation = {
+  missions?: ApiScheduleMission[];
+  planned_date?: string;
 };
 
 type ApiScheduleUser = {
@@ -143,6 +149,7 @@ export type TripScheduleMission = {
   title: string;
   type?: string | null;
   verificationType?: string | null;
+  visitOrder?: number | null;
 };
 
 export type TripScheduleUser = {
@@ -190,6 +197,18 @@ function parseJsonOrText(text: string) {
   }
 }
 
+export class TripScheduleApiError extends Error {
+  readonly code?: string;
+  readonly status: number;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'TripScheduleApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
 function getErrorMessage(data: unknown, fallback: string) {
   if (typeof data === 'string') {
     return data.trim() || fallback;
@@ -198,6 +217,10 @@ function getErrorMessage(data: unknown, fallback: string) {
   if (data !== null && typeof data === 'object') {
     const container = data as Record<string, unknown>;
     const message = container.detail ?? container.message;
+
+    if (message !== null && typeof message === 'object' && !Array.isArray(message) && 'message' in message) {
+      return typeof message.message === 'string' ? message.message : fallback;
+    }
 
     if (Array.isArray(message)) {
       return message.map((item) => (typeof item === 'object' && item !== null && 'msg' in item ? String(item.msg) : String(item))).join('\n');
@@ -216,7 +239,12 @@ async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
   const data = parseJsonOrText(text);
 
   if (!res.ok) {
-    throw new Error(getErrorMessage(data, fallbackMessage));
+    const detail = data !== null && typeof data === 'object' ? (data as Record<string, unknown>).detail : undefined;
+    const code = detail !== null && typeof detail === 'object' && !Array.isArray(detail) && typeof (detail as Record<string, unknown>).code === 'string'
+      ? (detail as Record<string, unknown>).code as string
+      : undefined;
+
+    throw new TripScheduleApiError(getErrorMessage(data, fallbackMessage), res.status, code);
   }
 
   if (typeof data === 'string') {
@@ -289,6 +317,7 @@ function normalizeScheduleMission(data: ApiScheduleMission): TripScheduleMission
     title: data.mission?.title ?? '미션명',
     type: data.mission?.type ?? null,
     verificationType: data.mission?.verification_type ?? null,
+    visitOrder: data.visit_order ?? null,
   };
 }
 
@@ -504,6 +533,28 @@ export async function getTripSchedule(scheduleId: string) {
   cacheTripSchedule(schedule);
 
   return schedule;
+}
+
+export async function recommendMissionOrder(scheduleId: string, plannedDate: string) {
+  const data = await requestAuthenticatedJson<ApiMissionOrderRecommendation>(
+    `/schedules/${encodeURIComponent(scheduleId)}/days/${encodeURIComponent(plannedDate)}/recommend-order?lang=${getCurrentLanguage()}`,
+    'POST',
+  );
+  const normalizedDate = data.planned_date ?? plannedDate;
+  const missions = (Array.isArray(data.missions) ? data.missions : []).map(normalizeScheduleMission);
+  const cachedSchedule = getCachedTripSchedules().find((schedule) => schedule.scheduleId === scheduleId);
+
+  if (cachedSchedule) {
+    cacheTripSchedule({
+      ...cachedSchedule,
+      missions: [
+        ...cachedSchedule.missions.filter((mission) => mission.plannedDate !== normalizedDate),
+        ...missions,
+      ],
+    });
+  }
+
+  return { missions, plannedDate: normalizedDate };
 }
 
 export async function createDraftSchedule(input: CreateScheduleInput) {

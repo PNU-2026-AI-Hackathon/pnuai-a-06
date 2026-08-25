@@ -7,7 +7,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { BottomNavigationBar } from '@/components/bottom-navigation-bar';
-import { MissionCompletionAlert } from '@/components/mission-completion-alert';
+import { TutorialOverlayHost, TutorialProvider } from '@/components/tutorial-provider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { LanguageProvider } from '@/hooks/use-language';
 import { saveAuthTokens } from '@/lib/auth-api';
@@ -91,25 +91,27 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <LanguageProvider>
-        <View style={styles.root}>
-          <View style={styles.stackArea}>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="(auth)" />
-              <Stack.Screen name="main" />
-              <Stack.Screen name="tutorial" />
-              <Stack.Screen name="magazine" />
-              <Stack.Screen name="map" />
-              <Stack.Screen name="mission" />
-              <Stack.Screen name="trip" />
-              <Stack.Screen name="collection" />
-            </Stack>
+      <TutorialProvider>
+        <LanguageProvider>
+          <View style={styles.root}>
+            <View style={styles.stackArea}>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="index" />
+                <Stack.Screen name="(auth)" />
+                <Stack.Screen name="main" />
+                <Stack.Screen name="tutorial" />
+                <Stack.Screen name="magazine" />
+                <Stack.Screen name="map" />
+                <Stack.Screen name="mission" />
+                <Stack.Screen name="trip" />
+                <Stack.Screen name="collection" />
+              </Stack>
+            </View>
+            <BottomNavigationBar />
           </View>
-          <BottomNavigationBar />
-          <MissionCompletionAlert />
-        </View>
-      </LanguageProvider>
+        </LanguageProvider>
+        <TutorialOverlayHost />
+      </TutorialProvider>
       <StatusBar style="auto" />
     </ThemeProvider>
   );

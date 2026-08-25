@@ -1,0 +1,304 @@
+// 미션 화면과 하위 컴포넌트에서 공유하는 스타일입니다.
+
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+  container: {
+    backgroundColor: '#eaf5f9',
+    flex: 1,
+  },
+  content: {
+    alignItems: 'center',
+  },
+  inner: {
+    width: '100%',
+  },
+  backButton: {
+    alignItems: 'flex-start',
+    height: 50,
+    justifyContent: 'center',
+    marginBottom: 22,
+    width: 54,
+  },
+  backIcon: {
+    color: '#111111',
+    fontSize: 46,
+    lineHeight: 48,
+  },
+  title: {
+    color: '#000000',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  themeRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
+  },
+  themeCard: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 11,
+    height: 98,
+    justifyContent: 'center',
+    width: 82,
+  },
+  selectedThemeCard: {
+    borderColor: '#2B2F33',
+    borderWidth: 1,
+  },
+  themeIcon: {
+    height: 40,
+    marginBottom: 8,
+    width: 40,
+  },
+  themeLabel: {
+    color: '#000000',
+    fontSize: 12,
+    fontWeight: '400',
+  },
+  selectedThemeLabel: {
+    fontWeight: '700',
+  },
+  actionMessage: {
+    color: '#409CB7',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  stateBox: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+  },
+  stateText: {
+    color: '#676D70',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  missionList: {
+    gap: 12,
+  },
+  missionCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+  },
+  missionHeaderRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  missionTitleGroup: {
+    flex: 1,
+  },
+  missionTitle: {
+    color: '#000000',
+    fontSize: 17,
+    fontWeight: '500',
+    marginBottom: 7,
+  },
+  locationText: {
+    color: '#AEAEAE',
+    fontSize: 13,
+    fontWeight: '400',
+    marginBottom: 10,
+  },
+  addMissionButton: {
+    alignItems: 'center',
+    backgroundColor: '#409CB7',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 38,
+    minWidth: 62,
+    paddingHorizontal: 16,
+  },
+  addedMissionButton: {
+    alignItems: 'center',
+    backgroundColor: '#8A9194',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 38,
+    minWidth: 62,
+    paddingHorizontal: 16,
+  },
+  addMissionButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
+  descriptionText: {
+    color: '#AEAEAE',
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 18,
+    marginBottom: 24,
+  },
+  missionPhoto: {
+    aspectRatio: 1.55,
+    backgroundColor: '#eef3f5',
+    borderRadius: 10,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  photoPlaceholder: {
+    aspectRatio: 1.55,
+    backgroundColor: '#eef3f5',
+    borderRadius: 10,
+    width: '100%',
+  },
+  modalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.26)',
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 18,
+    paddingVertical: 32,
+  },
+  dateModalBackdrop: {
+    paddingBottom: 0,
+    paddingHorizontal: 0,
+  },
+  schedulePanel: {
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    maxHeight: '72%',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    width: '100%',
+  },
+  dateSchedulePanel: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '82%',
+    paddingBottom: 22,
+    paddingHorizontal: 30,
+    paddingTop: 30,
+  },
+  schedulePanelTitle: {
+    color: '#10161F',
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  dateSchedulePanelTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 24,
+  },
+  scheduleList: {
+    gap: 10,
+  },
+  selectedScheduleBox: {
+    backgroundColor: '#F6F8FA',
+    borderRadius: 18,
+    marginBottom: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 22,
+  },
+  selectedScheduleName: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  selectedScheduleDate: {
+    fontSize: 12,
+    fontWeight: '400',
+    marginTop: 4,
+  },
+  dateGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  dateGridScroll: {
+    maxHeight: 210,
+  },
+  dateOption: {
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 999,
+    height: 47,
+    justifyContent: 'center',
+    width: 47,
+  },
+  selectedDateOption: {
+    backgroundColor: '#C9E4EE',
+  },
+  dateOptionText: {
+    color: '#8A9194',
+    fontSize: 17,
+    fontWeight: '500',
+  },
+  selectedDateOptionText: {
+    color: '#10161F',
+    fontWeight: '500',
+  },
+  dateEmptyText: {
+    color: '#8A9194',
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  confirmDateButton: {
+    alignItems: 'center',
+    backgroundColor: '#409CB7',
+    borderRadius: 999,
+    height: 50,
+    justifyContent: 'center',
+    marginTop: 17,
+    width: '100%',
+  },
+  confirmDateButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  scheduleItem: {
+    alignItems: 'center',
+    backgroundColor: '#F4F7F8',
+    borderRadius: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 70,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  disabledScheduleItem: {
+    opacity: 0.55,
+  },
+  scheduleTextGroup: {
+    flex: 1,
+  },
+  scheduleName: {
+    color: '#10161F',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  scheduleDate: {
+    color: '#8A9194',
+    fontSize: 12,
+    marginTop: 5,
+  },
+  scheduleMissionCount: {
+    color: '#409CB7',
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: 12,
+  },
+  panelLoader: {
+    marginTop: 14,
+  },
+});
