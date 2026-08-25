@@ -6,7 +6,7 @@
 - Python environment is conda env `pnuai`.
 - Install dependencies with `pip install -r requirements.txt` inside that env.
 - Run migrations with `alembic upgrade head`.
-- Current Alembic head is `20260824_0043`; it includes mission judgement/session state, schedule magazine persistence with a global generation-number sequence, GPS checks for mission participation, global developer test locations, localized mission content with locale-specific magazines, a separate demo mission category with 10 seeded demo missions, compact English mission copy, email-verified password reset state, localized detailed mission addresses, and persisted per-day mission visit ordering.
+- Current Alembic head is `20260824_0044`; it includes mission judgement/session state, schedule magazine persistence with a global generation-number sequence, GPS checks for mission participation, global developer test locations, localized mission content with locale-specific magazines, a separate demo mission category with 10 seeded demo missions, compact English mission copy, email-verified password reset state, localized detailed mission addresses with seeded English values, and persisted per-day mission visit ordering.
 - Run API externally on port 7020 with `uvicorn app.main:app --host 0.0.0.0 --port 7020 --reload`.
 - Current long-running dev server convention is tmux session `backend-7020`:
   `tmux attach -t backend-7020`
@@ -60,7 +60,7 @@
 - Mission-set, mission, district, mission-location, schedule mission, mission-session, candidate, draft, and generated magazine responses localize backend-owned content. User-created schedule titles, nicknames, and comments are never machine-translated and remain exactly as entered.
 - WebSockets use `?lang=en` because they cannot use the HTTP locale dependency. Each connection receives session snapshots and events in its own locale.
 - Translations are stored in `mission_set_translations`, `mission_translations`, and `mission_location_translations`. Missing rows or null translated fields fall back independently to the Korean source field.
-- Current English seed data covers the 3 regular mission sets, the DEMO mission set, all 33 current missions' user-facing core fields, all 10 demo missions' structured judgement rules, and all currently registered mission GPS labels. Other missing `judgement_rules` translations can be added through the admin page; until then the Korean structured criteria remain the field-level fallback.
+- Current English seed data covers the 3 regular mission sets, the DEMO mission set, all 33 current missions' user-facing core fields and detailed addresses, all 10 demo missions' structured judgement rules, and all currently registered mission GPS labels. Other missing `judgement_rules` translations can be added through the admin page; until then the Korean structured criteria remain the field-level fallback.
 - Manage English values at `http://<server-host>:8197/translations`. New missions can also receive an initial English title, description, place, and detailed address from the mission creation page.
 
 ## Current Mission Data
@@ -132,6 +132,7 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   �
   - `POST /mission-sessions/{session_id}/photo`: upload one participant photo as multipart form data.
   - `POST /mission-sessions/{session_id}/reveal`
   - `POST /mission-sessions/{session_id}/complete`
+  - `POST /mission-sessions/{session_id}/cancel`: creator-only cancellation; persists `CANCELLED` and broadcasts `session_cancelled` to both session and schedule WebSockets.
   - `POST /mission-sessions/{session_id}/submissions/{submission_id}/comments`
   - `POST /mission-sessions/{session_id}/submissions/{submission_id}/like`
 - Real-time endpoints accept the access token as the `token` query parameter:
