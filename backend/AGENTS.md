@@ -6,7 +6,7 @@
 - Python environment is conda env `pnuai`.
 - Install dependencies with `pip install -r requirements.txt` inside that env.
 - Run migrations with `alembic upgrade head`.
-- Current Alembic head is `20260824_0044`; it includes mission judgement/session state, schedule magazine persistence with a global generation-number sequence, GPS checks for mission participation, global developer test locations, localized mission content with locale-specific magazines, a separate demo mission category with 10 seeded demo missions, compact English mission copy, email-verified password reset state, localized detailed mission addresses with seeded English values, and persisted per-day mission visit ordering.
+- Current Alembic head is `20260825_0045`; it includes mission judgement/session state, schedule magazine persistence with a global generation-number sequence and one shared generated magazine per schedule/template, GPS checks for mission participation, global developer test locations, localized mission content, a separate demo mission category with 10 seeded demo missions, compact English mission copy, email-verified password reset state, localized detailed mission addresses with seeded English values, and persisted per-day mission visit ordering.
 - Run API externally on port 7020 with `uvicorn app.main:app --host 0.0.0.0 --port 7020 --reload`.
 - Current long-running dev server convention is tmux session `backend-7020`:
   `tmux attach -t backend-7020`
@@ -57,7 +57,7 @@
 - Keep the existing endpoint paths. Localized content APIs accept `?lang=ko|en`; when the query is omitted, `Accept-Language` is used. Korean is the default and fallback language.
 - `lang` takes precedence over `Accept-Language`. An unsupported explicit `lang` returns `400` with `UNSUPPORTED_LOCALE`; unsupported header languages fall back to Korean.
 - Localized HTTP responses set `Content-Language` and `Vary: Accept-Language`.
-- Mission-set, mission, district, mission-location, schedule mission, mission-session, candidate, draft, and generated magazine responses localize backend-owned content. User-created schedule titles, nicknames, and comments are never machine-translated and remain exactly as entered.
+- Mission-set, mission, district, mission-location, schedule mission, mission-session, magazine candidate, and magazine draft responses localize backend-owned content. Magazine generation uses the requested locale, while generated-magazine lookup returns the single stored image regardless of the current request locale. User-created schedule titles, nicknames, and comments are never machine-translated and remain exactly as entered.
 - WebSockets use `?lang=en` because they cannot use the HTTP locale dependency. Each connection receives session snapshots and events in its own locale.
 - Translations are stored in `mission_set_translations`, `mission_translations`, and `mission_location_translations`. Missing rows or null translated fields fall back independently to the Korean source field.
 - Current English seed data covers the 3 regular mission sets, the DEMO mission set, all 33 current missions' user-facing core fields and detailed addresses, all 10 demo missions' structured judgement rules, and all currently registered mission GPS labels. Other missing `judgement_rules` translations can be added through the admin page; until then the Korean structured criteria remain the field-level fallback.
@@ -165,7 +165,7 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   �
 ```
 
 - `GET /schedules/{schedule_id}/magazine?template_key=handwriting-2025-v1`: return the latest generated record and its `image_urls`.
-- All magazine endpoints honor `?lang=en`/`Accept-Language`; generated records include `locale`, and Korean and English records coexist for the same schedule/template.
+- Candidate, draft, and generation endpoints honor `?lang=en`/`Accept-Language`. A schedule/template has one generated record; its `locale` reports the language used for the current stored image, and `GET /schedules/{schedule_id}/magazine` returns that image regardless of the request locale.
 - `handwriting-2025-v1` has six mission slots. When renderable candidates exceed six, the frontend must first call the candidates endpoint and send at most six ordered `schedule_mission_ids`.
 - Omitting ids when selection is required returns `409` with `MAGAZINE_MISSION_SELECTION_REQUIRED`, `max_selectable`, and candidate ids. Invalid or excessive selections return `422`.
 - Fewer than six selected/renderable missions leave the unused frame slots blank; the output canvas is not cropped.
@@ -175,7 +175,7 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   �
 - A rendered photo includes all comments when there are at most three. More than three are sampled deterministically using the generation number and submission id. Comment authors are not rendered.
 - The frame's comment icon is shown only when the selected photo has at least one comment; it is removed with the empty comment area otherwise.
 - Identical source data and template version reuse the current `READY` record unless `force` is true. A real regeneration receives a new global generation number.
-- The current renderer accepts only local `/static/...` source photos and writes WebP files to `app/static/magazines/<schedule-id>/<template-key>/<locale>/page-<n>.webp`.
+- The current renderer accepts only local `/static/...` source photos and writes WebP files to `app/static/magazines/<schedule-id>/<template-key>/page-<n>.webp`. Legacy locale-specific URLs remain valid until that magazine is regenerated.
 - Generated WebP files are runtime artifacts and are ignored by git. `image_urls` is the storage-facing API contract so local storage can later be replaced by S3.
 - Generation requires at least one completed mission with a passed local photo; otherwise it returns `409`.
 

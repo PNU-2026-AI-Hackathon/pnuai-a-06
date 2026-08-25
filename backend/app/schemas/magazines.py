@@ -127,7 +127,7 @@ class GeneratedMagazineResponse(BaseModel):
     id: int
     schedule_id: int
     template_key: str
-    locale: str
+    locale: str = Field(description="Language embedded in the currently stored image.")
     template_version: int
     generation_number: int
     status: str
