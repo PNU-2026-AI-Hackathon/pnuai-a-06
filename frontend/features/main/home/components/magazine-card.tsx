@@ -15,12 +15,13 @@ const magazineBlackEllipse = require('@/assets/svg/magazine/black_ellipse.svg');
 
 type MagazineCardProps = {
   isLoading: boolean;
+  magazinePreviewUrl: string | null;
   onPress: () => void;
   photoUrls: string[];
   scheduleId: string | null;
 };
 
-export function MagazineCard({ isLoading, onPress, photoUrls, scheduleId }: MagazineCardProps) {
+export function MagazineCard({ isLoading, magazinePreviewUrl, onPress, photoUrls, scheduleId }: MagazineCardProps) {
   const isSingleMagazine = photoUrls.length === 1;
   const magazinePhotoSlots = [0, 1, 2].map((index) => photoUrls[index] ?? null);
 
@@ -59,13 +60,17 @@ export function MagazineCard({ isLoading, onPress, photoUrls, scheduleId }: Maga
             <Image source={magazineTitle} style={styles.magazineTitle} contentFit="contain" />
             <Image source={magazineNumber} style={styles.magazineNumber} contentFit="contain" />
           </View>
-          <View style={styles.magazinePhotos}>
-            {magazinePhotoSlots.map((photoUrl, index) => photoUrl ? (
-              <Image cachePolicy="memory-disk" key={`${photoUrl}-${index}`} source={{ uri: photoUrl }} style={styles.magazinePhoto} contentFit="cover" />
-            ) : (
-              <View key={`magazine-photo-placeholder-${index}`} style={styles.magazinePhotoPlaceholder} />
-            ))}
-          </View>
+          {photoUrls.length > 0 ? (
+            <View style={styles.magazinePhotos}>
+              {magazinePhotoSlots.map((photoUrl, index) => photoUrl ? (
+                <Image cachePolicy="memory-disk" key={`${photoUrl}-${index}`} source={{ uri: photoUrl }} style={styles.magazinePhoto} contentFit="cover" />
+              ) : (
+                <View key={`magazine-photo-placeholder-${index}`} style={styles.magazinePhotoPlaceholder} />
+              ))}
+            </View>
+          ) : magazinePreviewUrl ? (
+            <Image cachePolicy="memory-disk" source={{ uri: magazinePreviewUrl }} style={styles.magazinePreview} contentFit="cover" />
+          ) : null}
         </>
       )}
     </Pressable>

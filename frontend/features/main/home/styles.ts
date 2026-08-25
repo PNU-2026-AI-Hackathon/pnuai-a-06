@@ -156,4 +156,9 @@ export const styles = StyleSheet.create({
     minHeight: 0,
     width: '100%',
   },
+  magazinePreview: {
+    borderRadius: 10,
+    flex: 1,
+    width: '37%',
+  },
 });
