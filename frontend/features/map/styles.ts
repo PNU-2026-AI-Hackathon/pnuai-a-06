@@ -38,6 +38,7 @@ export const styles = StyleSheet.create({
     gap: 10,
     justifyContent: 'center',
     marginBottom: 38,
+    transform: [{ translateY: -8 }],
   },
   categoryButton: {
     alignItems: 'center',
@@ -74,6 +75,19 @@ export const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     marginBottom: 28,
+  },
+  mapContent: {
+    alignItems: 'center',
+    gap: 12,
+    transform: [{ translateY: 36 }],
+  },
+  mapGuideText: {
+    color: '#8A9194',
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 18,
+    paddingHorizontal: 8,
+    textAlign: 'center',
   },
   mapPieceStage: {
     height: '100%',

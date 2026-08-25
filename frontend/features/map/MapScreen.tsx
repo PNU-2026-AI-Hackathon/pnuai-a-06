@@ -26,7 +26,7 @@ export default function MapScreen() {
     width,
   } = useResponsiveLayout();
   const { language } = useLanguage();
-  const mapWidth = Math.min(width - 16, mediaMaxWidth, 430);
+  const mapWidth = Math.min(width - 16, mediaMaxWidth, 400);
   const mapHeight = mapWidth / MAP_ASPECT_RATIO;
   const frameWidth = Math.min(width * 0.84, 344);
   const frameHeight = frameWidth / MISSION_FRAME_ASPECT_RATIO;

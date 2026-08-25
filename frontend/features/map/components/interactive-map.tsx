@@ -34,51 +34,57 @@ export function InteractiveMap({
 }: InteractiveMapProps) {
   return (
     <View style={styles.mapArea}>
-      <View style={{ height: mapHeight, width: mapWidth }}>
-        <View style={styles.mapPieceStage}>
-          <Image contentFit="contain" pointerEvents="none" source={mapSource} style={styles.mapImage} />
-          {!isMissionDeckOpen ? (
-            <View pointerEvents="box-none" style={styles.districtTouchLayer}>
-              {mapPieceTargets.map((target) => {
-                const polygonPoints = districtTouchPolygons[target.number];
+      <View style={[styles.mapContent, { width: mapWidth }]}>
+        <Text style={styles.mapGuideText}>테마별 미션을 확인해보세요</Text>
 
-                if (!polygonPoints) {
-                  return null;
-                }
+        <View style={{ height: mapHeight, width: mapWidth }}>
+          <View style={styles.mapPieceStage}>
+            <Image contentFit="contain" pointerEvents="none" source={mapSource} style={styles.mapImage} />
+            {!isMissionDeckOpen ? (
+              <View pointerEvents="box-none" style={styles.districtTouchLayer}>
+                {mapPieceTargets.map((target) => {
+                  const polygonPoints = districtTouchPolygons[target.number];
 
-                const bounds = getPolygonBounds(polygonPoints);
-                const isActive =
-                  !hasThemeDistrictFilter || activeDistrictKeys.has(target.district) || activeDistrictKeys.has(target.districtCode);
+                  if (!polygonPoints) {
+                    return null;
+                  }
 
-                return (
-                  <Pressable
-                    accessibilityLabel={`${target.district} ${isActive ? '미션 보기' : '비활성 구'}`}
-                    accessibilityRole="button"
-                    disabled={!isActive}
-                    hitSlop={6}
-                    key={`district-touch-${target.number}`}
-                    onPress={() => onOpenMissionDeck(target.number)}
-                    style={[
-                      styles.districtTouchTarget,
-                      {
-                        height: (bounds.maxY - bounds.minY) * mapHeight,
-                        left: bounds.minX * mapWidth,
-                        top: bounds.minY * mapHeight,
-                        width: (bounds.maxX - bounds.minX) * mapWidth,
-                      },
-                    ]}
-                  />
-                );
-              })}
-            </View>
-          ) : null}
-          {!isMissionDeckOpen && isThemeDistrictLoading ? <ActivityIndicator color="#202124" size="small" style={styles.mapLoadingIndicator} /> : null}
-          {!isMissionDeckOpen && !isThemeDistrictLoading && themeDistrictError ? (
-            <View style={styles.mapStatusBox}>
-              <Text style={styles.mapStatusText}>{themeDistrictError}</Text>
-            </View>
-          ) : null}
+                  const bounds = getPolygonBounds(polygonPoints);
+                  const isActive =
+                    !hasThemeDistrictFilter || activeDistrictKeys.has(target.district) || activeDistrictKeys.has(target.districtCode);
+
+                  return (
+                    <Pressable
+                      accessibilityLabel={`${target.district} ${isActive ? '미션 보기' : '비활성 구'}`}
+                      accessibilityRole="button"
+                      disabled={!isActive}
+                      hitSlop={6}
+                      key={`district-touch-${target.number}`}
+                      onPress={() => onOpenMissionDeck(target.number)}
+                      style={[
+                        styles.districtTouchTarget,
+                        {
+                          height: (bounds.maxY - bounds.minY) * mapHeight,
+                          left: bounds.minX * mapWidth,
+                          top: bounds.minY * mapHeight,
+                          width: (bounds.maxX - bounds.minX) * mapWidth,
+                        },
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+            ) : null}
+            {!isMissionDeckOpen && isThemeDistrictLoading ? <ActivityIndicator color="#202124" size="small" style={styles.mapLoadingIndicator} /> : null}
+            {!isMissionDeckOpen && !isThemeDistrictLoading && themeDistrictError ? (
+              <View style={styles.mapStatusBox}>
+                <Text style={styles.mapStatusText}>{themeDistrictError}</Text>
+              </View>
+            ) : null}
+          </View>
         </View>
+
+        <Text style={styles.mapGuideText}>부산은 산과 바다, 도심이 아우러진{`\n`}15개 구와 1개 군으로 구성되어 있습니다.</Text>
       </View>
     </View>
   );
