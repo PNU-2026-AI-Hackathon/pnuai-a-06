@@ -15,6 +15,7 @@ from app.services.mission_sessions import (
     ActiveMissionSessionConflict,
     MissionLocationValidationError,
     MissionSessionExpired,
+    MissionSessionNotCancellable,
     NoParticipants,
     ParticipationLocked,
     ParticipationNotAllowed,
@@ -22,7 +23,7 @@ from app.services.mission_sessions import (
     SubmissionAlreadyExists,
     VotingNotReady,
     VotingSessionExpired,
-    add_submission, complete_session, create_session, get_session_for_user,
+    add_submission, cancel_session, complete_session, create_session, get_session_for_user,
     get_active_session_for_schedule, get_latest_session_for_schedule_mission,
     can_access_schedule, ensure_can_add_submission, join_session, mark_ready,
     reveal_session, start_session, add_submission_comment, like_submission,
@@ -419,6 +420,33 @@ async def finish_mission_session(
         _voting_expired()
     if result is None: _not_found()
     await _broadcast_session(result, "session_completed")
+    return localized_session(result, locale)
+
+
+@router.post(
+    "/mission-sessions/{session_id}/cancel",
+    response_model=MissionSessionResponse,
+    summary="Cancel an active mission session for all participants",
+)
+async def cancel_mission_session(
+    session_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        result = cancel_session(db, session_id, current_user.id)
+    except MissionSessionNotCancellable as error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "MISSION_SESSION_NOT_CANCELLABLE",
+                "message": str(error),
+            },
+        ) from error
+    if result is None:
+        _not_found()
+    await _broadcast_session(result, "session_cancelled")
     return localized_session(result, locale)
 
 

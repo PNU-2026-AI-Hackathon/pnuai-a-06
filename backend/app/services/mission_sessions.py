@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import logging
 import math
 
 from sqlalchemy import func, or_, select
@@ -36,6 +37,7 @@ RETAKE_DURATION = timedelta(seconds=60)
 VOTING_DURATION = timedelta(minutes=10)
 TERMINAL_MEMBER_STATUSES = ("SKIPPED", "LOCKED_OUT", "TIMED_OUT", "COMPLETED")
 EARTH_RADIUS_M = 6_371_008.8
+logger = logging.getLogger("app.mission_sessions")
 
 
 class ActiveMissionSessionConflict(Exception):
@@ -99,6 +101,10 @@ class NoParticipants(Exception):
     pass
 
 
+class MissionSessionNotCancellable(Exception):
+    pass
+
+
 def _session_load_options():
     """Load a complete session response in three bounded SQL queries.
 
@@ -146,6 +152,7 @@ def _load_session(
     session_id: int,
     *,
     accessible_by_user_id: int | None = None,
+    for_update: bool = False,
 ) -> MissionSession | None:
     statement = select(MissionSession).where(MissionSession.id == session_id)
     if accessible_by_user_id is not None:
@@ -159,6 +166,11 @@ def _load_session(
                 )
             )
         )
+    if for_update:
+        # Serialize terminal state changes with participation/start/upload
+        # transitions. Restricting the lock target avoids locking rows brought
+        # in by the eager-load joins.
+        statement = statement.with_for_update(of=MissionSession)
     session = _load_session_from_statement(db, statement)
     if session is not None:
         # Keep the response stable for clients that render the creator/companion
@@ -975,7 +987,7 @@ def set_participation(
     accuracy_m: float | None = None,
     measured_at: datetime | None = None,
 ):
-    session = _load_session(db, session_id)
+    session = _load_session(db, session_id, for_update=True)
     if session is None:
         return None
     _ensure_session_not_expired(db, session)
@@ -1032,7 +1044,7 @@ def mark_ready(db: Session, session_id: int, user_id: int):
 
 
 def start_session(db: Session, session_id: int, user_id: int):
-    session = _load_session(db, session_id)
+    session = _load_session(db, session_id, for_update=True)
     if session is None or session.created_by_user_id != user_id:
         return None
     _ensure_session_not_expired(db, session)
@@ -1106,7 +1118,7 @@ def ensure_can_add_submission(db: Session, session_id: int, user_id: int) -> boo
 
 
 def add_submission(db: Session, session_id: int, user_id: int, storage_key: str, photo_url: str, captured_at):
-    session = _load_session(db, session_id)
+    session = _load_session(db, session_id, for_update=True)
     if session is None:
         return None
     _ensure_session_not_expired(db, session)
@@ -1156,7 +1168,7 @@ def reveal_session(db: Session, session_id: int, user_id: int):
 
 
 def complete_session(db: Session, session_id: int, user_id: int):
-    session = _load_session(db, session_id)
+    session = _load_session(db, session_id, for_update=True)
     if session is None or session.created_by_user_id != user_id:
         return None
     _ensure_session_not_expired(db, session, allow_voting=True)
@@ -1180,6 +1192,38 @@ def complete_session(db: Session, session_id: int, user_id: int):
     session.schedule_mission.winner_user_id = session.winner_user_id
     db.commit()
     return _load_session(db, session_id)
+
+
+def cancel_session(db: Session, session_id: int, user_id: int):
+    """Cancel one shared mission attempt for every schedule participant."""
+    session = _load_session(db, session_id, for_update=True)
+    if session is None or session.created_by_user_id != user_id:
+        return None
+    if session.status == "CANCELLED":
+        return session
+    if session.status not in ACTIVE_MISSION_STATUSES:
+        raise MissionSessionNotCancellable(
+            "Only an active mission session can be cancelled."
+        )
+
+    now = datetime.now(timezone.utc)
+    session.status = "CANCELLED"
+    session.completed_at = now
+    session.shooting_deadline_at = None
+    session.voting_expires_at = None
+    for member in session.members:
+        member.upload_deadline_at = None
+    db.commit()
+    cancelled = _load_session(db, session_id)
+    logger.info(
+        "mission session cancelled session_id=%s schedule_id=%s "
+        "schedule_mission_id=%s creator_id=%s",
+        session_id,
+        session.schedule_mission.schedule_id,
+        session.schedule_mission_id,
+        user_id,
+    )
+    return cancelled
 
 
 def add_submission_comment(
