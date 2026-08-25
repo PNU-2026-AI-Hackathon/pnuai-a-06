@@ -1,0 +1,211 @@
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Circle, Defs, Mask, Rect, Svg } from 'react-native-svg';
+import { useState } from 'react';
+
+export type TutorialTarget = {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+export type TutorialShape = 'circle' | 'rect' | 'roundedRect';
+
+type TutorialOverlayProps = {
+  messageGap?: number;
+  messagePlacement?: 'above' | 'below';
+  message: string;
+  onNext?: () => void;
+  onPrev?: () => void;
+  onTargetPress?: () => void;
+  shape?: TutorialShape;
+  target: TutorialTarget;
+};
+
+export function TutorialOverlay({ message, messageGap = 40, messagePlacement = 'below', onNext, onPrev, onTargetPress, shape = 'roundedRect', target }: TutorialOverlayProps) {
+  const [overlaySize, setOverlaySize] = useState({ height: 0, width: 0 });
+  const messageHeight = onNext || onPrev ? 106 : 72;
+  const messageTop = messagePlacement === 'above'
+    ? Math.max(24, target.y - messageHeight - messageGap)
+    : Math.min(target.y + target.height + messageGap, Math.max(24, overlaySize.height - messageHeight - messageGap));
+
+  return (
+    <Modal animationType="none" onRequestClose={() => undefined} statusBarTranslucent transparent visible>
+      <View
+        accessibilityViewIsModal
+        onLayout={({ nativeEvent }) => setOverlaySize(nativeEvent.layout)}
+        style={styles.overlay}>
+        <Pressable
+          accessibilityLabel="튜토리얼 안내가 진행 중입니다"
+          accessibilityRole="none"
+          style={styles.backdropPressable}
+        />
+
+        {overlaySize.width > 0 && overlaySize.height > 0 ? (
+          <Svg
+            height={overlaySize.height}
+            pointerEvents="none"
+            style={StyleSheet.absoluteFill}
+            viewBox={`0 0 ${overlaySize.width} ${overlaySize.height}`}
+            width={overlaySize.width}>
+            <Defs>
+              <Mask id="tutorial-overlay-mask">
+                <Rect fill="#FFFFFF" height={overlaySize.height} width={overlaySize.width} x="0" y="0" />
+                {shape === 'circle' ? (
+                  <Circle
+                    cx={target.x + target.width / 2}
+                    cy={target.y + target.height / 2}
+                    fill="#000000"
+                    r={Math.min(target.width, target.height) / 2}
+                  />
+                ) : (
+                  <Rect
+                    fill="#000000"
+                    height={target.height}
+                    rx={shape === 'roundedRect' ? 18 : 0}
+                    ry={shape === 'roundedRect' ? 18 : 0}
+                    width={target.width}
+                    x={target.x}
+                    y={target.y}
+                  />
+                )}
+              </Mask>
+            </Defs>
+            <Rect
+              fill="rgba(0, 0, 0, 0.8)"
+              height={overlaySize.height}
+              mask="url(#tutorial-overlay-mask)"
+              width={overlaySize.width}
+              x="0"
+              y="0"
+            />
+            {shape === 'circle' ? (
+              <Circle
+                cx={target.x + target.width / 2}
+                cy={target.y + target.height / 2}
+                fill="none"
+                r={Math.min(target.width, target.height) / 2}
+                stroke="#FFFFFF"
+                strokeDasharray="6, 6"
+                strokeWidth="2"
+              />
+            ) : (
+              <Rect
+                fill="none"
+                height={target.height}
+                rx={shape === 'roundedRect' ? 18 : 0}
+                ry={shape === 'roundedRect' ? 18 : 0}
+                stroke="#FFFFFF"
+                strokeDasharray="6, 6"
+                strokeWidth="2"
+                width={target.width}
+                x={target.x}
+                y={target.y}
+              />
+            )}
+          </Svg>
+        ) : null}
+
+        {onTargetPress ? (
+          <Pressable
+            accessibilityLabel="강조된 아이콘 선택"
+            accessibilityRole="button"
+            onPress={onTargetPress}
+            style={[styles.targetPressable, {
+              height: target.height,
+              left: target.x,
+              top: target.y,
+              width: target.width,
+            }]}
+          />
+        ) : null}
+
+        <View pointerEvents="box-none" style={[styles.messageContainer, { top: messageTop }]}>
+          <Text style={styles.message}>{message}</Text>
+          {onPrev || onNext ? (
+            <View style={[styles.navigationRow, !onPrev && styles.navigationRowNextOnly]}>
+              {onPrev ? (
+                <Pressable accessibilityRole="button" onPress={onPrev} style={styles.prevButton}>
+                  <View style={styles.prevButtonContent}>
+                    <Text style={styles.nextButtonText}>&lt; Prev</Text>
+                    <View style={styles.nextButtonUnderline} />
+                  </View>
+                </Pressable>
+              ) : null}
+              {onNext ? (
+                <Pressable accessibilityRole="button" onPress={onNext} style={styles.nextButton}>
+                  <View style={styles.nextButtonContent}>
+                    <Text style={styles.nextButtonText}>Next &gt;</Text>
+                    <View style={styles.nextButtonUnderline} />
+                  </View>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  overlay: {
+    elevation: 20,
+    flex: 1,
+    zIndex: 20,
+  },
+  backdropPressable: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  targetPressable: {
+    position: 'absolute',
+  },
+  messageContainer: {
+    alignItems: 'center',
+    left: 24,
+    position: 'absolute',
+    right: 24,
+  },
+  message: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '500',
+    lineHeight: 23,
+    textAlign: 'center',
+  },
+  navigationRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 24,
+    width: '100%',
+  },
+  navigationRowNextOnly: {
+    justifyContent: 'flex-end',
+  },
+  prevButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  nextButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  prevButtonContent: {
+    alignItems: 'flex-start',
+  },
+  nextButtonContent: {
+    alignItems: 'flex-end',
+  },
+  nextButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '400',
+  },
+  nextButtonUnderline: {
+    backgroundColor: '#FFFFFF',
+    height: 0.5,
+    marginTop: 1,
+    width: '100%',
+  },
+});

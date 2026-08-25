@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { View } from 'react-native';
 
 import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
+import { useTutorialTarget } from '@/components/tutorial-provider';
 
 import { ProfileAvatar } from '@/components/profile-avatar';
 
@@ -19,6 +20,8 @@ type MainHeaderProps = {
 };
 
 export function MainHeader({ onOpenLogin, onOpenProfile, profileEmoji, profileImageUrl, topInset }: MainHeaderProps) {
+  const profileTarget = useTutorialTarget('profile-header', { offsetY: 27 });
+
   return (
     <View style={[styles.header, { paddingTop: topInset }]}>
       <Pressable
@@ -29,7 +32,12 @@ export function MainHeader({ onOpenLogin, onOpenProfile, profileEmoji, profileIm
         style={styles.logoButton}>
         <Image source={splashText} style={styles.logoText} contentFit="contain" />
       </Pressable>
-      <Pressable accessibilityLabel="프로필" onPress={onOpenProfile} style={styles.profileButton}>
+      <Pressable
+        accessibilityLabel="프로필"
+        onLayout={profileTarget.onLayout}
+        onPress={onOpenProfile}
+        ref={profileTarget.ref}
+        style={styles.profileButton}>
         <ProfileAvatar profileImageUrl={profileImageUrl} profileEmoji={profileEmoji} size={56} />
       </Pressable>
     </View>

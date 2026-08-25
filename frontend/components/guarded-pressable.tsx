@@ -1,9 +1,12 @@
-import { useCallback } from 'react';
+import { forwardRef, useCallback, type ComponentRef } from 'react';
 import { Pressable, TouchableOpacity, type PressableProps, type TouchableOpacityProps } from 'react-native';
 
 import { usePressGuard } from '@/lib/press-guard';
 
-export function GuardedPressable({ onPress, ...props }: PressableProps) {
+export const GuardedPressable = forwardRef<ComponentRef<typeof Pressable>, PressableProps>(function GuardedPressable(
+  { onPress, ...props },
+  ref,
+) {
   const allowPress = usePressGuard();
   const guardedOnPress = useCallback<NonNullable<PressableProps['onPress']>>(
     (event) => {
@@ -14,8 +17,8 @@ export function GuardedPressable({ onPress, ...props }: PressableProps) {
     [allowPress, onPress],
   );
 
-  return <Pressable {...props} onPress={guardedOnPress} />;
-}
+  return <Pressable ref={ref} {...props} onPress={guardedOnPress} />;
+});
 
 export function GuardedTouchableOpacity({ onPress, ...props }: TouchableOpacityProps) {
   const allowPress = usePressGuard();

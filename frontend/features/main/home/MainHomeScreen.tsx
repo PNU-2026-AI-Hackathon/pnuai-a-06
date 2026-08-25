@@ -1,7 +1,9 @@
 // main 홈 화면을 구성하고 매거진 상세 이동을 연결합니다.
 import { router } from 'expo-router';
+import { useEffect } from 'react';
 import { View } from 'react-native';
 
+import { useTutorial } from '@/components/tutorial-provider';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 import { EmptyMagazineState } from './components/empty-magazine-state';
@@ -13,6 +15,7 @@ import { styles } from './styles';
 export default function MainHomeScreen() {
   const { bottomActionInset, centerContentOffset, horizontalPadding, topInset } = useResponsiveLayout();
   const main = useMainHome();
+  const { start: startTutorial } = useTutorial();
   const shouldShowEmptyMagazine = main.hasLoadedMagazine && main.magazinePhotoUrls.length === 0;
 
   const openMagazine = () => {
@@ -25,6 +28,12 @@ export default function MainHomeScreen() {
       params: { scheduleId: main.magazineScheduleId },
     });
   };
+
+  useEffect(() => {
+    if (shouldShowEmptyMagazine) {
+      void startTutorial();
+    }
+  }, [shouldShowEmptyMagazine, startTutorial]);
 
   return (
     <View style={[styles.container, { paddingBottom: bottomActionInset, paddingHorizontal: horizontalPadding }]}>
@@ -46,6 +55,7 @@ export default function MainHomeScreen() {
           scheduleId={main.magazineScheduleId}
         />
       ) : null}
+
     </View>
   );
 }

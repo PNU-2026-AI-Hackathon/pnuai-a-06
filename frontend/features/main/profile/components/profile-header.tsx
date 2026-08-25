@@ -6,6 +6,7 @@ import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useTutorialTarget } from '@/components/tutorial-provider';
 
 import { styles } from '../styles';
 
@@ -32,6 +33,8 @@ export function ProfileHeader({
   profileImageUrl,
   topInset,
 }: ProfileHeaderProps) {
+  const profileEditTarget = useTutorialTarget('profile-edit', { height: 140, offsetY: 27, width: 140 });
+
   return (
     <View style={[styles.profileSection, { paddingHorizontal: horizontalPadding, paddingTop: topInset }]}>
       <View style={[styles.header, { maxWidth: contentMaxWidth }]}>
@@ -45,7 +48,13 @@ export function ProfileHeader({
       </View>
 
       <View style={styles.profileInfo}>
-        <Pressable accessibilityRole="button" accessibilityLabel="프로필 편집" onPress={onEdit} style={styles.avatarButton}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="프로필 편집"
+          onLayout={profileEditTarget.onLayout}
+          onPress={onEdit}
+          ref={profileEditTarget.ref}
+          style={styles.avatarButton}>
           <ProfileAvatar profileImageUrl={profileImageUrl} profileEmoji={profileEmoji} />
           <View style={styles.editBadge}>
             <MaterialCommunityIcons color="#4E5259" name="pencil" size={20} />

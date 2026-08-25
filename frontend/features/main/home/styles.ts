@@ -103,6 +103,10 @@ export const styles = StyleSheet.create({
     height: 180,
     width: 180,
   },
+  emptyMagazineImageTarget: {
+    height: 180,
+    width: 180,
+  },
   emptyMagazineCopy: {
     alignItems: 'center',
     marginTop: 40,
