@@ -4,53 +4,59 @@ from datetime import datetime, timezone
 
 from fastapi import WebSocket
 
-from app.schemas.mission_sessions import MissionSessionResponse
+from app.services.localization import localized_session
 
 
 class ScheduleMissionConnectionManager:
     def __init__(self) -> None:
-        self._connections: dict[int, set[WebSocket]] = defaultdict(set)
+        self._connections: dict[int, dict[WebSocket, str]] = defaultdict(dict)
         self._lock = asyncio.Lock()
 
-    async def connect(self, schedule_id: int, websocket: WebSocket) -> None:
+    async def connect(self, schedule_id: int, websocket: WebSocket, locale: str = "ko") -> None:
         await websocket.accept()
         async with self._lock:
-            self._connections[schedule_id].add(websocket)
+            self._connections[schedule_id][websocket] = locale
 
     async def disconnect(self, schedule_id: int, websocket: WebSocket) -> None:
         async with self._lock:
             connections = self._connections.get(schedule_id)
             if not connections:
                 return
-            connections.discard(websocket)
+            connections.pop(websocket, None)
             if not connections:
                 self._connections.pop(schedule_id, None)
 
     async def broadcast_session(
         self, schedule_id: int, session, event_type: str
     ) -> None:
-        response = MissionSessionResponse.model_validate(session)
-        event = {
-            "type": event_type,
-            "scheduleId": schedule_id,
-            "sessionId": session.id,
-            "serverTime": datetime.now(timezone.utc).isoformat(),
-            "payload": {"session": response.model_dump(mode="json")},
-        }
         async with self._lock:
-            connections = list(self._connections.get(schedule_id, ()))
+            connections = list(self._connections.get(schedule_id, {}).items())
         stale_connections: list[WebSocket] = []
-        for websocket in connections:
+        responses: dict[str, dict] = {}
+        for websocket, locale in connections:
             try:
+                payload = responses.setdefault(
+                    locale,
+                    localized_session(session, locale).model_dump(mode="json"),
+                )
+                event = {
+                    "type": event_type,
+                    "scheduleId": schedule_id,
+                    "sessionId": session.id,
+                    "serverTime": datetime.now(timezone.utc).isoformat(),
+                    "payload": {"session": payload},
+                }
                 await websocket.send_json(event)
             except Exception:
                 stale_connections.append(websocket)
         for websocket in stale_connections:
             await self.disconnect(schedule_id, websocket)
 
-    async def send_snapshot(self, websocket: WebSocket, schedule_id: int, session) -> None:
+    async def send_snapshot(
+        self, websocket: WebSocket, schedule_id: int, session, locale: str = "ko"
+    ) -> None:
         payload = (
-            MissionSessionResponse.model_validate(session).model_dump(mode="json")
+            localized_session(session, locale).model_dump(mode="json")
             if session is not None
             else None
         )

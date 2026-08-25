@@ -18,16 +18,23 @@ official Kyobo handwriting font page and place it in `app/static/fonts/`. Font
 binaries are intentionally ignored because the font license does not permit
 redistribution.
 
-Generated files are written below `app/static/magazines/<schedule-id>/<template-key>/`
+Generated files are written below `app/static/magazines/<schedule-id>/<template-key>/<locale>/`
 and are intentionally ignored. This directory can later be replaced by an S3
 storage adapter while keeping the API response contract (`image_urls`).
 
+Template manifests may provide a `names` object keyed by locale. Magazine generation
+uses the request locale for backend-owned mission text and static labels, while
+schedule titles, participant names, and comments remain in their original language.
+Korean and English outputs are persisted separately and never overwrite one another.
+
 ## Frontend selection flow
 
-1. Call `GET /schedules/{schedule_id}/magazine/candidates?template_key=...`.
+1. Call `GET /schedules/{schedule_id}/magazine/candidates?template_key=...&lang=en`
+   (omit `lang` for Korean).
 2. When `selection_required` is true, let the user choose up to `max_selectable` ids.
 3. Pass the ordered ids as `schedule_mission_ids` to
-   `POST /schedules/{schedule_id}/magazine`.
+   `POST /schedules/{schedule_id}/magazine?lang=en` using the same locale as the
+   candidates request.
 
 If more candidates exist than the frame capacity and ids are omitted, generation
 returns `409` with code `MAGAZINE_MISSION_SELECTION_REQUIRED`.

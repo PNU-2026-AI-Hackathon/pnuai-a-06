@@ -25,14 +25,18 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
-from app.auth.email import send_verification_email
+from app.auth.email import send_password_reset_email, send_verification_email
 from app.auth.kakao import (
     exchange_code_for_token,
     fetch_kakao_user,
     normalize_kakao_user,
+    unlink_kakao_user_with_admin_key,
 )
 from app.auth.schemas import (
     EmailLoginRequest,
+    EmailPasswordResetConfirmRequest,
+    EmailPasswordResetConfirmResponse,
+    EmailPasswordResetRequest,
     EmailRegisterRequest,
     EmailVerificationResponse,
     EmailVerifyRequest,
@@ -52,9 +56,14 @@ from app.core.security import (
 from app.db.session import get_db
 from app.models.users import User
 from app.services.users import (
+    EmailAccountNotRegisteredError,
+    EmailAccountNotVerifiedError,
     authenticate_email_user,
+    delete_user_account,
     get_or_create_kakao_user,
     register_email_user,
+    request_email_password_reset,
+    reset_email_password,
     update_user_profile,
     verify_email_user,
 )
@@ -204,7 +213,7 @@ def kakao_login(
         STATE_COOKIE_NAME,
         state,
         httponly=True,
-        secure=False,
+        secure=True,
         samesite="lax",
         max_age=600,
     )
@@ -213,7 +222,7 @@ def kakao_login(
             FRONTEND_REDIRECT_COOKIE_NAME,
             frontend_redirect_uri,
             httponly=True,
-            secure=False,
+            secure=True,
             samesite="lax",
             max_age=600,
         )
@@ -341,6 +350,92 @@ def verify_email(
     return create_token_response(user)
 
 
+@router.post(
+    "/email/password-reset/request",
+    response_model=EmailVerificationResponse,
+    tags=["email auth"],
+)
+def request_password_reset(
+    payload: EmailPasswordResetRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> EmailVerificationResponse:
+    try:
+        _, code = request_email_password_reset(
+            db,
+            email=payload.email,
+            expires_in_minutes=settings.email_verification_expire_minutes,
+        )
+    except EmailAccountNotRegisteredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "EMAIL_NOT_REGISTERED",
+                "message": "No email account found. Please register first.",
+            },
+        ) from exc
+    except EmailAccountNotVerifiedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "EMAIL_NOT_VERIFIED",
+                "message": "Complete sign-up email verification first.",
+            },
+        ) from exc
+
+    sent = send_password_reset_email(settings, to_email=payload.email, code=code)
+    return EmailVerificationResponse(
+        message="Password reset code sent." if sent else "Password reset code created.",
+        expires_in_minutes=settings.email_verification_expire_minutes,
+        dev_verification_code=None if sent else code,
+    )
+
+
+@router.post(
+    "/email/password-reset/confirm",
+    response_model=EmailPasswordResetConfirmResponse,
+    tags=["email auth"],
+)
+def confirm_password_reset(
+    payload: EmailPasswordResetConfirmRequest,
+    db: Session = Depends(get_db),
+) -> EmailPasswordResetConfirmResponse:
+    try:
+        user = reset_email_password(
+            db,
+            email=payload.email,
+            code=payload.code,
+            new_password=payload.new_password,
+        )
+    except EmailAccountNotRegisteredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "EMAIL_NOT_REGISTERED",
+                "message": "No email account found. Please register first.",
+            },
+        ) from exc
+    except EmailAccountNotVerifiedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "EMAIL_NOT_VERIFIED",
+                "message": "Complete sign-up email verification first.",
+            },
+        ) from exc
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "PASSWORD_RESET_CODE_INVALID",
+                "message": "Invalid or expired password reset code.",
+            },
+        )
+
+    return EmailPasswordResetConfirmResponse(message="Password has been reset.")
+
+
 @router.post("/email/login", response_model=TokenResponse, tags=["email auth"])
 def login_with_email(
     payload: EmailLoginRequest,
@@ -407,6 +502,35 @@ def refresh_token(
 @router.get("/me", response_model=UserResponse, tags=["account"])
 def read_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["account"],
+    summary="Delete the current account",
+)
+async def delete_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if current_user.provider == "kakao":
+        if not settings.kakao_admin_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "KAKAO_UNLINK_NOT_CONFIGURED",
+                    "message": "Kakao account unlink is not configured.",
+                },
+            )
+        await unlink_kakao_user_with_admin_key(
+            kakao_id=current_user.provider_user_id,
+            admin_key=settings.kakao_admin_key,
+        )
+
+    delete_user_account(db, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/me", response_model=UserResponse, tags=["account"])

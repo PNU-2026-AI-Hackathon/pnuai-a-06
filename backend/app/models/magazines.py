@@ -10,7 +10,10 @@ class ScheduleMagazine(Base):
     __tablename__ = "schedule_magazines"
     __table_args__ = (
         UniqueConstraint(
-            "schedule_id", "template_key", name="uq_schedule_magazines_schedule_template"
+            "schedule_id",
+            "template_key",
+            "locale",
+            name="uq_schedule_magazines_schedule_template_locale",
         ),
     )
 
@@ -19,6 +22,7 @@ class ScheduleMagazine(Base):
         ForeignKey("mission_schedules.id", ondelete="CASCADE"), nullable=False, index=True
     )
     template_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    locale: Mapped[str] = mapped_column(String(10), nullable=False, default="ko")
     template_version: Mapped[int] = mapped_column(Integer, nullable=False)
     generation_number: Mapped[int] = mapped_column(
         Integer,

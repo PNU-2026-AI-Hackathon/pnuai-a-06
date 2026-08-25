@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.core.localization import resolve_locale
 from app.schemas.missions import (
     DistrictResponse,
     MissionResponse,
@@ -19,6 +20,11 @@ from app.services.missions import (
     list_districts,
     list_mission_sets,
     list_missions,
+)
+from app.services.localization import (
+    district_label,
+    localized_mission,
+    localized_mission_set,
 )
 
 router = APIRouter(tags=["missions"])
@@ -36,8 +42,20 @@ MISSION_PHOTO_DIR = Path("app/static/mission-photos")
         "on each mission's own district tag."
     ),
 )
-def read_districts(db: Session = Depends(get_db)) -> list[DistrictResponse]:
-    return list_districts(db)
+def read_districts(
+    locale: str = Depends(resolve_locale),
+    db: Session = Depends(get_db),
+) -> list[DistrictResponse]:
+    return [
+        DistrictResponse(
+            district_code=item["district_code"],
+            district_label=district_label(
+                item["district_code"], item["district_label"], locale
+            ),
+            mission_count=item["mission_count"],
+        )
+        for item in list_districts(db)
+    ]
 
 
 @router.get(
@@ -58,15 +76,19 @@ def read_missions(
     ),
     theme: Theme | None = Query(
         default=None,
-        description="Optional basket theme filter: MOUNTAIN, SEA, or CITY.",
+        description="Optional mission category filter: MOUNTAIN, SEA, CITY, or DEMO.",
     ),
     type: MissionType | None = Query(
         default=None,
         description="Optional mission type filter: BASIC, RARE, or SIDE.",
     ),
+    locale: str = Depends(resolve_locale),
     db: Session = Depends(get_db),
 ) -> list[MissionResponse]:
-    return list_missions(db, district_code=district_code, theme=theme, mission_type=type)
+    missions = list_missions(
+        db, district_code=district_code, theme=theme, mission_type=type
+    )
+    return [localized_mission(mission, locale) for mission in missions]
 
 
 @router.get(
@@ -110,14 +132,21 @@ def read_mission_photo(
     response_model=list[MissionSetResponse],
     summary="List basket themes",
     description=(
-        "Returns the three backend-created basket themes: mountain, sea, and city. "
-        "Use this for home/map basket cards. This endpoint does not require login "
+        "Returns the three regular basket themes plus the separate DEMO category. "
+        "Use the regular themes for home/map basket cards and DEMO for presentation missions. "
+        "This endpoint does not require login "
         "and does not include individual missions. Basket themes do not have district "
         "tags; district filtering belongs to `/missions`."
     ),
 )
-def read_mission_sets(db: Session = Depends(get_db)) -> list[MissionSetResponse]:
-    return list_mission_sets(db)
+def read_mission_sets(
+    locale: str = Depends(resolve_locale),
+    db: Session = Depends(get_db),
+) -> list[MissionSetResponse]:
+    return [
+        localized_mission_set(mission_set, locale)
+        for mission_set in list_mission_sets(db)
+    ]
 
 
 @router.get(
@@ -135,6 +164,7 @@ def read_mission_sets(db: Session = Depends(get_db)) -> list[MissionSetResponse]
 )
 def read_mission_set(
     mission_set_id: int,
+    locale: str = Depends(resolve_locale),
     db: Session = Depends(get_db),
 ) -> MissionSetDetailResponse:
     mission_set = get_mission_set(db, mission_set_id)
@@ -143,4 +173,4 @@ def read_mission_set(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Mission set not found.",
         )
-    return mission_set
+    return localized_mission_set(mission_set, locale, detail=True)

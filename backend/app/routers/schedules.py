@@ -1,7 +1,10 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
+from app.core.localization import resolve_locale
 from app.db.session import get_db
 from app.models.users import User
 from app.schemas.schedules import (
@@ -17,6 +20,7 @@ from app.schemas.schedules import (
     ScheduleMemberResponse,
     ScheduleMemberStatus,
     ScheduleMissionCreateRequest,
+    ScheduleMissionOrderRecommendationResponse,
     ScheduleMissionResponse,
     ScheduleShareInvitationResponse,
 )
@@ -43,6 +47,14 @@ from app.services.schedules import (
     update_user_schedule_order,
     update_schedule,
 )
+from app.services.localization import (
+    localized_schedule,
+    localized_schedule_mission,
+)
+from app.services.mission_route_recommendations import (
+    MissionRouteRecommendationError,
+    recommend_schedule_mission_order,
+)
 
 schedules_router = APIRouter(prefix="/schedules", tags=["schedules"])
 schedule_missions_router = APIRouter(prefix="/schedules", tags=["schedule missions"])
@@ -64,10 +76,14 @@ invitation_router = invitations_router
     ),
 )
 def read_my_schedules(
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[MissionScheduleResponse]:
-    return list_user_schedules(db, current_user.id)
+    return [
+        localized_schedule(schedule, locale)
+        for schedule in list_user_schedules(db, current_user.id)
+    ]
 
 
 @schedules_router.post(
@@ -87,6 +103,7 @@ def read_my_schedules(
 )
 def create_mission_schedule(
     payload: MissionScheduleCreateRequest,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MissionScheduleResponse:
@@ -99,7 +116,7 @@ def create_mission_schedule(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"message": "Invitee email not found.", "missing_emails": missing_ids},
         )
-    return schedule
+    return localized_schedule(schedule, locale)
 
 
 @schedules_router.put(
@@ -110,11 +127,15 @@ def create_mission_schedule(
 )
 def reorder_my_schedules(
     payload: ScheduleOrderUpdateRequest,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[MissionScheduleResponse]:
     try:
-        return update_user_schedule_order(db, user_id=current_user.id, schedule_ids=payload.schedule_ids)
+        schedules = update_user_schedule_order(
+            db, user_id=current_user.id, schedule_ids=payload.schedule_ids
+        )
+        return [localized_schedule(schedule, locale) for schedule in schedules]
     except ScheduleOrderError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -127,6 +148,7 @@ def reorder_my_schedules(
 )
 def read_mission_schedule(
     schedule_id: int,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MissionScheduleResponse:
@@ -136,7 +158,7 @@ def read_mission_schedule(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Mission schedule not found.",
         )
-    return schedule
+    return localized_schedule(schedule, locale)
 
 
 @schedule_invitations_router.post(
@@ -174,7 +196,7 @@ def create_schedule_share_invite(
     response_model=list[ScheduleBasketResponse],
     summary="Get theme basket states for a schedule",
     description=(
-        "Returns MOUNTAIN, SEA, and CITY basket states for the selected schedule. "
+        "Returns MOUNTAIN, SEA, CITY, and DEMO category states for the selected schedule. "
         "States are calculated from missions added to this schedule, not from a "
         "user-wide basket."
     ),
@@ -208,6 +230,7 @@ def read_schedule_baskets(
 def update_mission_schedule(
     schedule_id: int,
     payload: MissionScheduleUpdateRequest,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MissionScheduleResponse:
@@ -227,7 +250,7 @@ def update_mission_schedule(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Mission schedule not found.",
         )
-    return schedule
+    return localized_schedule(schedule, locale)
 
 
 @schedules_router.delete(
@@ -338,6 +361,7 @@ def create_schedule_invitation(
 def create_schedule_mission(
     schedule_id: int,
     payload: ScheduleMissionCreateRequest,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ScheduleMissionResponse:
@@ -354,7 +378,61 @@ def create_schedule_mission(
         if error == "mission_date_out_of_range":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="planned_date must be within the schedule date range.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission schedule not found.")
-    return schedule_mission
+    return localized_schedule_mission(schedule_mission, locale)
+
+
+@schedule_missions_router.post(
+    "/{schedule_id}/days/{planned_date}/recommend-order",
+    response_model=ScheduleMissionOrderRecommendationResponse,
+    summary="Recommend and apply a day's mission visit order",
+    description=(
+        "Uses OpenAI to recommend a rough geographic visit order for only the "
+        "missions assigned to the requested date, validates the returned ids, and "
+        "persists the new one-based visit order. Only the schedule creator can run it."
+    ),
+    responses={
+        400: {"description": "The date is outside the schedule range."},
+        404: {"description": "Schedule was not found or the user is not its creator."},
+        409: {"description": "No missions exist for the date, or they changed during generation."},
+        502: {"description": "OpenAI did not return a usable recommendation."},
+        503: {"description": "OpenAI is not configured."},
+    },
+)
+def recommend_day_mission_order(
+    schedule_id: int,
+    planned_date: date,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ScheduleMissionOrderRecommendationResponse:
+    try:
+        schedule_missions = recommend_schedule_mission_order(
+            db,
+            schedule_id=schedule_id,
+            creator_id=current_user.id,
+            planned_date=planned_date,
+        )
+    except MissionRouteRecommendationError as error:
+        status_by_code = {
+            "MISSION_DATE_OUT_OF_RANGE": status.HTTP_400_BAD_REQUEST,
+            "SCHEDULE_NOT_FOUND": status.HTTP_404_NOT_FOUND,
+            "NO_MISSIONS_FOR_DATE": status.HTTP_409_CONFLICT,
+            "SCHEDULE_MISSIONS_CHANGED": status.HTTP_409_CONFLICT,
+            "ROUTE_RECOMMENDATION_UNAVAILABLE": status.HTTP_502_BAD_GATEWAY,
+            "OPENAI_NOT_CONFIGURED": status.HTTP_503_SERVICE_UNAVAILABLE,
+        }
+        raise HTTPException(
+            status_code=status_by_code.get(error.code, status.HTTP_502_BAD_GATEWAY),
+            detail={"code": error.code, "message": error.message},
+        ) from error
+
+    return ScheduleMissionOrderRecommendationResponse(
+        planned_date=planned_date,
+        missions=[
+            localized_schedule_mission(schedule_mission, locale)
+            for schedule_mission in schedule_missions
+        ],
+    )
 
 
 @schedule_missions_router.patch(
@@ -370,6 +448,7 @@ def update_scheduled_mission(
     schedule_id: int,
     schedule_mission_id: int,
     payload: ScheduleMissionUpdateRequest,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ScheduleMissionResponse:
@@ -384,7 +463,7 @@ def update_scheduled_mission(
         if error == "mission_date_out_of_range":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="planned_date must be within the schedule date range.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule or schedule mission not found.")
-    return schedule_mission
+    return localized_schedule_mission(schedule_mission, locale)
 
 
 @schedule_missions_router.delete(

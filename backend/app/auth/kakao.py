@@ -7,6 +7,7 @@ from app.core.config import Settings
 
 KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 KAKAO_USER_INFO_URL = "https://kapi.kakao.com/v2/user/me"
+KAKAO_UNLINK_URL = "https://kapi.kakao.com/v1/user/unlink"
 
 
 async def exchange_code_for_token(code: str, settings: Settings) -> str:
@@ -82,3 +83,54 @@ def normalize_kakao_user(payload: dict[str, Any]) -> dict[str, str | None]:
         "nickname": profile.get("nickname"),
         "profile_image_url": profile.get("profile_image_url"),
     }
+
+
+async def unlink_kakao_user_with_admin_key(
+    *,
+    kakao_id: str,
+    admin_key: str,
+) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                KAKAO_UNLINK_URL,
+                data={
+                    "target_id_type": "user_id",
+                    "target_id": kakao_id,
+                },
+                headers={
+                    "Authorization": f"KakaoAK {admin_key}",
+                    "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+                },
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "KAKAO_UNLINK_UNAVAILABLE",
+                "message": "Kakao unlink service is unavailable.",
+            },
+        ) from exc
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "KAKAO_UNLINK_FAILED",
+                "message": "Failed to unlink the Kakao account.",
+            },
+        )
+
+    try:
+        unlinked_id = str(response.json().get("id"))
+    except (AttributeError, ValueError):
+        unlinked_id = ""
+
+    if unlinked_id != kakao_id:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "KAKAO_UNLINK_INVALID_RESPONSE",
+                "message": "Kakao returned an invalid unlink response.",
+            },
+        )

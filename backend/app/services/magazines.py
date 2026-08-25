@@ -16,6 +16,7 @@ from app.models.schedules import (
     ScheduleMission,
 )
 from app.models.magazines import ScheduleMagazine
+from app.models.missions import Mission, MissionLocation
 from app.schemas.magazines import (
     MagazineCommentResponse,
     MagazineCoverResponse,
@@ -27,6 +28,7 @@ from app.schemas.magazines import (
     ScheduleMagazineResponse,
 )
 from app.services.magazine_renderer import MagazineRenderError, MagazineTemplate, render_magazine
+from app.services.localization import localized_mission
 
 
 class MagazineSelectionRequired(ValueError):
@@ -105,6 +107,13 @@ def _load_completed_sessions(db: Session, schedule_id: int) -> list[MissionSessi
             selectinload(MissionSession.schedule_mission).selectinload(
                 ScheduleMission.mission
             ),
+            selectinload(MissionSession.schedule_mission)
+            .selectinload(ScheduleMission.mission)
+            .selectinload(Mission.translations),
+            selectinload(MissionSession.schedule_mission)
+            .selectinload(ScheduleMission.mission)
+            .selectinload(Mission.locations)
+            .selectinload(MissionLocation.translations),
             selectinload(MissionSession.winner),
             selectinload(MissionSession.members).selectinload(MissionSessionMember.user),
             selectinload(MissionSession.submissions).selectinload(MissionSubmission.user),
@@ -189,7 +198,7 @@ def _photo_response(
 
 
 def build_schedule_magazine(
-    db: Session, *, schedule_id: int, user_id: int
+    db: Session, *, schedule_id: int, user_id: int, locale: str = "ko"
 ) -> ScheduleMagazineResponse | None:
     schedule = _load_accessible_schedule(db, schedule_id, user_id)
     if schedule is None:
@@ -212,6 +221,7 @@ def build_schedule_magazine(
     for page_index, session in enumerate(sessions):
         schedule_mission = session.schedule_mission
         mission = schedule_mission.mission
+        mission_response = localized_mission(mission, locale)
         submissions = _eligible_submissions(session)
         photos = [
             _photo_response(submission, session.winner_user_id)
@@ -238,8 +248,11 @@ def build_schedule_magazine(
             _comment_response(winner_comments[0]) if winner_comments else None
         )
 
-        if mission.place_label and mission.place_label not in visited_places:
-            visited_places.append(mission.place_label)
+        if (
+            mission_response.place_label
+            and mission_response.place_label not in visited_places
+        ):
+            visited_places.append(mission_response.place_label)
         if winner is not None:
             winner_counts[winner.id] += 1
             winner_users[winner.id] = winner
@@ -252,16 +265,16 @@ def build_schedule_magazine(
                 planned_date=schedule_mission.planned_date,
                 mission=MagazineMissionResponse(
                     code=mission.code,
-                    title=mission.title,
-                    description=mission.description,
+                    title=mission_response.title,
+                    description=mission_response.description,
                     emoji_url=mission.emoji_url,
                     district_code=mission.district_code,
-                    district_label=mission.district_label,
-                    place_label=mission.place_label,
+                    district_label=mission_response.district_label,
+                    place_label=mission_response.place_label,
                 ),
                 winner_user_id=session.winner_user_id,
                 winner=_user_response(winner) if winner is not None else None,
-                headline=mission.title,
+                headline=mission_response.title,
                 featured_comment=featured_comment,
                 photos=photos,
             )
@@ -277,6 +290,7 @@ def build_schedule_magazine(
         pages[0].photos[0].photo_url if pages and pages[0].photos else None,
     )
     return ScheduleMagazineResponse(
+        locale=locale,
         schedule_id=schedule.id,
         title=schedule.title,
         start_date=schedule.start_date,
@@ -308,7 +322,12 @@ def build_schedule_magazine(
 
 
 def get_generated_magazine(
-    db: Session, *, schedule_id: int, user_id: int, template_key: str
+    db: Session,
+    *,
+    schedule_id: int,
+    user_id: int,
+    template_key: str,
+    locale: str = "ko",
 ) -> ScheduleMagazine | None:
     if _load_accessible_schedule(db, schedule_id, user_id) is None:
         return None
@@ -316,14 +335,22 @@ def get_generated_magazine(
         select(ScheduleMagazine).where(
             ScheduleMagazine.schedule_id == schedule_id,
             ScheduleMagazine.template_key == template_key,
+            ScheduleMagazine.locale == locale,
         )
     )
 
 
 def build_magazine_candidates(
-    db: Session, *, schedule_id: int, user_id: int, template: MagazineTemplate
+    db: Session,
+    *,
+    schedule_id: int,
+    user_id: int,
+    template: MagazineTemplate,
+    locale: str = "ko",
 ) -> tuple[ScheduleMagazineResponse, list[dict]] | None:
-    draft = build_schedule_magazine(db, schedule_id=schedule_id, user_id=user_id)
+    draft = build_schedule_magazine(
+        db, schedule_id=schedule_id, user_id=user_id, locale=locale
+    )
     if draft is None:
         return None
     snapshot = draft.model_dump(mode="json")
@@ -355,10 +382,13 @@ def generate_schedule_magazine(
     schedule_id: int,
     user_id: int,
     template: MagazineTemplate,
+    locale: str = "ko",
     force: bool = False,
     schedule_mission_ids: list[int] | None = None,
 ) -> ScheduleMagazine | None:
-    draft = build_schedule_magazine(db, schedule_id=schedule_id, user_id=user_id)
+    draft = build_schedule_magazine(
+        db, schedule_id=schedule_id, user_id=user_id, locale=locale
+    )
     if draft is None:
         return None
 
@@ -379,12 +409,14 @@ def generate_schedule_magazine(
         select(ScheduleMagazine).where(
             ScheduleMagazine.schedule_id == schedule_id,
             ScheduleMagazine.template_key == template.key,
+            ScheduleMagazine.locale == locale,
         )
     )
     if record is None:
         record = ScheduleMagazine(
             schedule_id=schedule_id,
             template_key=template.key,
+            locale=locale,
             template_version=template.version,
             status="GENERATING",
             image_urls=[],

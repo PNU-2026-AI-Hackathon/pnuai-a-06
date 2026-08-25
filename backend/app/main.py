@@ -6,10 +6,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from app.auth.router import router as auth_router
 from app.core.config import get_settings
+from app.db.session import engine
 from app.routers.missions import router as missions_router
 from app.routers.schedules import (
     invitations_router,
@@ -91,7 +94,7 @@ app = FastAPI(
         },
         {
             "name": "email auth",
-            "description": "Email registration, verification, and login.",
+            "description": "Email registration, verification, login, and password reset.",
         },
         {
             "name": "kakao auth",
@@ -140,6 +143,31 @@ app = FastAPI(
         },
     ],
 )
+
+
+@app.exception_handler(SQLAlchemyTimeoutError)
+async def database_pool_timeout_handler(
+    request: Request,
+    _error: SQLAlchemyTimeoutError,
+) -> JSONResponse:
+    """Return a bounded overload response without exposing database details."""
+    logger.error(
+        "database pool exhausted method=%s path=%s pool_status=%s",
+        request.method,
+        request.url.path,
+        engine.pool.status(),
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {
+                "code": "DATABASE_BUSY",
+                "message": "The server is temporarily busy. Please retry shortly.",
+            }
+        },
+        headers={"Retry-After": "1"},
+    )
+
 
 if settings.cors_origin_list:
     app.add_middleware(

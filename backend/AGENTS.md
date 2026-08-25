@@ -6,7 +6,7 @@
 - Python environment is conda env `pnuai`.
 - Install dependencies with `pip install -r requirements.txt` inside that env.
 - Run migrations with `alembic upgrade head`.
-- Current Alembic head is `20260813_0036`; it includes mission judgement/session state, schedule magazine persistence with a global generation-number sequence, GPS checks for mission participation, and global developer test locations.
+- Current Alembic head is `20260824_0044`; it includes mission judgement/session state, schedule magazine persistence with a global generation-number sequence, GPS checks for mission participation, global developer test locations, localized mission content with locale-specific magazines, a separate demo mission category with 10 seeded demo missions, compact English mission copy, email-verified password reset state, localized detailed mission addresses with seeded English values, and persisted per-day mission visit ordering.
 - Run API externally on port 7020 with `uvicorn app.main:app --host 0.0.0.0 --port 7020 --reload`.
 - Current long-running dev server convention is tmux session `backend-7020`:
   `tmux attach -t backend-7020`
@@ -14,7 +14,7 @@
 - API docs should be checked at `http://<server-host>:7020/docs`.
 - The local mission administration UI runs separately on port 8197:
   `uvicorn mission_admin.server:app --host 0.0.0.0 --port 8197 --reload`
-- Mission creation is at `http://<server-host>:8197/`; GPS location management is at `http://<server-host>:8197/locations`; global developer test locations are at `http://<server-host>:8197/developer-locations`. All pages use the same administrator session.
+- Mission creation and existing-mission editing are at `http://<server-host>:8197/`; GPS location management is at `http://<server-host>:8197/locations`; English content management is at `http://<server-host>:8197/translations`; global developer test locations are at `http://<server-host>:8197/developer-locations`. All pages use the same administrator session.
 - Default database URL is `postgresql+psycopg://postgres:postgres@localhost:5432/jjigeukka`.
 - If `alembic upgrade head` fails with `connection refused`, PostgreSQL is not listening on `localhost:5432`.
 - Local dev DB uses installed PostgreSQL binaries and workspace `.pgdata`:
@@ -32,11 +32,12 @@
 - Schedule creators and invited participants are stored separately.
 - Kakao share invitations use backend-generated invite tokens and frontend app/deep links.
 - Email-targeted invitations can be listed and accepted inside the app through `GET /invitations/me`.
-- Busan is split into three basket themes: `MOUNTAIN`, `SEA`, `CITY`.
+- Regular Busan content is split into three basket themes: `MOUNTAIN`, `SEA`, `CITY`.
+- Presentation-only missions use the separate `DEMO` category and mission set. Store new demo missions there rather than mixing them into the three regular baskets. Demo codes are generated as `DEMO_B01`, `DEMO_R01`, or `DEMO_S01` according to mission type.
 - Important domain rule: `MOUNTAIN`, `SEA`, and `CITY` are basket/theme categories, not Busan districts. Never add `district_code` or `district_label` to `mission_sets`/basket theme responses.
 - District data belongs to individual `missions` only.
 - Sprint 2 mission data is DB-seeded as 12 missions: each theme has 2 basic, 1 rare, and 1 side mission.
-- Mission responses include `district_code`, `district_label`, and `place_label`; basket/theme responses must not include district tags.
+- Mission responses include `district_code`, `district_label`, `place_label`, and nullable detailed `address`; basket/theme responses must not include district tags.
 - Current district codes include `BUK`, `BUSANJIN`, `DONGNAE`, `GANGSEO`, `GEUMJEONG`, `GIJANG`, `HAEUNDAE`, `JUNG`, `NAM`, `SAHA`, `SEO`, `YEONJE`.
 - The primary mission browsing API is `GET /missions`, filterable by `district_code`, `theme`, and `type`.
 - `GET /districts` supports the first district-based browsing screen.
@@ -50,6 +51,17 @@
 - Mission execution now uses schedule-scoped mission sessions with participant decisions, photo submission, asynchronous visual judgement, comments, likes, voting, and WebSocket updates.
 - Missions may have multiple allowed GPS points in `mission_locations`; each point has its own label and allowed radius.
 - Completed schedule missions with passed submission photos can be rendered into a server-generated magazine image.
+
+## Localization
+
+- Keep the existing endpoint paths. Localized content APIs accept `?lang=ko|en`; when the query is omitted, `Accept-Language` is used. Korean is the default and fallback language.
+- `lang` takes precedence over `Accept-Language`. An unsupported explicit `lang` returns `400` with `UNSUPPORTED_LOCALE`; unsupported header languages fall back to Korean.
+- Localized HTTP responses set `Content-Language` and `Vary: Accept-Language`.
+- Mission-set, mission, district, mission-location, schedule mission, mission-session, candidate, draft, and generated magazine responses localize backend-owned content. User-created schedule titles, nicknames, and comments are never machine-translated and remain exactly as entered.
+- WebSockets use `?lang=en` because they cannot use the HTTP locale dependency. Each connection receives session snapshots and events in its own locale.
+- Translations are stored in `mission_set_translations`, `mission_translations`, and `mission_location_translations`. Missing rows or null translated fields fall back independently to the Korean source field.
+- Current English seed data covers the 3 regular mission sets, the DEMO mission set, all 33 current missions' user-facing core fields and detailed addresses, all 10 demo missions' structured judgement rules, and all currently registered mission GPS labels. Other missing `judgement_rules` translations can be added through the admin page; until then the Korean structured criteria remain the field-level fallback.
+- Manage English values at `http://<server-host>:8197/translations`. New missions can also receive an initial English title, description, place, and detailed address from the mission creation page.
 
 ## Current Mission Data
 
@@ -120,6 +132,7 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   �
   - `POST /mission-sessions/{session_id}/photo`: upload one participant photo as multipart form data.
   - `POST /mission-sessions/{session_id}/reveal`
   - `POST /mission-sessions/{session_id}/complete`
+  - `POST /mission-sessions/{session_id}/cancel`: creator-only cancellation; persists `CANCELLED` and broadcasts `session_cancelled` to both session and schedule WebSockets.
   - `POST /mission-sessions/{session_id}/submissions/{submission_id}/comments`
   - `POST /mission-sessions/{session_id}/submissions/{submission_id}/like`
 - Real-time endpoints accept the access token as the `token` query parameter:
@@ -152,6 +165,7 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   �
 ```
 
 - `GET /schedules/{schedule_id}/magazine?template_key=handwriting-2025-v1`: return the latest generated record and its `image_urls`.
+- All magazine endpoints honor `?lang=en`/`Accept-Language`; generated records include `locale`, and Korean and English records coexist for the same schedule/template.
 - `handwriting-2025-v1` has six mission slots. When renderable candidates exceed six, the frontend must first call the candidates endpoint and send at most six ordered `schedule_mission_ids`.
 - Omitting ids when selection is required returns `409` with `MAGAZINE_MISSION_SELECTION_REQUIRED`, `max_selectable`, and candidate ids. Invalid or excessive selections return `422`.
 - Fewer than six selected/renderable missions leave the unused frame slots blank; the output canvas is not cropped.
@@ -161,7 +175,7 @@ CITY_S01  CITY      SIDE   물떡 빼빼로 게임                  DONGNAE   �
 - A rendered photo includes all comments when there are at most three. More than three are sampled deterministically using the generation number and submission id. Comment authors are not rendered.
 - The frame's comment icon is shown only when the selected photo has at least one comment; it is removed with the empty comment area otherwise.
 - Identical source data and template version reuse the current `READY` record unless `force` is true. A real regeneration receives a new global generation number.
-- The current renderer accepts only local `/static/...` source photos and writes WebP files to `app/static/magazines/<schedule-id>/<template-key>/page-<n>.webp`.
+- The current renderer accepts only local `/static/...` source photos and writes WebP files to `app/static/magazines/<schedule-id>/<template-key>/<locale>/page-<n>.webp`.
 - Generated WebP files are runtime artifacts and are ignored by git. `image_urls` is the storage-facing API contract so local storage can later be replaced by S3.
 - Generation requires at least one completed mission with a passed local photo; otherwise it returns `409`.
 
@@ -190,6 +204,8 @@ app/static/frame/<template-key>/
 - `GET /schedules/{schedule_id}`: get schedule detail.
 - `PATCH /schedules/{schedule_id}`: update schedule fields.
 - `DELETE /schedules/{schedule_id}`: delete a schedule if allowed.
+- `POST /schedules/{schedule_id}/days/{planned_date}/recommend-order`: creator-only OpenAI recommendation that reorders and persists only the missions assigned to that date. The date path value uses `YYYY-MM-DD` and the response returns those missions in the saved `visit_order`.
+- Schedule mission responses include one-based `visit_order`. Schedule/detail mission arrays are sorted by `planned_date`, then `visit_order`.
 - Schedule routes are grouped in docs as `schedules`, `schedule missions`, and `schedule invitations`.
 
 ## Invitation API
@@ -210,6 +226,7 @@ app/static/frame/<template-key>/
 - In Swagger, put email in `username`, password in `password`, and leave `client_id`/`client_secret` empty.
 - App/frontend JSON login remains `POST /auth/email/login`.
 - There may be no users initially. Register with `POST /auth/email/register`, use `dev_verification_code`, then verify with `POST /auth/email/verify`.
+- Password reset uses `POST /auth/email/password-reset/request` followed by `POST /auth/email/password-reset/confirm`. Only verified email accounts can request a code; unknown accounts receive `EMAIL_NOT_REGISTERED` and must register first.
 - Kakao auth redirect/token support is restored:
   - `GET /auth/kakao/login`
   - `GET /auth/kakao/callback`
@@ -224,11 +241,14 @@ app/static/frame/<template-key>/
 - `DATABASE_POOL_TIMEOUT_SECONDS`: maximum wait for a pooled connection; defaults to 10 seconds.
 - `JWT_SECRET_KEY`: JWT signing secret.
 - `KAKAO_REST_API_KEY`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`: Kakao login support.
+- `KAKAO_ADMIN_KEY`: server-only Kakao Admin key used to unlink Kakao accounts before `DELETE /auth/me` removes the local account. Never expose it to the frontend.
 - `FRONTEND_REDIRECT_URI`: auth callback redirect target.
 - `CORS_ORIGINS`: comma-separated allowed frontend origins.
-- `OPENAI_API_KEY`: API key used by asynchronous mission photo judgement.
+- `OPENAI_API_KEY`: API key used by asynchronous mission photo judgement and date-specific mission-order recommendation.
 - `OPENAI_VISION_MODEL`: Responses API vision model; defaults to `gpt-5.4-mini`.
 - `OPENAI_VISION_TIMEOUT_SECONDS`: mission judgement request timeout; defaults to 60 seconds.
+- `OPENAI_ROUTE_MODEL`: Responses API model for mission-order recommendation; defaults to `gpt-5.4-mini`.
+- `OPENAI_ROUTE_TIMEOUT_SECONDS`: mission-order recommendation timeout; defaults to 30 seconds.
 - `MISSION_JUDGEMENT_PASS_SCORE`: minimum score for an automatic pass; defaults to 70.
 - `MISSION_JUDGEMENT_REVIEW_SCORE`: reserved review threshold configuration; defaults to 50.
 - `MISSION_LOCATION_MAX_ACCURACY_M`: worst accepted device-reported GPS accuracy; defaults to 100 meters.

@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta, timezone
+import logging
 import math
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.config import get_settings
-from app.models.missions import Mission, MissionDeveloperLocation
+from app.models.missions import Mission, MissionDeveloperLocation, MissionLocation
 from app.models.schedules import (
     MissionSession,
     MissionSessionMember,
@@ -36,6 +37,7 @@ RETAKE_DURATION = timedelta(seconds=60)
 VOTING_DURATION = timedelta(minutes=10)
 TERMINAL_MEMBER_STATUSES = ("SKIPPED", "LOCKED_OUT", "TIMED_OUT", "COMPLETED")
 EARTH_RADIUS_M = 6_371_008.8
+logger = logging.getLogger("app.mission_sessions")
 
 
 class ActiveMissionSessionConflict(Exception):
@@ -99,23 +101,77 @@ class NoParticipants(Exception):
     pass
 
 
-def _load_session(db: Session, session_id: int) -> MissionSession | None:
-    session = db.scalar(
-        select(MissionSession)
-        .where(MissionSession.id == session_id)
-        .options(
-            selectinload(MissionSession.schedule_mission).selectinload(ScheduleMission.mission),
-            selectinload(MissionSession.schedule_mission)
-            .selectinload(ScheduleMission.mission)
-            .selectinload(Mission.locations),
-            selectinload(MissionSession.members).selectinload(MissionSessionMember.user),
-            selectinload(MissionSession.submissions).selectinload(MissionSubmission.user),
-            selectinload(MissionSession.submissions).selectinload(MissionSubmission.likes),
-            selectinload(MissionSession.submissions)
-            .selectinload(MissionSubmission.comments)
-            .selectinload(MissionSubmissionComment.user),
-        )
+class MissionSessionNotCancellable(Exception):
+    pass
+
+
+def _session_load_options():
+    """Load a complete session response in three bounded SQL queries.
+
+    The mission graph is small and belongs to the root row, while members and
+    submissions are the two potentially growing collections. Keeping those as
+    select-in loads avoids a members x submissions cartesian product, and
+    joining their nested relationships prevents one query per response field.
+    """
+    return (
+        joinedload(MissionSession.schedule_mission)
+        .joinedload(ScheduleMission.mission)
+        .joinedload(Mission.translations),
+        joinedload(MissionSession.schedule_mission)
+        .joinedload(ScheduleMission.mission)
+        .joinedload(Mission.locations)
+        .joinedload(MissionLocation.translations),
+        selectinload(MissionSession.members).joinedload(MissionSessionMember.user),
+        selectinload(MissionSession.submissions).joinedload(MissionSubmission.user),
+        selectinload(MissionSession.submissions).joinedload(MissionSubmission.likes),
+        selectinload(MissionSession.submissions)
+        .joinedload(MissionSubmission.comments)
+        .joinedload(MissionSubmissionComment.user),
     )
+
+
+def _accepted_schedule_member_exists(user_id: int):
+    return (
+        select(ScheduleMember.id)
+        .where(
+            ScheduleMember.schedule_id == MissionSchedule.id,
+            ScheduleMember.user_id == user_id,
+            ScheduleMember.status == "ACCEPTED",
+        )
+        .exists()
+    )
+
+
+def _load_session_from_statement(db: Session, statement) -> MissionSession | None:
+    result = db.execute(statement.options(*_session_load_options())).unique()
+    return result.scalar_one_or_none()
+
+
+def _load_session(
+    db: Session,
+    session_id: int,
+    *,
+    accessible_by_user_id: int | None = None,
+    for_update: bool = False,
+) -> MissionSession | None:
+    statement = select(MissionSession).where(MissionSession.id == session_id)
+    if accessible_by_user_id is not None:
+        statement = (
+            statement.join(MissionSession.schedule_mission)
+            .join(ScheduleMission.schedule)
+            .where(
+                or_(
+                    MissionSchedule.creator_id == accessible_by_user_id,
+                    _accepted_schedule_member_exists(accessible_by_user_id),
+                )
+            )
+        )
+    if for_update:
+        # Serialize terminal state changes with participation/start/upload
+        # transitions. Restricting the lock target avoids locking rows brought
+        # in by the eager-load joins.
+        statement = statement.with_for_update(of=MissionSession)
+    session = _load_session_from_statement(db, statement)
     if session is not None:
         # Keep the response stable for clients that render the creator/companion
         # uploads side by side, and make sure the complete session collection is
@@ -154,12 +210,18 @@ def _can_participate(schedule: MissionSchedule, user_id: int) -> bool:
 
 
 def can_access_schedule(db: Session, schedule_id: int, user_id: int) -> bool:
-    schedule = db.scalar(
-        select(MissionSchedule)
-        .where(MissionSchedule.id == schedule_id)
-        .options(selectinload(MissionSchedule.members))
+    accessible_schedule_id = db.scalar(
+        select(MissionSchedule.id)
+        .where(
+            MissionSchedule.id == schedule_id,
+            or_(
+                MissionSchedule.creator_id == user_id,
+                _accepted_schedule_member_exists(user_id),
+            ),
+        )
+        .limit(1)
     )
-    return bool(schedule and _can_participate(schedule, user_id))
+    return accessible_schedule_id is not None
 
 
 def _member(session: MissionSession, user_id: int) -> MissionSessionMember | None:
@@ -840,50 +902,69 @@ def create_session(db: Session, schedule_id: int, schedule_mission_id: int, user
 def get_latest_session_for_schedule_mission(
     db: Session, schedule_id: int, schedule_mission_id: int, user_id: int
 ):
-    schedule_mission = _accessible_schedule_mission(db, schedule_id, user_id, schedule_mission_id)
-    if schedule_mission is None:
-        return None
-    session = db.scalar(
+    session = _load_session_from_statement(
+        db,
         select(MissionSession)
-        .where(MissionSession.schedule_mission_id == schedule_mission.id)
+        .join(MissionSession.schedule_mission)
+        .join(ScheduleMission.schedule)
+        .where(
+            ScheduleMission.id == schedule_mission_id,
+            ScheduleMission.schedule_id == schedule_id,
+            or_(
+                MissionSchedule.creator_id == user_id,
+                _accepted_schedule_member_exists(user_id),
+            ),
+        )
         .order_by(
             MissionSession.status.in_(OPEN_SESSION_STATUSES).desc(),
             MissionSession.created_at.desc(),
             MissionSession.id.desc(),
         )
+        .limit(1),
     )
-    return _refresh_session_progress(db, session.id) if session is not None else None
+    if session is None:
+        return None
+    changed = _refresh_loaded_session_progress(db, session)
+    return _load_session(db, session.id) if changed else session
 
 
 def get_active_session_for_schedule(db: Session, schedule_id: int, user_id: int):
-    schedule = db.scalar(
-        select(MissionSchedule)
-        .where(MissionSchedule.id == schedule_id)
-        .options(selectinload(MissionSchedule.members))
+    session = _load_session_from_statement(
+        db,
+        select(MissionSession)
+        .join(MissionSession.schedule_mission)
+        .join(ScheduleMission.schedule)
+        .where(
+            ScheduleMission.schedule_id == schedule_id,
+            MissionSession.status.in_(ACTIVE_MISSION_STATUSES),
+            or_(
+                MissionSchedule.creator_id == user_id,
+                _accepted_schedule_member_exists(user_id),
+            ),
+        )
+        .order_by(MissionSession.started_at.desc(), MissionSession.id.desc())
+        .limit(1),
     )
-    if schedule is None or not _can_participate(schedule, user_id):
-        return None
-    session = _active_session_for_schedule(db, schedule_id)
     if session is None:
         return None
-    refreshed = _refresh_session_progress(db, session.id)
-    if refreshed is None or refreshed.status not in ACTIVE_MISSION_STATUSES:
+    changed = _refresh_loaded_session_progress(db, session)
+    refreshed = _load_session(db, session.id) if changed else session
+    if refreshed.status not in ACTIVE_MISSION_STATUSES:
         return None
     return refreshed
 
 
 def get_session_for_user(db: Session, session_id: int, user_id: int):
-    session = _load_session(db, session_id)
+    session = _load_session(
+        db,
+        session_id,
+        accessible_by_user_id=user_id,
+    )
     if session is None:
         return None
     _finalize_voting_if_expired(db, session)
     _record_expiration(db, session)
-    schedule = session.schedule_mission.schedule
-    if schedule is None:
-        schedule = db.scalar(
-            select(MissionSchedule).where(MissionSchedule.id == session.schedule_mission.schedule_id)
-        )
-    return session if schedule and _can_participate(schedule, user_id) else None
+    return session
 
 
 def join_session(db: Session, session_id: int, user_id: int):
@@ -906,7 +987,7 @@ def set_participation(
     accuracy_m: float | None = None,
     measured_at: datetime | None = None,
 ):
-    session = _load_session(db, session_id)
+    session = _load_session(db, session_id, for_update=True)
     if session is None:
         return None
     _ensure_session_not_expired(db, session)
@@ -963,7 +1044,7 @@ def mark_ready(db: Session, session_id: int, user_id: int):
 
 
 def start_session(db: Session, session_id: int, user_id: int):
-    session = _load_session(db, session_id)
+    session = _load_session(db, session_id, for_update=True)
     if session is None or session.created_by_user_id != user_id:
         return None
     _ensure_session_not_expired(db, session)
@@ -1037,7 +1118,7 @@ def ensure_can_add_submission(db: Session, session_id: int, user_id: int) -> boo
 
 
 def add_submission(db: Session, session_id: int, user_id: int, storage_key: str, photo_url: str, captured_at):
-    session = _load_session(db, session_id)
+    session = _load_session(db, session_id, for_update=True)
     if session is None:
         return None
     _ensure_session_not_expired(db, session)
@@ -1087,7 +1168,7 @@ def reveal_session(db: Session, session_id: int, user_id: int):
 
 
 def complete_session(db: Session, session_id: int, user_id: int):
-    session = _load_session(db, session_id)
+    session = _load_session(db, session_id, for_update=True)
     if session is None or session.created_by_user_id != user_id:
         return None
     _ensure_session_not_expired(db, session, allow_voting=True)
@@ -1111,6 +1192,38 @@ def complete_session(db: Session, session_id: int, user_id: int):
     session.schedule_mission.winner_user_id = session.winner_user_id
     db.commit()
     return _load_session(db, session_id)
+
+
+def cancel_session(db: Session, session_id: int, user_id: int):
+    """Cancel one shared mission attempt for every schedule participant."""
+    session = _load_session(db, session_id, for_update=True)
+    if session is None or session.created_by_user_id != user_id:
+        return None
+    if session.status == "CANCELLED":
+        return session
+    if session.status not in ACTIVE_MISSION_STATUSES:
+        raise MissionSessionNotCancellable(
+            "Only an active mission session can be cancelled."
+        )
+
+    now = datetime.now(timezone.utc)
+    session.status = "CANCELLED"
+    session.completed_at = now
+    session.shooting_deadline_at = None
+    session.voting_expires_at = None
+    for member in session.members:
+        member.upload_deadline_at = None
+    db.commit()
+    cancelled = _load_session(db, session_id)
+    logger.info(
+        "mission session cancelled session_id=%s schedule_id=%s "
+        "schedule_mission_id=%s creator_id=%s",
+        session_id,
+        session.schedule_mission.schedule_id,
+        session.schedule_mission_id,
+        user_id,
+    )
+    return cancelled
 
 
 def add_submission_comment(

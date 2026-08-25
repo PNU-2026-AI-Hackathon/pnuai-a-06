@@ -15,6 +15,7 @@ from app.services.mission_sessions import (
     ActiveMissionSessionConflict,
     MissionLocationValidationError,
     MissionSessionExpired,
+    MissionSessionNotCancellable,
     NoParticipants,
     ParticipationLocked,
     ParticipationNotAllowed,
@@ -22,7 +23,7 @@ from app.services.mission_sessions import (
     SubmissionAlreadyExists,
     VotingNotReady,
     VotingSessionExpired,
-    add_submission, complete_session, create_session, get_session_for_user,
+    add_submission, cancel_session, complete_session, create_session, get_session_for_user,
     get_active_session_for_schedule, get_latest_session_for_schedule_mission,
     can_access_schedule, ensure_can_add_submission, join_session, mark_ready,
     reveal_session, start_session, add_submission_comment, like_submission,
@@ -39,6 +40,8 @@ from app.services.mission_session_timeouts import (
 )
 from app.services.mission_judgement import judge_submission
 from app.services.schedule_mission_ws import manager as schedule_mission_ws
+from app.core.localization import normalize_locale, resolve_locale
+from app.services.localization import localized_session
 
 router = APIRouter(tags=["mission sessions"])
 storage = LocalStorageService()
@@ -52,7 +55,10 @@ async def _broadcast_session(session, event_type: str = "session_updated") -> No
 
 
 @router.websocket("/schedules/{schedule_id}/mission-sessions/ws")
-async def schedule_mission_socket(schedule_id: int, websocket: WebSocket, token: str):
+async def schedule_mission_socket(
+    schedule_id: int, websocket: WebSocket, token: str, lang: str | None = None
+):
+    locale = normalize_locale(lang)
     user_id = decode_access_token(token)
     db = SessionLocal()
     try:
@@ -66,9 +72,11 @@ async def schedule_mission_socket(schedule_id: int, websocket: WebSocket, token:
         # connection for the lifetime of the socket after its snapshot is built.
         db.close()
 
-    await schedule_mission_ws.connect(schedule_id, websocket)
+    await schedule_mission_ws.connect(schedule_id, websocket, locale)
     try:
-        await schedule_mission_ws.send_snapshot(websocket, schedule_id, active_session)
+        await schedule_mission_ws.send_snapshot(
+            websocket, schedule_id, active_session, locale
+        )
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
@@ -78,7 +86,10 @@ async def schedule_mission_socket(schedule_id: int, websocket: WebSocket, token:
 
 
 @router.websocket("/mission-sessions/{session_id}/ws")
-async def mission_session_socket(session_id: int, websocket: WebSocket, token: str):
+async def mission_session_socket(
+    session_id: int, websocket: WebSocket, token: str, lang: str | None = None
+):
+    locale = normalize_locale(lang)
     user_id = decode_access_token(token)
     db = SessionLocal()
     try:
@@ -96,9 +107,11 @@ async def mission_session_socket(session_id: int, websocket: WebSocket, token: s
     finally:
         db.close()
 
-    await mission_session_ws.connect(session_id, websocket)
+    await mission_session_ws.connect(session_id, websocket, locale)
     try:
-        await mission_session_ws.send_session(websocket, accessible_session)
+        await mission_session_ws.send_session(
+            websocket, accessible_session, locale=locale
+        )
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
@@ -146,11 +159,17 @@ def _location_validation_error(error: MissionLocationValidationError):
 
 
 @router.get("/schedules/{schedule_id}/missions/{schedule_mission_id}/session", response_model=MissionSessionResponse)
-def read_latest_mission_session(schedule_id: int, schedule_mission_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def read_latest_mission_session(
+    schedule_id: int,
+    schedule_mission_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     result = get_latest_session_for_schedule_mission(db, schedule_id, schedule_mission_id, current_user.id)
     if result is None:
         raise HTTPException(status_code=404, detail="Mission session not found.")
-    return result
+    return localized_session(result, locale)
 
 
 @router.get(
@@ -161,35 +180,52 @@ def read_latest_mission_session(schedule_id: int, schedule_mission_id: int, curr
 )
 def read_active_schedule_mission_session(
     schedule_id: int,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     result = get_active_session_for_schedule(db, schedule_id, current_user.id)
     if result is None:
         raise HTTPException(status_code=404, detail="No active mission session found.")
-    return result
+    return localized_session(result, locale)
 
 
 @router.post("/schedules/{schedule_id}/missions/{schedule_mission_id}/sessions", response_model=MissionSessionResponse)
-async def create_mission_session(schedule_id: int, schedule_mission_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def create_mission_session(
+    schedule_id: int,
+    schedule_mission_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
         result = create_session(db, schedule_id, schedule_mission_id, current_user.id)
     except ActiveMissionSessionConflict as error:
         _active_session_conflict(error)
     if result is None: _not_found()
     await _broadcast_session(result, "mission_session_created")
-    return result
+    return localized_session(result, locale)
 
 
 @router.get("/mission-sessions/{session_id}", response_model=MissionSessionResponse)
-def read_mission_session(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def read_mission_session(
+    session_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     result = get_session_for_user(db, session_id, current_user.id)
     if result is None: _not_found()
-    return result
+    return localized_session(result, locale)
 
 
 @router.post("/mission-sessions/{session_id}/join", response_model=MissionSessionResponse)
-async def join_mission_session(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def join_mission_session(
+    session_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
         result = join_session(db, session_id, current_user.id)
     except ActiveMissionSessionConflict as error:
@@ -204,7 +240,7 @@ async def join_mission_session(session_id: int, current_user: User = Depends(get
         _location_validation_error(error)
     if result is None: _not_found()
     await _broadcast_session(result, "participation_updated")
-    return result
+    return localized_session(result, locale)
 
 
 @router.post(
@@ -214,6 +250,7 @@ async def join_mission_session(session_id: int, current_user: User = Depends(get
 async def choose_mission_participation(
     session_id: int,
     payload: MissionParticipationRequest,
+    locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -241,11 +278,16 @@ async def choose_mission_participation(
     if result is None:
         _not_found()
     await _broadcast_session(result, "participation_updated")
-    return result
+    return localized_session(result, locale)
 
 
 @router.post("/mission-sessions/{session_id}/ready", response_model=MissionSessionResponse)
-async def ready_mission_session(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def ready_mission_session(
+    session_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
         result = mark_ready(db, session_id, current_user.id)
     except ActiveMissionSessionConflict as error:
@@ -260,11 +302,16 @@ async def ready_mission_session(session_id: int, current_user: User = Depends(ge
         _location_validation_error(error)
     if result is None: _not_found()
     await _broadcast_session(result, "participation_updated")
-    return result
+    return localized_session(result, locale)
 
 
 @router.post("/mission-sessions/{session_id}/start", response_model=MissionSessionResponse)
-async def start_mission_session(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def start_mission_session(
+    session_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
         result = start_session(db, session_id, current_user.id)
     except ActiveMissionSessionConflict as error:
@@ -281,7 +328,7 @@ async def start_mission_session(session_id: int, current_user: User = Depends(ge
     if result.shooting_deadline_at is not None:
         schedule_participant_timeout(result.id, result.shooting_deadline_at)
     await _broadcast_session(result, "session_started")
-    return result
+    return localized_session(result, locale)
 
 
 @router.post("/mission-sessions/{session_id}/photo", response_model=MissionSubmissionResponse)
@@ -339,7 +386,12 @@ async def upload_mission_photo(session_id: int, background_tasks: BackgroundTask
 
 
 @router.post("/mission-sessions/{session_id}/reveal", response_model=MissionSessionResponse)
-async def reveal_mission_session(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def reveal_mission_session(
+    session_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
         result = reveal_session(db, session_id, current_user.id)
     except MissionSessionExpired:
@@ -350,11 +402,16 @@ async def reveal_mission_session(session_id: int, current_user: User = Depends(g
         raise HTTPException(status_code=409, detail=str(error))
     if result is None: _not_found()
     await _broadcast_session(result)
-    return result
+    return localized_session(result, locale)
 
 
 @router.post("/mission-sessions/{session_id}/complete", response_model=MissionSessionResponse)
-async def finish_mission_session(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def finish_mission_session(
+    session_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
         result = complete_session(db, session_id, current_user.id)
     except MissionSessionExpired:
@@ -363,7 +420,34 @@ async def finish_mission_session(session_id: int, current_user: User = Depends(g
         _voting_expired()
     if result is None: _not_found()
     await _broadcast_session(result, "session_completed")
-    return result
+    return localized_session(result, locale)
+
+
+@router.post(
+    "/mission-sessions/{session_id}/cancel",
+    response_model=MissionSessionResponse,
+    summary="Cancel an active mission session for all participants",
+)
+async def cancel_mission_session(
+    session_id: int,
+    locale: str = Depends(resolve_locale),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        result = cancel_session(db, session_id, current_user.id)
+    except MissionSessionNotCancellable as error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "MISSION_SESSION_NOT_CANCELLABLE",
+                "message": str(error),
+            },
+        ) from error
+    if result is None:
+        _not_found()
+    await _broadcast_session(result, "session_cancelled")
+    return localized_session(result, locale)
 
 
 @router.post(

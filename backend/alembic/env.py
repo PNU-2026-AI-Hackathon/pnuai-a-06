@@ -9,7 +9,10 @@ from app.models.missions import (  # noqa: F401
     Mission,
     MissionDeveloperLocation,
     MissionLocation,
+    MissionLocationTranslation,
     MissionSet,
+    MissionSetTranslation,
+    MissionTranslation,
 )
 from app.models.schedules import (  # noqa: F401
     MissionSchedule, ScheduleInviteLink, ScheduleMember, ScheduleMission,
