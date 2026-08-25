@@ -12,8 +12,7 @@ class ScheduleMagazine(Base):
         UniqueConstraint(
             "schedule_id",
             "template_key",
-            "locale",
-            name="uq_schedule_magazines_schedule_template_locale",
+            name="uq_schedule_magazines_schedule_template",
         ),
     )
 

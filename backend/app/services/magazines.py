@@ -329,13 +329,15 @@ def get_generated_magazine(
     template_key: str,
     locale: str = "ko",
 ) -> ScheduleMagazine | None:
+    # A generated magazine is shared across app languages. ``locale`` remains
+    # in the call signature for compatibility, but it is not part of the
+    # lookup identity; the returned record reports its generation language.
     if _load_accessible_schedule(db, schedule_id, user_id) is None:
         return None
     return db.scalar(
         select(ScheduleMagazine).where(
             ScheduleMagazine.schedule_id == schedule_id,
             ScheduleMagazine.template_key == template_key,
-            ScheduleMagazine.locale == locale,
         )
     )
 
@@ -409,7 +411,6 @@ def generate_schedule_magazine(
         select(ScheduleMagazine).where(
             ScheduleMagazine.schedule_id == schedule_id,
             ScheduleMagazine.template_key == template.key,
-            ScheduleMagazine.locale == locale,
         )
     )
     if record is None:
@@ -432,6 +433,7 @@ def generate_schedule_magazine(
         return record
 
     record.status = "GENERATING"
+    record.locale = locale
     record.template_version = template.version
     record.source_fingerprint = fingerprint
     record.source_snapshot = snapshot

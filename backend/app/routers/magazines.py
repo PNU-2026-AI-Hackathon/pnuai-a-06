@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
@@ -160,6 +160,7 @@ def create_schedule_magazine(
 )
 def read_generated_schedule_magazine(
     schedule_id: int,
+    response: Response,
     template_key: str = Query(default="handwriting-2025-v1"),
     locale: str = Depends(resolve_locale),
     current_user: User = Depends(get_current_user),
@@ -174,4 +175,5 @@ def read_generated_schedule_magazine(
     )
     if magazine is None:
         raise HTTPException(status_code=404, detail="Generated magazine not found.")
+    response.headers["Content-Language"] = magazine.locale
     return GeneratedMagazineResponse.model_validate(magazine)

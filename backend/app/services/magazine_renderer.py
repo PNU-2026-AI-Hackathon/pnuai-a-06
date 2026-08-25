@@ -346,8 +346,7 @@ def render_magazine(template: MagazineTemplate, source: dict, schedule_id: int) 
     pages = source.get("pages") or []
     if not pages:
         raise MagazineRenderError("At least one completed mission with a passed photo is required.")
-    locale = source.get("locale", "ko")
-    output_directory = OUTPUT_DIR / str(schedule_id) / template.key / locale
+    output_directory = OUTPUT_DIR / str(schedule_id) / template.key
     output_directory.mkdir(parents=True, exist_ok=True)
     urls: list[str] = []
     chunks = [pages[i : i + template.capacity] for i in range(0, len(pages), template.capacity)]
@@ -355,11 +354,11 @@ def render_magazine(template: MagazineTemplate, source: dict, schedule_id: int) 
         output_path = output_directory / f"page-{page_number}.webp"
         _render_one(template, source, chunk, output_path)
         urls.append(
-            f"/static/magazines/{schedule_id}/{template.key}/{locale}/{output_path.name}"
+            f"/static/magazines/{schedule_id}/{template.key}/{output_path.name}"
         )
     for stale in output_directory.glob("page-*.webp"):
         if (
-            f"/static/magazines/{schedule_id}/{template.key}/{locale}/{stale.name}"
+            f"/static/magazines/{schedule_id}/{template.key}/{stale.name}"
             not in urls
         ):
             stale.unlink()
