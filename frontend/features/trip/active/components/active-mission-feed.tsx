@@ -3,6 +3,7 @@ import { ActivityIndicator, ScrollView, View } from 'react-native';
 
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useTutorialTarget } from '@/components/tutorial-provider';
 import type { MissionSession } from '@/lib/mission-session-api';
 import type { TripScheduleMission } from '@/lib/trip-schedule-api';
 import { getFeedSubmissions, getMissionLocation, isFeedReadySession } from '../active-data';
@@ -48,6 +49,7 @@ export function ActiveMissionFeed({
   revealedSessions,
   tripDayLabel,
 }: ActiveMissionFeedProps) {
+  const feedTarget = useTutorialTarget('trip-feed', { offsetY: 27 });
   const completedMissionFeeds: MissionFeed[] = missions
     .map((mission) => {
       const session = missionSessions[mission.scheduleMissionId] ?? revealedSessions[mission.scheduleMissionId];
@@ -64,7 +66,7 @@ export function ActiveMissionFeed({
   const hasSavedMissions = missions.length > 0;
 
   return (
-    <View style={[styles.feedPanel, !hasSavedMissions && styles.emptyFeedPanel]}>
+    <View onLayout={feedTarget.onLayout} ref={feedTarget.ref} style={[styles.feedPanel, !hasSavedMissions && styles.emptyFeedPanel]}>
       <Text style={styles.dayLabel}>{tripDayLabel}</Text>
       {isLoading && !hasSchedule ? (
         <View style={styles.stateBox}>

@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { ActivityIndicator, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useTutorialTarget } from '@/components/tutorial-provider';
 import type { MissionItem } from '@/lib/mission-api';
 import type { TripSchedule, TripScheduleMission } from '@/lib/trip-schedule-api';
 
@@ -36,9 +37,11 @@ export function MissionList({
   getAddedMissionState,
   onAddMission,
 }: MissionListProps) {
+  const addMissionTarget = useTutorialTarget('mission-list', { offsetY: 27 });
+
   return (
     <View style={styles.missionList}>
-      {missions.map((mission) => {
+      {missions.map((mission, index) => {
         const { addedMission, isCompleted, isInProgress } = targetScheduleId
           ? getAddedMissionState(mission)
           : { addedMission: null, isCompleted: false, isInProgress: false };
@@ -54,18 +57,22 @@ export function MissionList({
                 <Text style={styles.missionTitle}>{mission.title}</Text>
                 <Text style={styles.locationText}>{mission.location}</Text>
               </View>
-              <ScalePressable
-                accessibilityRole="button"
-                accessibilityLabel={`${mission.title} ${missionButtonLabel}`}
-                disabled={isMissionBusy || isScheduleLoading || Boolean(addedMission)}
-                onPress={() => onAddMission(mission)}
-                pressedScale={0.94}
-                style={[
-                  addedMission ? styles.addedMissionButton : styles.addMissionButton,
-                  (isMissionBusy || isScheduleLoading || addedMission) && styles.disabledButton,
-                ]}>
-                {isMissionBusy ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.addMissionButtonText}>{missionButtonLabel}</Text>}
-              </ScalePressable>
+              <View
+                onLayout={index === 0 ? addMissionTarget.onLayout : undefined}
+                ref={index === 0 ? addMissionTarget.ref : undefined}>
+                <ScalePressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${mission.title} ${missionButtonLabel}`}
+                  disabled={isMissionBusy || isScheduleLoading || Boolean(addedMission)}
+                  onPress={() => onAddMission(mission)}
+                  pressedScale={0.94}
+                  style={[
+                    addedMission ? styles.addedMissionButton : styles.addMissionButton,
+                    (isMissionBusy || isScheduleLoading || addedMission) && styles.disabledButton,
+                  ]}>
+                  {isMissionBusy ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.addMissionButtonText}>{missionButtonLabel}</Text>}
+                </ScalePressable>
+              </View>
             </View>
             <Text style={styles.descriptionText}>{mission.description}</Text>
             {mission.photoUrl ? (

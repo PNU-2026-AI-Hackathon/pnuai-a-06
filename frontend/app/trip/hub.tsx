@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 
+import { useTutorial } from '@/components/tutorial-provider';
 import { TripHubContent } from '@/features/trip/hub/components/trip-hub-content';
 import { useTripHub } from '@/features/trip/hub/hooks/use-trip-hub';
 import { useLanguage } from '@/hooks/use-language';
@@ -12,7 +13,12 @@ import type { TripSchedule } from '@/lib/trip-schedule-api';
 export default function TripHubScreen() {
   const { bottomActionInset, horizontalPadding, topInset } = useResponsiveLayout();
   const { language } = useLanguage();
+  const { start: startTutorial } = useTutorial();
   const hub = useTripHub({ language });
+
+  useEffect(() => {
+    void startTutorial('trip-hub');
+  }, [startTutorial]);
   const openSchedule = useCallback((schedule: TripSchedule) => {
     if (isClosedSchedule(schedule)) {
       router.push({ pathname: '/trip/result', params: { scheduleId: schedule.scheduleId, returnTo: 'hub' } });

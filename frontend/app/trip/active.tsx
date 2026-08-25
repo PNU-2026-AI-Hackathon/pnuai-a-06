@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 
+import { useTutorial } from '@/components/tutorial-provider';
 import { TripInviteSheet } from '@/components/trip-invite-sheet';
 import { ActiveMissionFeed } from '@/features/trip/active/components/active-mission-feed';
 import { ActiveMissionListModal } from '@/features/trip/active/components/active-mission-list-modal';
@@ -36,8 +37,13 @@ export default function ActiveTripScreen() {
   const initialSessionId = getParamValue(params.sessionId);
   const suppressedParticipationSessionId = getParamValue(params.suppressedParticipationSessionId);
   const currentUserId = getAuthItem('user_id');
+  const { start: startTutorial } = useTutorial();
   const { bottomSafeInset, horizontalPadding, topSafeInset } = useResponsiveLayout();
   const isFocused = useIsFocused();
+
+  useEffect(() => {
+    void startTutorial('trip-active');
+  }, [startTutorial]);
   const [schedule, setSchedule] = useState<TripSchedule | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');

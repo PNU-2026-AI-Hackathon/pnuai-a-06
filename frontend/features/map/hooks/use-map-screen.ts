@@ -219,6 +219,7 @@ export function useMapScreen({ frameWidth, language }: UseMapScreenOptions) {
     isThemeDistrictLoading,
     mapSource: selectedMapSource,
     missionDeckCount,
+    moveMissionCard,
     nextMission: deckMissions[nextMissionIndex],
     openMissionDeck,
     previousMission: deckMissions[previousMissionIndex],

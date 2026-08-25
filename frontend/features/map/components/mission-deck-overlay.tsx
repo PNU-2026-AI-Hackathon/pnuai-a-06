@@ -5,6 +5,7 @@ import { Animated, PanResponder, View } from 'react-native';
 import { getMissionCardLevel, MissionCard } from '@/components/mission-card';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useTutorialTarget } from '@/components/tutorial-provider';
 import type { MissionItem } from '@/lib/mission-api';
 
 import { styles } from '../styles';
@@ -24,6 +25,7 @@ type MissionDeckOverlayProps = {
   nextMission: MissionItem | undefined;
   onClose: () => void;
   onOpenMissionDetail: () => void;
+  onTutorialSwipe: (direction: 1 | -1) => void;
   previousMission: MissionItem | undefined;
   shouldShowNextFrame: boolean;
   shouldShowPreviousFrame: boolean;
@@ -44,10 +46,14 @@ export function MissionDeckOverlay({
   nextMission,
   onClose,
   onOpenMissionDetail,
+  onTutorialSwipe,
   previousMission,
   shouldShowNextFrame,
   shouldShowPreviousFrame,
 }: MissionDeckOverlayProps) {
+  const cardTarget = useTutorialTarget('mission-card', { height: frameHeight, offsetY: 20, onSwipe: onTutorialSwipe, width: frameWidth });
+  const detailTarget = useTutorialTarget('mission-detail', { offsetY: 27, onPress: onOpenMissionDetail });
+
   return (
     <View style={styles.overlay}>
       <Text style={styles.overlayTitle}>넘겨서 다음 미션 보기</Text>
@@ -66,21 +72,26 @@ export function MissionDeckOverlay({
             contentFit="contain"
           />
         ) : null}
-        <Animated.View
-          {...cardPanHandlers}
-          style={[styles.frontMissionCard, { height: frameHeight, transform: [{ translateX: cardTranslateX }, { rotate: cardRotate }], width: frameWidth }]}>
-          <MissionCard
-            errorMessage={deckMissionError}
-            isLoading={isDeckMissionLoading}
-            mission={activeMission ? {
-              description: activeMission.description,
-              iconText: activeMission.rewardItemIcon,
-              iconUrl: activeMission.emojiUrl,
-              title: activeMission.title,
-              type: activeMission.type,
-            } : null}
-          />
-        </Animated.View>
+        <View
+          onLayout={cardTarget.onLayout}
+          ref={cardTarget.ref}
+          style={[styles.frontMissionCard, { height: frameHeight, width: frameWidth }]}>
+          <Animated.View
+            {...cardPanHandlers}
+            style={[styles.frontMissionCard, { height: frameHeight, transform: [{ translateX: cardTranslateX }, { rotate: cardRotate }], width: frameWidth }]}>
+            <MissionCard
+              errorMessage={deckMissionError}
+              isLoading={isDeckMissionLoading}
+              mission={activeMission ? {
+                description: activeMission.description,
+                iconText: activeMission.rewardItemIcon,
+                iconUrl: activeMission.emojiUrl,
+                title: activeMission.title,
+                type: activeMission.type,
+              } : null}
+            />
+          </Animated.View>
+        </View>
       </View>
 
       <View style={styles.pagination}>
@@ -90,9 +101,11 @@ export function MissionDeckOverlay({
       </View>
 
       <View style={[styles.overlayActions, { maxWidth: contentMaxWidth }]}>
-        <ScalePressable accessibilityRole="button" accessibilityLabel="미션 상세 보기" onPress={onOpenMissionDetail} style={styles.overlayButton}>
-          <Text style={styles.overlayButtonText}>미션 상세 보기</Text>
-        </ScalePressable>
+        <View onLayout={detailTarget.onLayout} ref={detailTarget.ref} style={styles.overlayButtonTarget}>
+          <ScalePressable accessibilityRole="button" accessibilityLabel="미션 상세 보기" onPress={onOpenMissionDetail} style={styles.overlayButton}>
+            <Text style={styles.overlayButtonText}>미션 상세 보기</Text>
+          </ScalePressable>
+        </View>
         <ScalePressable accessibilityRole="button" accessibilityLabel="닫기" onPress={onClose} style={styles.overlayButton}>
           <Text style={styles.overlayButtonText}>닫기</Text>
         </ScalePressable>

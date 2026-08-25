@@ -193,6 +193,9 @@ export const styles = StyleSheet.create({
     gap: 8,
     width: '90%',
   },
+  overlayButtonTarget: {
+    flex: 1,
+  },
   overlayButton: {
     alignItems: 'center',
     backgroundColor: '#E1E9EC',

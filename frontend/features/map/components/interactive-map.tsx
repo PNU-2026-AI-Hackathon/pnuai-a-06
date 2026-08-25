@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { ActivityIndicator, View } from 'react-native';
 
 import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
+import { useTutorialTarget } from '@/components/tutorial-provider';
 
 import { LocalizedText as Text } from '@/components/localized-text';
 
@@ -32,6 +33,8 @@ export function InteractiveMap({
   onOpenMissionDeck,
   themeDistrictError,
 }: InteractiveMapProps) {
+  const dongnaeTarget = useTutorialTarget('map-dongnae', { onPress: () => onOpenMissionDeck(6) });
+
   return (
     <View style={styles.mapArea}>
       <View style={[styles.mapContent, { width: mapWidth }]}>
@@ -61,6 +64,8 @@ export function InteractiveMap({
                       hitSlop={6}
                       key={`district-touch-${target.number}`}
                       onPress={() => onOpenMissionDeck(target.number)}
+                      onLayout={target.number === 6 ? dongnaeTarget.onLayout : undefined}
+                      ref={target.number === 6 ? dongnaeTarget.ref : undefined}
                       style={[
                         styles.districtTouchTarget,
                         {

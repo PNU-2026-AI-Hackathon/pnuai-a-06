@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, View } from 'react-native';
 import { GuardedPressable as Pressable } from '@/components/guarded-pressable';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
+import { useTutorialTarget } from '@/components/tutorial-provider';
 import { ScheduleCard } from '@/features/trip/hub/components/schedule-card';
 import { styles } from '@/features/trip/hub/trip-hub-styles';
 import type { TripSchedule } from '@/lib/trip-schedule-api';
@@ -58,6 +59,9 @@ export function TripHubContent({
   setIsEditing,
   topInset,
 }: TripHubContentProps) {
+  const createTarget = useTutorialTarget('trip-create', { offsetY: 27 });
+  const listTarget = useTutorialTarget('trip-list', { offsetY: 27 });
+
   return (
     <View style={[styles.container, { paddingHorizontal: horizontalPadding, paddingTop: topInset }]}>
       <View style={styles.topBar}>
@@ -77,9 +81,11 @@ export function TripHubContent({
               <Text style={styles.createSubtitle}>여행 날짜와 동행자를 설정해요</Text>
             </View>
           </View>
-          <ScalePressable accessibilityRole="button" onPress={onCreateTrip} pressedScale={0.98} style={styles.createButton}>
-            <Text style={styles.createButtonText}>새 일정 만들기</Text>
-          </ScalePressable>
+          <View onLayout={createTarget.onLayout} ref={createTarget.ref}>
+            <ScalePressable accessibilityRole="button" onPress={onCreateTrip} pressedScale={0.98} style={styles.createButton}>
+              <Text style={styles.createButtonText}>새 일정 만들기</Text>
+            </ScalePressable>
+          </View>
         </View>
 
         <View style={styles.sectionHeader}>
@@ -92,33 +98,35 @@ export function TripHubContent({
           </View>
         </View>
 
-        {schedules.length > 0 ? (
-          <View style={styles.scheduleList}>
-            {schedules.map((schedule, index) => (
-              <ScheduleCard
-                deletingScheduleId={deletingScheduleId}
-                dragPreviewOffset={getSchedulePreviewOffset(schedule.scheduleId, index)}
-                isCreator={isCreatorSchedule(schedule)}
-                isDragging={activeDrag?.scheduleId === schedule.scheduleId}
-                isEditing={isEditing}
-                isPinned={isInProgressSchedule(schedule)}
-                key={schedule.scheduleId}
-                onDelete={confirmDeleteSchedule}
-                onDragCancel={() => setActiveDrag(null)}
-                onDragEnd={handleDragEnd}
-                onDragMove={handleDragMove}
-                onDragStart={(scheduleId) => setActiveDrag({ dragY: 0, scheduleId })}
-                onOpen={onOpenSchedule}
-                schedule={schedule}
-              />
-            ))}
-          </View>
-        ) : (
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>아직 만든 일정이 없어요</Text>
-            <Text style={styles.emptyDescription}>새 일정 만들기로 여행을 시작해보세요.</Text>
-          </View>
-        )}
+        <View onLayout={listTarget.onLayout} ref={listTarget.ref}>
+          {schedules.length > 0 ? (
+            <View style={styles.scheduleList}>
+              {schedules.map((schedule, index) => (
+                <ScheduleCard
+                  deletingScheduleId={deletingScheduleId}
+                  dragPreviewOffset={getSchedulePreviewOffset(schedule.scheduleId, index)}
+                  isCreator={isCreatorSchedule(schedule)}
+                  isDragging={activeDrag?.scheduleId === schedule.scheduleId}
+                  isEditing={isEditing}
+                  isPinned={isInProgressSchedule(schedule)}
+                  key={schedule.scheduleId}
+                  onDelete={confirmDeleteSchedule}
+                  onDragCancel={() => setActiveDrag(null)}
+                  onDragEnd={handleDragEnd}
+                  onDragMove={handleDragMove}
+                  onDragStart={(scheduleId) => setActiveDrag({ dragY: 0, scheduleId })}
+                  onOpen={onOpenSchedule}
+                  schedule={schedule}
+                />
+              ))}
+            </View>
+          ) : (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyTitle}>아직 만든 일정이 없어요</Text>
+              <Text style={styles.emptyDescription}>새 일정 만들기로 여행을 시작해보세요.</Text>
+            </View>
+          )}
+        </View>
 
         {message ? <Text style={styles.messageText}>{message}</Text> : null}
       </ScrollView>
