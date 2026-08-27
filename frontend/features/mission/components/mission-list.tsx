@@ -1,6 +1,8 @@
 // 미션 카드 목록과 일정에 담기 상태를 표시하는 UI입니다.
 
 import { Image } from 'expo-image';
+import * as Clipboard from 'expo-clipboard';
+import { Feather } from '@expo/vector-icons';
 import { ActivityIndicator, View } from 'react-native';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
@@ -55,7 +57,18 @@ export function MissionList({
             <View style={styles.missionHeaderRow}>
               <View style={styles.missionTitleGroup}>
                 <Text style={styles.missionTitle}>{mission.title}</Text>
-                <Text style={styles.locationText}>{mission.location}</Text>
+                <View style={styles.locationBlock}>
+                  <Text numberOfLines={2} style={styles.locationText}>{mission.location}</Text>
+                  <ScalePressable
+                    accessibilityLabel={`${mission.location} 주소 복사`}
+                    accessibilityRole="button"
+                    onPress={() => void Clipboard.setStringAsync(mission.location)}
+                    pressedScale={0.94}
+                    style={styles.copyAddressButton}>
+                    <Feather color="#409CB7" name="copy" size={13} />
+                    <Text style={styles.copyAddressButtonText}>복사</Text>
+                  </ScalePressable>
+                </View>
               </View>
               <View
                 onLayout={index === 0 ? addMissionTarget.onLayout : undefined}

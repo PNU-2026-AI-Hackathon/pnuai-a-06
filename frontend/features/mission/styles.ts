@@ -101,6 +101,9 @@ export const styles = StyleSheet.create({
   missionTitleGroup: {
     flex: 1,
   },
+  locationBlock: {
+    marginBottom: 10,
+  },
   missionTitle: {
     color: '#000000',
     fontSize: 17,
@@ -111,7 +114,19 @@ export const styles = StyleSheet.create({
     color: '#AEAEAE',
     fontSize: 13,
     fontWeight: '400',
-    marginBottom: 10,
+  },
+  copyAddressButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 4,
+    paddingVertical: 2,
+  },
+  copyAddressButtonText: {
+    color: '#409CB7',
+    fontSize: 11,
+    fontWeight: '600',
   },
   addMissionButton: {
     alignItems: 'center',
