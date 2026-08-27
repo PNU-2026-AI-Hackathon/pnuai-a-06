@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 
-import { useTutorial } from '@/components/tutorial-provider';
+import { TUTORIAL_AUTO_START_ENABLED, useTutorial } from '@/components/tutorial-provider';
 import { useLanguage } from '@/hooks/use-language';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
@@ -49,7 +49,9 @@ export default function MapScreen() {
   });
 
   useEffect(() => {
-    void startTutorial('map');
+    if (TUTORIAL_AUTO_START_ENABLED) {
+      void startTutorial('map');
+    }
   }, [startTutorial]);
 
   useEffect(() => {

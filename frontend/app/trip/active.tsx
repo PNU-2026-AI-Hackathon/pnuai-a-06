@@ -42,8 +42,10 @@ export default function ActiveTripScreen() {
   const isFocused = useIsFocused();
 
   useEffect(() => {
-    void startTutorial('trip-active');
-  }, [startTutorial]);
+    if (isFocused) {
+      void startTutorial('trip-active');
+    }
+  }, [isFocused, startTutorial]);
   const [schedule, setSchedule] = useState<TripSchedule | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');

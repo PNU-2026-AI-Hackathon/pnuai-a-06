@@ -1,7 +1,7 @@
 // 지도 asset, 구역 터치 영역과 관련 상수 데이터입니다.
 import type { CategoryItem, MapPieceTarget, MissionTheme } from './types';
 
-export const dividedMap = require('@/assets/svg/map/divided_map.svg');
+export const dividedMap = require('@/assets/svg/map/demo_map.svg');
 
 export const themeMapByCategory: Record<MissionTheme, number> = {
   MOUNTAIN: require('@/assets/svg/map/mountain_map.svg'),

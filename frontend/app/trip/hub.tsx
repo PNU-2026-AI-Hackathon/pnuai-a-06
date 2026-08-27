@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useCallback, useEffect } from 'react';
 
-import { useTutorial } from '@/components/tutorial-provider';
+import { TUTORIAL_AUTO_START_ENABLED, useTutorial } from '@/components/tutorial-provider';
 import { TripHubContent } from '@/features/trip/hub/components/trip-hub-content';
 import { useTripHub } from '@/features/trip/hub/hooks/use-trip-hub';
 import { useLanguage } from '@/hooks/use-language';
@@ -15,10 +16,13 @@ export default function TripHubScreen() {
   const { language } = useLanguage();
   const { start: startTutorial } = useTutorial();
   const hub = useTripHub({ language });
+  const isFocused = useIsFocused();
 
   useEffect(() => {
-    void startTutorial('trip-hub');
-  }, [startTutorial]);
+    if (TUTORIAL_AUTO_START_ENABLED && isFocused) {
+      void startTutorial('trip-hub');
+    }
+  }, [isFocused, startTutorial]);
   const openSchedule = useCallback((schedule: TripSchedule) => {
     if (isClosedSchedule(schedule)) {
       router.push({ pathname: '/trip/result', params: { scheduleId: schedule.scheduleId, returnTo: 'hub' } });

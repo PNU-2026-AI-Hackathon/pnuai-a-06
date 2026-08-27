@@ -16,6 +16,7 @@ type ScalePressableProps = PropsWithChildren<
   Omit<PressableProps, 'style' | 'onPressIn' | 'onPressOut'> & {
     onPressIn?: (event: GestureResponderEvent) => void;
     onPressOut?: (event: GestureResponderEvent) => void;
+    pressGuard?: boolean;
     pressedScale?: number;
     style?: StyleProp<ViewStyle>;
   }
@@ -26,6 +27,7 @@ export function ScalePressable({
   disabled,
   onPressIn,
   onPressOut,
+  pressGuard = true,
   pressedScale = 0.92,
   style,
   ...pressableProps
@@ -35,11 +37,11 @@ export function ScalePressable({
   const { onPress, ...restPressableProps } = pressableProps;
   const guardedOnPress = useCallback<NonNullable<PressableProps['onPress']>>(
     (event) => {
-      if (allowPress()) {
+      if (!pressGuard || allowPress()) {
         onPress?.(event);
       }
     },
-    [allowPress, onPress],
+    [allowPress, onPress, pressGuard],
   );
 
   const animateTo = (toValue: number) => {

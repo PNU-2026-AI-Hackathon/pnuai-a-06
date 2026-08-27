@@ -30,6 +30,10 @@ export type TutorialTargetId =
   | 'trip-settings'
   | 'trip-feed';
 
+// Keep all tutorial code and state intact while temporarily hiding the three
+// automatic entry-point tutorials from the user.
+export const TUTORIAL_AUTO_START_ENABLED = false;
+
 type TutorialStep = {
   action: 'next' | 'target';
   messageGap?: number;

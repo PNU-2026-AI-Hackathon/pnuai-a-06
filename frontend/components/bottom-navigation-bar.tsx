@@ -10,7 +10,7 @@ import { getAuthItem } from '@/lib/auth-storage';
 import { getActiveMissionSession, type MissionSession } from '@/lib/mission-session-api';
 import { getCachedTripSchedules, listTripSchedules, type TripSchedule } from '@/lib/trip-schedule-api';
 
-const hiddenPathnames = ['/', '/login', '/auth/callback', '/main/waiting', '/trip/participation', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result', '/trip/edit'];
+const hiddenPathnames = ['/', '/login', '/welcome', '/onboarding/step1', '/auth/callback', '/main/waiting', '/trip/participation', '/trip/capture', '/trip/review', '/trip/vote', '/trip/vote-waiting', '/trip/result', '/trip/edit'];
 
 type FeatherIconName = React.ComponentProps<typeof Feather>['name'];
 

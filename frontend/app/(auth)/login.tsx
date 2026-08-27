@@ -1,5 +1,5 @@
 // 인증 기능 화면들을 조립하고 라우팅하는 진입점입니다.
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, type Href } from 'expo-router';
 
 import { AuthFormLayout } from '@/features/auth/components/auth-form-layout';
 import { AuthHome } from '@/features/auth/components/auth-home';
@@ -16,7 +16,7 @@ export default function LoginScreen() {
   const { bottomActionInset, bottomSafeInset, horizontalPadding, topInset } = useResponsiveLayout();
   const auth = useAuthFlow({
     initialMode: params.mode === 'reset' ? 'resetRequest' : 'home',
-    onAuthenticated: () => router.replace('/main'),
+    onAuthenticated: (isNewUser) => router.replace((isNewUser ? '/welcome' : '/main') as Href),
   });
 
   if (auth.mode === 'home') {

@@ -5,7 +5,8 @@ import { Platform, StyleSheet, View } from 'react-native';
 
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { refreshAuthToken, saveAuthTokens, saveWebKakaoAuthToken } from '@/lib/auth-api';
-import { deletePersistentAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
+import { deletePersistentAuthItem, getAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
+import { hasSeenWelcomeScreen } from '@/lib/tutorial-storage';
 
 const splashText = require('@/assets/svg/logo_text.svg');
 const splashMap = require('@/assets/svg/splash_map.svg');
@@ -56,12 +57,18 @@ export default function SplashScreen() {
     let isActive = true;
     const startedAt = Date.now();
 
-    const routeAfterSplash = async (path: '/login' | '/main') => {
+    const routeAfterSplash = async (path: '/login' | '/main' | '/welcome') => {
       await waitForMinimumSplash(startedAt);
 
       if (isActive) {
         router.replace(path);
       }
+    };
+
+    const routeAfterAuthentication = async () => {
+      const userId = getAuthItem('user_id');
+      const shouldShowWelcome = userId ? !(await hasSeenWelcomeScreen(userId)) : false;
+      await routeAfterSplash(shouldShowWelcome ? '/welcome' : '/main');
     };
 
     const restoreSession = async () => {
@@ -70,7 +77,7 @@ export default function SplashScreen() {
       if (webKakaoTokens) {
         saveWebKakaoAuthToken(webKakaoTokens);
         clearWebKakaoCallbackUrl();
-        await routeAfterSplash('/main');
+        await routeAfterAuthentication();
         return;
       }
 
@@ -85,7 +92,7 @@ export default function SplashScreen() {
       try {
         const tokens = await refreshAuthToken(refreshToken);
         await saveAuthTokens(tokens, true);
-        await routeAfterSplash('/main');
+        await routeAfterAuthentication();
       } catch {
         await Promise.all([
           deletePersistentAuthItem('access_token'),

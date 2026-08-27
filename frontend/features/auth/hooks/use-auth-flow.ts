@@ -18,7 +18,7 @@ import type { AuthMode } from '../types';
 
 type UseAuthFlowOptions = {
   initialMode: AuthMode;
-  onAuthenticated: () => void;
+  onAuthenticated: (isNewUser?: boolean) => void;
 };
 
 export function useAuthFlow({ initialMode, onAuthenticated }: UseAuthFlowOptions) {
@@ -36,10 +36,10 @@ export function useAuthFlow({ initialMode, onAuthenticated }: UseAuthFlowOptions
 
   const resetMessage = () => setMessage('');
 
-  const completeLogin = async (shouldPersist = false) => {
+  const completeLogin = async (shouldPersist = false, isNewUser = false) => {
     const tokens = await loginWithEmail(email.trim(), password);
     await saveAuthTokens(tokens, shouldPersist);
-    onAuthenticated();
+    onAuthenticated(isNewUser);
   };
 
   const handleLogin = async () => {
@@ -104,7 +104,7 @@ export function useAuthFlow({ initialMode, onAuthenticated }: UseAuthFlowOptions
       setIsSubmitting(true);
       resetMessage();
       await verifyEmail(email.trim(), verificationCode.trim());
-      await completeLogin();
+      await completeLogin(false, true);
     } catch (error) {
       setMessage(getRequestErrorMessage(error));
     } finally {

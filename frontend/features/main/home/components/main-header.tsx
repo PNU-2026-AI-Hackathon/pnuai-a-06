@@ -12,26 +12,20 @@ import { styles } from '../styles';
 const splashText = require('@/assets/svg/logo_text.svg');
 
 type MainHeaderProps = {
-  onOpenLogin: () => void;
   onOpenProfile: () => void;
   profileEmoji: string | null;
   profileImageUrl: string | null;
   topInset: number;
 };
 
-export function MainHeader({ onOpenLogin, onOpenProfile, profileEmoji, profileImageUrl, topInset }: MainHeaderProps) {
+export function MainHeader({ onOpenProfile, profileEmoji, profileImageUrl, topInset }: MainHeaderProps) {
   const profileTarget = useTutorialTarget('profile-header', { offsetY: 27 });
 
   return (
     <View style={[styles.header, { paddingTop: topInset }]}>
-      <Pressable
-        accessibilityLabel="찌그까 로그인 화면으로 이동"
-        accessibilityRole="button"
-        hitSlop={8}
-        onPress={onOpenLogin}
-        style={styles.logoButton}>
+      <View style={styles.logoButton}>
         <Image source={splashText} style={styles.logoText} contentFit="contain" />
-      </Pressable>
+      </View>
       <Pressable
         accessibilityLabel="프로필"
         onLayout={profileTarget.onLayout}
