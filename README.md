@@ -1,10 +1,5 @@
 # 찌그까
-
-> AI 미션으로 부산의 숨은 로컬을 살리는 여행 앱
->
-> 관광객이 몰리기만 하는 여행에서, 로컬이 살아나는 여행으로
-
-제7회 PNU 창의융합 AI 해커톤 | 융합트랙 06팀
+![찌그까](docs/jjigeukka.png)
 
 `찌그까`는 AI 미션을 통해 20대 여행자의 발걸음을 부산의 숨은 로컬로 분산시키고, 지역 상권 활성화와 개인의 회복 경험을 함께 만드는 모바일 여행 서비스입니다. 여행 일정 구성, 현장 GPS 인증, 사진 미션, AI 성공 판정, 동행자 반응, 여행 매거진 생성을 하나의 흐름으로 연결합니다.
 
@@ -19,10 +14,12 @@
 
 따라서 관광객의 발걸음을 새로운 지역으로 자연스럽게 분산시키고, 여행자가 직접 참여하고 기록하면서 개인적인 회복까지 경험할 수 있는 새로운 여행 방식이 필요합니다.
 
+![반복되는 여행 문제와 사용자 조사 결과](docs/presentation-pages/problem-survey.png)
+
 <br/>
 
 #### 1.2. 개발 목표 및 주요 내용
-본 프로젝트의 목표는 부산 여행을 `발견 -> 참여 -> 기록`의 경험으로 전환하여 관광 수요를 자발적으로 분산시키고, 지역 경제와 개인의 회복에 함께 기여하는 것입니다.
+본 프로젝트의 목표는 부산 여행을 `발견 → 참여 → 기록`의 경험으로 전환하여 관광 수요를 자발적으로 분산시키고, 지역 경제와 개인의 회복에 함께 기여하는 것입니다.
 
 - 여행 전: 여행 일정과 동행자를 등록하고 부산의 산, 바다, 도시 및 지역별 미션을 선택합니다.
 - 여행 중: 현장에서 GPS 인증 후 사진 미션을 수행하고, AI로부터 성공 여부를 즉시 판정받습니다.
@@ -43,6 +40,8 @@
 6. AI가 기준 사진과 구조화된 판정 조건을 바탕으로 미션 성공 여부를 판정합니다.
 7. 동행자들은 성공 사진에 댓글과 좋아요를 남기고 대표 사진을 선정합니다.
 8. 여행 종료 후 사진, 미션 제목, 일정, 참가자 이름과 댓글을 조합한 여행 매거진을 자동 생성합니다.
+
+![미션 선택부터 매거진 생성까지의 서비스 흐름](docs/presentation-pages/mission-flow.png)
 
 <br/>
 
@@ -65,6 +64,8 @@
 - **로컬 상생 선순환**: 미션 참여, 숨은 지역 방문, 지역 소비, 관광 품질 향상으로 이어지는 구조를 구축합니다.
 - **향후 공공 연계**: 익명화된 미션 참여 및 이동 데이터를 부산시와 관광공사의 관광 정책 자료로 활용할 수 있도록 확장합니다.
 
+![미션 수행과 로컬 상권 활성화의 선순환](docs/presentation-pages/local-impact.png)
+
 <br/>
 
 ### 2. 상세설계
@@ -72,7 +73,7 @@
 #### 2.1. 시스템 구성도
 ```mermaid
 flowchart TD
-    APP["Mobile App<br/>Expo · React Native"]
+    APP["Expo App<br/>Mobile · Web · React Native"]
 
     subgraph BACKEND["FastAPI Backend"]
         API["Router · Pydantic<br/>요청 검증 및 권한 검사"]
@@ -101,7 +102,8 @@ flowchart TD
 #### 2.2. 사용 기술
 | 구분 | 기술 |
 |:---:|:---|
-| Frontend | React Native 0.81, Expo 54, TypeScript, Expo Router, React Navigation |
+| Frontend | React Native 0.81, Expo 54, TypeScript, Expo Router, React Navigation, React Native Web |
+| Device Integration | Expo Camera, Location, SecureStore, Kakao Login·Share, Deep Link |
 | Backend Runtime | Python 3.10, FastAPI, Uvicorn |
 | API Validation | Pydantic, pydantic-settings, python-dotenv, OpenAPI/Swagger |
 | ORM / Migration | SQLAlchemy 2.0, Alembic |
@@ -195,6 +197,8 @@ flowchart TD
 - 완성 미션이 프레임 수보다 많으면 사용자가 원하는 사진을 선택할 수 있습니다.
 - 사용자는 별도 편집 없이 동행자와 공유할 수 있는 완성형 여행 기록물을 얻습니다.
 
+![여행 기록을 담은 회복 매거진](docs/presentation-pages/recovery-magazine.png)
+
 ##### `계층형 백엔드와 데이터 관리`
 - FastAPI Router, Pydantic Schema, Service, SQLAlchemy Model을 분리해 API 입출력과 비즈니스 로직, 데이터 모델의 책임을 구분합니다.
 - PostgreSQL의 관계형 데이터 구조로 사용자, 일정, 초대, 미션, GPS 위치, 세션, 제출 사진, 댓글, 좋아요와 매거진 기록을 관리합니다.
@@ -205,6 +209,11 @@ flowchart TD
 - 상태 변경 시 DB 행 잠금과 트랜잭션을 사용해 동시에 들어오는 요청의 충돌을 줄이고, 서버 재시작 시 진행 중인 제한시간 작업을 복원합니다.
 - DB 연결 풀의 크기와 대기시간을 제한하고 연결 부족 시 재시도 가능한 `503 DATABASE_BUSY` 응답을 반환합니다.
 - 요청 방식, 경로, 상태 코드, 클라이언트 IP와 처리 시간을 순환 로그 파일에 기록하며 WebSocket 쿼리의 인증 토큰은 마스킹합니다.
+
+##### `크로스 플랫폼 사용자 경험`
+- Expo Router의 파일 기반 라우팅과 기능별 컴포넌트·Hook 구조로 인증, 지도, 일정, 미션 수행과 매거진 화면을 구성합니다.
+- 모바일에서는 카메라·위치 권한, Kakao 로그인과 초대 공유를 지원하고, 웹에서는 반응형 레이아웃과 Kakao 인증 callback·초대 링크를 처리합니다.
+- 한국어·영어 전환과 사용자별 최초 1회 튜토리얼을 제공하며, 빠른 중복 입력 방지와 WebSocket·polling fallback으로 비동기 화면 상태를 안정적으로 유지합니다.
 
 <br/>
 
@@ -237,8 +246,11 @@ flowchart TD
 ├── frontend/                   # Expo / React Native 앱
 │   ├── app/                    # Expo Router 화면
 │   ├── components/             # 공통 UI 컴포넌트
-│   ├── hooks/                  # 앱 훅
-│   └── assets/                 # 이미지·폰트 리소스
+│   ├── features/               # 인증·홈·지도·미션·여행 기능 모듈
+│   ├── hooks/                  # 앱 공통 훅
+│   ├── lib/                    # API 클라이언트·인증·다국어·플랫폼 연동
+│   ├── assets/                 # 이미지·SVG 리소스
+│   └── public/                 # 웹 정적 리소스
 ├── backend/                    # FastAPI API 서버
 │   ├── app/
 │   │   ├── auth/               # 이메일·Kakao 인증 API
@@ -265,15 +277,17 @@ flowchart TD
 - **AI 미션 판정**: OpenAI Responses API의 멀티모달 모델이 기준 이미지, 사용자가 촬영한 사진, 미션별 판정 조건을 함께 분석해 성공 여부와 점수를 반환합니다.
 - **방문 순서 추천**: 사용자가 선택한 특정 일자의 미션과 위치 정보를 바탕으로 추천 방문 순서를 생성하고 일정에 저장합니다.
 - **매거진 자동 생성**: AI 판정을 통과한 사진과 일정, 참가자, 댓글 데이터를 서버의 프레임 렌더러로 조합해 매거진 이미지를 생성합니다.
-- **OpenAI Codex**: 저장소 분석, FastAPI 백엔드 구현, DB 마이그레이션, 테스트, 오류 분석과 문서화를 보조합니다. 생성 코드는 팀원이 요구사항과 기존 API 계약에 맞게 검토하고 테스트한 뒤 반영합니다.
+- **OpenAI Codex**: 저장소 분석, FastAPI 백엔드와 DB 마이그레이션뿐 아니라 Expo 화면·공통 컴포넌트·Hook 구조화, API·WebSocket·카메라·GPS·Kakao 연동, 비동기 상태 오류 분석과 문서화를 보조합니다. 생성 코드는 팀원이 요구사항, 기존 API 계약과 플랫폼별 동작에 맞게 검토하고 실행·정적 검증한 뒤 반영합니다.
 
 AI 도구 활용을 통해 반복 개발 시간을 줄이고, 팀원이 AI 연동 로직과 사용자 경험 설계에 더 집중할 수 있도록 하는 것을 목표로 합니다.
+
+구체적인 개발 보조 범위와 검증 절차는 [`docs/ai-usage.md`](docs/ai-usage.md)에서 확인할 수 있습니다.
 
 <br/>
 
 ### 4. 설치 및 사용 방법
 
-현재 저장소에는 Expo 기반 모바일 앱과 FastAPI 백엔드 서버가 포함되어 있습니다.
+현재 저장소에는 Expo 기반 모바일·웹 프론트엔드와 FastAPI 백엔드 서버가 포함되어 있습니다.
 
 #### 4.1. Backend
 백엔드는 Python 3.10과 PostgreSQL을 사용합니다. 아래 명령은 저장소 루트에서 실행하는 것을 기준으로 하며, `pnuai` 환경이 없다면 최초 한 번 생성합니다.
@@ -324,20 +338,34 @@ conda activate pnuai
 uvicorn mission_admin.server:app --host 0.0.0.0 --port 8197 --reload
 ```
 
-#### 4.2. Mobile App
+#### 4.2. Frontend App
+프론트엔드는 기본적으로 공개 HTTPS 백엔드에 연결됩니다. 로컬 백엔드를 사용하려면 예제 환경변수 파일을 복사한 뒤 `EXPO_PUBLIC_API_BASE_URL`을 실행 환경에서 접근 가능한 주소로 변경합니다. 실제 기기에서는 `localhost` 대신 개발 PC의 LAN IP를 사용해야 합니다.
+
 ```bash
 cd frontend
 npm install
+cp .env.local.example .env.local
 npm run start
 ```
 
-#### 4.3. Docker
-Docker 기반 실행 환경은 향후 제공할 예정입니다. 현재는 Backend와 Mobile App을 각각 직접 실행합니다.
+웹 실행과 정적 검사는 각각 다음 명령을 사용합니다. Kakao SDK 같은 네이티브 모듈을 포함한 Android 개발 빌드는 `npm run android`로 실행합니다.
+
+```bash
+npm run web
+npm run lint
+npx tsc --noEmit
+npm run android
+```
+
+Kakao 초대 공유를 사용하려면 `.env.local`에 `EXPO_PUBLIC_KAKAO_INVITE_TEMPLATE_ID`도 설정한 뒤 Metro를 다시 시작해야 합니다.
 
 <br/>
 
 ### 5. 소개 및 시연 영상
-소개 및 시연 영상은 해커톤 제출 후 부여받은 YouTube URL을 추가할 예정입니다.
+
+[![찌그까 소개 및 시연 영상](https://img.youtube.com/vi/gVUJkRbbZDY/maxresdefault.jpg)](https://youtu.be/gVUJkRbbZDY)
+
+> 위 이미지를 클릭하면 소개 및 시연 영상이 재생됩니다.
 
 - 발표자료: `docs/융합트랙_부산 관광 지역 쏠림 문제 해결 서비스_비끕_발표자료.pdf`
 - 신청서: `docs/융합트랙_부산 관광 지역 쏠림 문제 해결 서비스_비끕_신청서.pdf`
