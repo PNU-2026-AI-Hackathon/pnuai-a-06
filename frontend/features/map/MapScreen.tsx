@@ -1,4 +1,5 @@
 // 부산 지도 화면을 조립하고 미션 상세 이동을 연결합니다.
+import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
@@ -14,9 +15,22 @@ import { MissionDeckOverlay } from './components/mission-deck-overlay';
 import {
   MAP_ASPECT_RATIO,
   MISSION_FRAME_ASPECT_RATIO,
+  categoryItems,
+  themeMapByCategory,
 } from './map-data';
 import { useMapScreen } from './hooks/use-map-screen';
 import { styles } from './styles';
+
+const mapAssetSources = [
+  ...Object.values(themeMapByCategory),
+  ...categoryItems.flatMap((item) => [item.icon, item.selectedIcon]),
+];
+
+// Start loading map assets as soon as this route module is available so the
+// first map render can reuse the memory cache.
+mapAssetSources.forEach((source) => {
+  void Image.loadAsync(source).catch(() => undefined);
+});
 
 export default function MapScreen() {
   const {

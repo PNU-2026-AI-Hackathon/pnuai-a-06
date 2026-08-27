@@ -11,6 +11,7 @@ import { getAuthItem } from '@/lib/auth-storage';
 import { hasSeenWelcomeScreen, markWelcomeScreenCompleted } from '@/lib/tutorial-storage';
 
 const welcomeImage = require('@/assets/svg/main/sig_home.svg');
+const onboardingStep1Image = require('@/assets/svg/onboarding/step1.svg');
 
 export default function WelcomeScreen() {
   const { bottomSafeInset, height, topSafeInset, width } = useResponsiveLayout();
@@ -19,6 +20,7 @@ export default function WelcomeScreen() {
 
   useEffect(() => {
     let isActive = true;
+    void Image.loadAsync(onboardingStep1Image).catch(() => undefined);
     const userId = getAuthItem('user_id');
 
     if (!userId) {

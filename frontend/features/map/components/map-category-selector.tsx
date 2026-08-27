@@ -36,7 +36,13 @@ export function MapCategorySelector({ onSelectCategory, selectedCategory }: MapC
               onPress={() => onSelectCategory(item.value)}
               pressedScale={0.94}
               style={[styles.categoryButton, isSelected && styles.selectedCategoryButton]}>
-              <Image source={isSelected ? item.selectedIcon : item.icon} style={styles.categoryIcon} contentFit="contain" />
+              <Image
+                cachePolicy="memory-disk"
+                contentFit="contain"
+                source={isSelected ? item.selectedIcon : item.icon}
+                style={styles.categoryIcon}
+                transition={0}
+              />
               <Text style={[styles.categoryLabel, isSelected && styles.selectedCategoryLabel]}>{item.label}</Text>
             </ScalePressable>
           </View>

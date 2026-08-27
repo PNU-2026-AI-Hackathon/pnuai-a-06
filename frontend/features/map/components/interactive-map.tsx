@@ -42,7 +42,7 @@ export function InteractiveMap({
 
         <View style={{ height: mapHeight, width: mapWidth }}>
           <View style={styles.mapPieceStage}>
-            <Image contentFit="contain" pointerEvents="none" source={mapSource} style={styles.mapImage} />
+            <Image cachePolicy="memory-disk" contentFit="contain" pointerEvents="none" priority="high" source={mapSource} style={styles.mapImage} transition={0} />
             {!isMissionDeckOpen ? (
               <View pointerEvents="box-none" style={styles.districtTouchLayer}>
                 {mapPieceTargets.map((target) => {
