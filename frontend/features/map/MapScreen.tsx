@@ -1,6 +1,6 @@
 // 부산 지도 화면을 조립하고 미션 상세 이동을 연결합니다.
-import { router } from 'expo-router';
-import { useEffect } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 
 import { useTutorial } from '@/components/tutorial-provider';
@@ -29,15 +29,44 @@ export default function MapScreen() {
   } = useResponsiveLayout();
   const { language } = useLanguage();
   const { start: startTutorial } = useTutorial();
+  const { tutorialMissionCode: tutorialMissionCodeParam, tutorialRestoreDeck: tutorialRestoreDeckParam } = useLocalSearchParams<{
+    tutorialMissionCode?: string | string[];
+    tutorialRestoreDeck?: string | string[];
+  }>();
+  const tutorialMissionCode = Array.isArray(tutorialMissionCodeParam) ? tutorialMissionCodeParam[0] : tutorialMissionCodeParam;
+  const tutorialRestoreDeck = Array.isArray(tutorialRestoreDeckParam) ? tutorialRestoreDeckParam[0] : tutorialRestoreDeckParam;
+  const hasRestoredMissionDeck = useRef(false);
+  const hasClosedReturnedMissionDeck = useRef(false);
   const mapWidth = Math.min(width - 16, mediaMaxWidth, 400);
   const mapHeight = mapWidth / MAP_ASPECT_RATIO;
   const frameWidth = Math.min(width * 0.84, 344);
   const frameHeight = frameWidth / MISSION_FRAME_ASPECT_RATIO;
-  const map = useMapScreen({ frameWidth, language });
+  const map = useMapScreen({
+    frameWidth,
+    initialCategory: tutorialMissionCode || tutorialRestoreDeck === 'true' ? 'DEMO' : undefined,
+    language,
+    tutorialMissionCode,
+  });
 
   useEffect(() => {
     void startTutorial('map');
   }, [startTutorial]);
+
+  useEffect(() => {
+    if (tutorialRestoreDeck !== 'true' || hasRestoredMissionDeck.current) {
+      return;
+    }
+
+    hasRestoredMissionDeck.current = true;
+    void map.openMissionDeck(6);
+  }, [map.isMissionDeckOpen, map.openMissionDeck, tutorialRestoreDeck]);
+
+  useEffect(() => {
+    if (tutorialMissionCode && tutorialRestoreDeck !== 'true' && !hasClosedReturnedMissionDeck.current) {
+      hasClosedReturnedMissionDeck.current = true;
+      map.closeMissionDeck();
+    }
+  }, [map.closeMissionDeck, tutorialMissionCode, tutorialRestoreDeck]);
 
   const openMissionDetail = () => {
     router.push({

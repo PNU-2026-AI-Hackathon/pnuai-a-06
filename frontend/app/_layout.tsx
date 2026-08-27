@@ -1,6 +1,8 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, Stack } from 'expo-router';
+import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
@@ -74,6 +76,9 @@ async function openKakaoAuth(url: string | null) {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const [iconFontLoaded, iconFontError] = useFonts({
+    'material-community': MaterialCommunityIcons.font['material-community'],
+  });
 
   useEffect(() => {
     Linking.getInitialURL().then(openKakaoInvite);
@@ -88,6 +93,10 @@ export default function RootLayout() {
       subscription.remove();
     };
   }, []);
+
+  if (!iconFontLoaded && !iconFontError) {
+    return <View style={styles.root} />;
+  }
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>

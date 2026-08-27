@@ -35,6 +35,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 24,
+    width: '100%',
   },
   themeCard: {
     alignItems: 'center',
@@ -42,7 +43,7 @@ export const styles = StyleSheet.create({
     borderRadius: 11,
     height: 98,
     justifyContent: 'center',
-    width: 82,
+    flex: 1,
   },
   selectedThemeCard: {
     borderColor: '#2B2F33',

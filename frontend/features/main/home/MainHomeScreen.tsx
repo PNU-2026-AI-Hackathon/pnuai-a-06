@@ -16,7 +16,7 @@ export default function MainHomeScreen() {
   const { bottomActionInset, centerContentOffset, horizontalPadding, topInset } = useResponsiveLayout();
   const main = useMainHome();
   const { start: startTutorial } = useTutorial();
-  const shouldShowEmptyMagazine = main.hasLoadedMagazine && main.magazinePhotoUrls.length === 0;
+  const shouldShowEmptyMagazine = main.hasLoadedMagazine && main.magazinePhotoUrls.length === 0 && !main.magazinePreviewUrl;
 
   const openMagazine = () => {
     if (!main.magazineScheduleId) {
@@ -50,6 +50,7 @@ export default function MainHomeScreen() {
       ) : main.hasLoadedMagazine ? (
         <MagazineCard
           isLoading={main.isMagazineLoading}
+          magazinePreviewUrl={main.magazinePreviewUrl}
           onPress={openMagazine}
           photoUrls={main.magazinePhotoUrls}
           scheduleId={main.magazineScheduleId}

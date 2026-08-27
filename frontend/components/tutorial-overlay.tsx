@@ -13,9 +13,13 @@ export type TutorialShape = 'circle' | 'rect' | 'roundedRect';
 
 type TutorialOverlayProps = {
   messageGap?: number;
+  messageOffsetY?: number;
   messagePlacement?: 'above' | 'below' | 'center';
   message: string;
   gestureHint?: 'horizontalSwipe';
+  nextLabel?: string;
+  startButton?: boolean;
+  avoidSkipOverlap?: boolean;
   onNext?: () => void;
   onPrev?: () => void;
   onSkip?: () => void;
@@ -25,7 +29,7 @@ type TutorialOverlayProps = {
   target?: TutorialTarget | null;
 };
 
-export function TutorialOverlay({ gestureHint, message, messageGap = 40, messagePlacement = 'below', onNext, onPrev, onSkip, onTargetSwipe, onTargetPress, shape = 'roundedRect', target }: TutorialOverlayProps) {
+export function TutorialOverlay({ avoidSkipOverlap = true, gestureHint, message, messageGap = 40, messageOffsetY = 0, messagePlacement = 'below', nextLabel, onNext, onPrev, onSkip, onTargetSwipe, onTargetPress, shape = 'roundedRect', startButton = false, target }: TutorialOverlayProps) {
   const [overlaySize, setOverlaySize] = useState({ height: 0, width: 0 });
   const targetSwipeResponder = useMemo(
     () => PanResponder.create({
@@ -46,14 +50,20 @@ export function TutorialOverlay({ gestureHint, message, messageGap = 40, message
     }),
     [onTargetSwipe],
   );
-  const messageHeight = onNext || onPrev ? 106 : 72;
-  const messageTop = messagePlacement === 'center'
+  const messageHeight = onNext || onPrev ? (message ? 106 : 52) : 72;
+  const messageTop = (messagePlacement === 'center'
     ? Math.max(24, overlaySize.height / 2 - messageHeight / 2)
     : messagePlacement === 'above' && target
       ? Math.max(24, target.y - messageHeight - messageGap)
       : target
         ? Math.min(target.y + target.height + messageGap, Math.max(24, overlaySize.height - messageHeight - messageGap))
-        : Math.max(24, overlaySize.height / 2 - messageHeight / 2);
+        : Math.max(24, overlaySize.height / 2 - messageHeight / 2)) + messageOffsetY;
+  const shouldPlaceSkipOnLeft = avoidSkipOverlap && Boolean(
+    target
+    && overlaySize.width > 0
+    && target.y < 160
+    && target.x + target.width > overlaySize.width * 0.55,
+  );
 
   return (
     <Modal animationType="none" onRequestClose={() => undefined} statusBarTranslucent transparent visible>
@@ -178,15 +188,15 @@ export function TutorialOverlay({ gestureHint, message, messageGap = 40, message
         ) : null}
 
         {onSkip ? (
-          <Pressable accessibilityRole="button" onPress={onSkip} style={styles.skipButton}>
+          <Pressable accessibilityRole="button" onPress={onSkip} style={[styles.skipButton, shouldPlaceSkipOnLeft ? styles.skipButtonLeft : styles.skipButtonRight]}>
             <Text style={styles.skipButtonText}>건너뛰기</Text>
           </Pressable>
         ) : null}
 
         <View pointerEvents="box-none" style={[styles.messageContainer, { top: messageTop }]}>
-          <Text style={styles.message}>{message}</Text>
+          {message ? <Text style={styles.message}>{message}</Text> : null}
           {onPrev || onNext ? (
-            <View style={[styles.navigationRow, !onPrev && styles.navigationRowNextOnly]}>
+            <View style={[styles.navigationRow, !onPrev && styles.navigationRowNextOnly, startButton && styles.navigationRowCentered]}>
               {onPrev ? (
                 <Pressable accessibilityRole="button" onPress={onPrev} style={styles.prevButton}>
                   <View style={styles.prevButtonContent}>
@@ -196,10 +206,10 @@ export function TutorialOverlay({ gestureHint, message, messageGap = 40, message
                 </Pressable>
               ) : null}
               {onNext ? (
-                <Pressable accessibilityRole="button" onPress={onNext} style={styles.nextButton}>
-                  <View style={styles.nextButtonContent}>
-                    <Text style={styles.nextButtonText}>Next &gt;</Text>
-                    <View style={styles.nextButtonUnderline} />
+                <Pressable accessibilityRole="button" onPress={onNext} style={[styles.nextButton, startButton && styles.startButton]}>
+                  <View style={[styles.nextButtonContent, startButton && styles.startButtonContent]}>
+                    <Text style={[styles.nextButtonText, startButton && styles.startButtonText]}>{nextLabel ?? 'Next >'}</Text>
+                    {!startButton ? <View style={styles.nextButtonUnderline} /> : null}
                   </View>
                 </Pressable>
               ) : null}
@@ -236,8 +246,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 5,
     position: 'absolute',
-    right: 20,
     top: 52,
+  },
+  skipButtonLeft: {
+    left: 20,
+  },
+  skipButtonRight: {
+    right: 20,
   },
   skipButtonText: {
     color: '#FFFFFF',
@@ -261,6 +276,9 @@ const styles = StyleSheet.create({
   navigationRowNextOnly: {
     justifyContent: 'flex-end',
   },
+  navigationRowCentered: {
+    justifyContent: 'center',
+  },
   prevButton: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -269,16 +287,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  startButton: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    minWidth: 176,
+    paddingHorizontal: 24,
+    paddingVertical: 13,
+  },
   prevButtonContent: {
     alignItems: 'flex-start',
   },
   nextButtonContent: {
     alignItems: 'flex-end',
   },
+  startButtonContent: {
+    alignItems: 'center',
+  },
   nextButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '400',
+  },
+  startButtonText: {
+    color: '#5E686D',
+    fontWeight: '500',
   },
   nextButtonUnderline: {
     backgroundColor: '#FFFFFF',

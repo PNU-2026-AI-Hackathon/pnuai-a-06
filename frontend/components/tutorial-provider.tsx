@@ -34,6 +34,9 @@ type TutorialStep = {
   action: 'next' | 'target';
   messageGap?: number;
   message: string;
+  messageOffsetY?: number;
+  startButton?: boolean;
+  nextLabel?: string;
   placement: 'above' | 'below' | 'center';
   shape: TutorialShape;
   targetId?: TutorialTargetId;
@@ -44,16 +47,12 @@ const tutorialStepsById: Record<TutorialId, TutorialStep[]> = {
   profile: [
     {
       action: 'next',
-      message: 'B-CUT에 오신 것을 환영해요!',
+      message: '',
+      messageOffsetY: 32,
+      nextLabel: '튜토리얼 시작하기',
       placement: 'center',
       shape: 'roundedRect',
-    },
-    {
-      action: 'next',
-      message: '홈 아이콘에서는 여행을 통해 만들어지는 매거진을 확인할 수 있어요.',
-      placement: 'above',
-      shape: 'roundedRect',
-      targetId: 'home-nav',
+      startButton: true,
     },
     {
       action: 'next',
@@ -72,6 +71,7 @@ const tutorialStepsById: Record<TutorialId, TutorialStep[]> = {
     {
       action: 'next',
       message: '프로필 사진과 닉네임을 변경할 수 있어요.',
+      nextLabel: 'Finish',
       placement: 'below',
       shape: 'circle',
       targetId: 'profile-edit',
@@ -109,7 +109,7 @@ const tutorialStepsById: Record<TutorialId, TutorialStep[]> = {
     {
       action: 'next',
       gestureHint: 'horizontalSwipe',
-      message: '카드를 오른쪽으로 스와이프해서 다음 미션을 볼 수 있어요.',
+      message: '카드를 오른쪽으로 스와이프해서\n다음 미션을 볼 수 있어요.',
       placement: 'below',
       shape: 'roundedRect',
       targetId: 'mission-card',
@@ -124,7 +124,8 @@ const tutorialStepsById: Record<TutorialId, TutorialStep[]> = {
     {
       action: 'next',
       message: '하고 싶은 미션을 원하는 일정에 담을 수 있어요.',
-      placement: 'above',
+      nextLabel: 'Finish',
+      placement: 'below',
       shape: 'roundedRect',
       targetId: 'mission-list',
     },
@@ -140,6 +141,7 @@ const tutorialStepsById: Record<TutorialId, TutorialStep[]> = {
     {
       action: 'next',
       message: '생성한 일정은 이곳에 리스트 형태로 보여요.',
+      nextLabel: 'Finish',
       placement: 'below',
       shape: 'roundedRect',
       targetId: 'trip-list',
@@ -184,6 +186,7 @@ const tutorialStepsById: Record<TutorialId, TutorialStep[]> = {
     {
       action: 'next',
       message: '미션을 모두 수행하면\n함께 찍은 사진이 이곳 피드에 보여요.',
+      nextLabel: 'Finish',
       placement: 'above',
       shape: 'roundedRect',
       targetId: 'trip-feed',
@@ -192,6 +195,7 @@ const tutorialStepsById: Record<TutorialId, TutorialStep[]> = {
 };
 
 type TutorialTargetEntry = {
+  metadata?: string;
   onPress?: () => void;
   onSwipe?: (direction: 1 | -1) => void;
   target: TutorialTarget;
@@ -202,10 +206,11 @@ type TutorialContextValue = {
   activeStepIndex: number;
   activeTarget: TutorialTarget | null;
   activeTargetSwipe?: (direction: 1 | -1) => void;
+  activeTutorial: TutorialId | null;
   advance: () => void;
   goBack: () => void;
   handleTargetPress: () => void;
-  registerTarget: (id: TutorialTargetId, target: TutorialTarget, onPress?: () => void, onSwipe?: (direction: 1 | -1) => void) => void;
+  registerTarget: (id: TutorialTargetId, target: TutorialTarget, onPress?: () => void, onSwipe?: (direction: 1 | -1) => void, metadata?: string) => void;
   skip: () => void;
   start: (tutorialId?: TutorialId) => Promise<void>;
 };
@@ -218,7 +223,7 @@ export function TutorialProvider({ children }: PropsWithChildren) {
   const [targets, setTargets] = useState<Partial<Record<TutorialTargetId, TutorialTargetEntry>>>({});
   const isStarting = useRef(false);
 
-  const registerTarget = useCallback((id: TutorialTargetId, target: TutorialTarget, onPress?: () => void, onSwipe?: (direction: 1 | -1) => void) => {
+  const registerTarget = useCallback((id: TutorialTargetId, target: TutorialTarget, onPress?: () => void, onSwipe?: (direction: 1 | -1) => void, metadata?: string) => {
     setTargets((currentTargets) => {
       const currentEntry = currentTargets[id];
       const currentTarget = currentEntry?.target;
@@ -228,9 +233,10 @@ export function TutorialProvider({ children }: PropsWithChildren) {
         && currentTarget.width === target.width
         && currentTarget.height === target.height
         && currentEntry?.onPress === onPress
-        && currentEntry?.onSwipe === onSwipe;
+        && currentEntry?.onSwipe === onSwipe
+        && currentEntry?.metadata === metadata;
 
-      return isSameTarget ? currentTargets : { ...currentTargets, [id]: { onPress, onSwipe, target } };
+      return isSameTarget ? currentTargets : { ...currentTargets, [id]: { metadata, onPress, onSwipe, target } };
     });
   }, []);
 
@@ -280,15 +286,45 @@ export function TutorialProvider({ children }: PropsWithChildren) {
     }
 
     if (activeTutorial === 'map') {
-      router.replace('/map');
-    } else if (stepIndex === 4) {
+      if (stepIndex === 6) {
+        const missionCode = targets['mission-card']?.metadata;
+        router.replace({
+          pathname: '/map',
+          params: {
+            tutorialMissionCode: missionCode ?? '',
+            tutorialRestoreDeck: 'true',
+          },
+        });
+        setStepIndex(5);
+        return;
+      }
+
+      if (stepIndex === 5) {
+        const missionCode = targets['mission-card']?.metadata;
+        router.replace({
+          pathname: '/map',
+          params: {
+            tutorialMissionCode: missionCode ?? '',
+            tutorialRestoreDeck: 'true',
+          },
+        });
+      } else if (stepIndex === 4) {
+        const missionCode = targets['mission-card']?.metadata;
+        router.replace({
+          pathname: '/map',
+          params: { tutorialMissionCode: missionCode ?? '' },
+        });
+      } else {
+        router.replace('/map');
+      }
+    } else if (activeTutorial === 'profile' && stepIndex === 3) {
       router.replace('/main/profile');
-    } else if (stepIndex >= 3) {
+    } else if (activeTutorial === 'profile' && stepIndex >= 2) {
       router.replace('/main');
     }
 
     setStepIndex(stepIndex - 1);
-  }, [activeTutorial, stepIndex]);
+  }, [activeTutorial, stepIndex, targets]);
 
   const handleTargetPress = useCallback(() => {
     if (stepIndex === null || !activeTutorial) {
@@ -329,6 +365,7 @@ export function TutorialProvider({ children }: PropsWithChildren) {
 
     try {
       if (!(await hasSeenTutorial(userId, tutorialId))) {
+        await markTutorialCompleted(userId, tutorialId);
         setActiveTutorial(tutorialId);
         setStepIndex(0);
       }
@@ -346,19 +383,20 @@ export function TutorialProvider({ children }: PropsWithChildren) {
     activeStepIndex: stepIndex ?? 0,
     activeTarget,
     activeTargetSwipe,
+    activeTutorial,
     advance,
     goBack,
     handleTargetPress,
     registerTarget,
     skip: finish,
     start,
-  }), [activeStep, activeTarget, activeTargetSwipe, advance, finish, goBack, handleTargetPress, registerTarget, start, stepIndex]);
+  }), [activeStep, activeTarget, activeTargetSwipe, activeTutorial, advance, finish, goBack, handleTargetPress, registerTarget, start, stepIndex]);
 
   return <TutorialContext.Provider value={value}>{children}</TutorialContext.Provider>;
 }
 
 export function TutorialOverlayHost() {
-  const { activeStep, activeStepIndex, activeTarget, activeTargetSwipe, advance, goBack, handleTargetPress, skip } = useTutorial();
+  const { activeStep, activeStepIndex, activeTarget, activeTargetSwipe, activeTutorial, advance, goBack, handleTargetPress, skip } = useTutorial();
 
   if (!activeStep) {
     return null;
@@ -368,7 +406,11 @@ export function TutorialOverlayHost() {
     <TutorialOverlay
       message={activeStep.message}
       messageGap={activeStep.messageGap}
+      messageOffsetY={activeStep.messageOffsetY}
       messagePlacement={activeStep.placement}
+      avoidSkipOverlap={activeTutorial !== 'map'}
+      startButton={activeStep.startButton}
+      nextLabel={activeStep.nextLabel}
       onNext={activeStep.action === 'next' ? advance : undefined}
       onPrev={activeStepIndex > 0 ? goBack : undefined}
       onTargetSwipe={activeTargetSwipe}
@@ -392,6 +434,7 @@ export function useTutorial() {
 }
 
 type TutorialTargetOptions = Pick<TutorialTarget, 'height' | 'width'> & {
+  metadata?: string;
   onPress?: () => void;
   onSwipe?: (direction: 1 | -1) => void;
   offsetX?: number;
@@ -407,8 +450,10 @@ export function useTutorialTarget(id: TutorialTargetId, options?: Partial<Tutori
   const offsetY = options?.offsetY ?? 0;
   const onPressRef = useRef(options?.onPress);
   const onSwipeRef = useRef(options?.onSwipe);
+  const metadataRef = useRef(options?.metadata);
   onPressRef.current = options?.onPress;
   onSwipeRef.current = options?.onSwipe;
+  metadataRef.current = options?.metadata;
   const handlePress = useCallback(() => onPressRef.current?.(), []);
   const handleSwipe = useCallback((direction: 1 | -1) => onSwipeRef.current?.(direction), []);
   const onLayout = useCallback(() => {
@@ -426,6 +471,7 @@ export function useTutorialTarget(id: TutorialTargetId, options?: Partial<Tutori
         },
         options?.onPress ? handlePress : undefined,
         options?.onSwipe ? handleSwipe : undefined,
+        metadataRef.current,
       );
     });
   }, [handlePress, handleSwipe, id, offsetX, offsetY, options?.onPress, options?.onSwipe, registerTarget, targetHeight, targetWidth]);
