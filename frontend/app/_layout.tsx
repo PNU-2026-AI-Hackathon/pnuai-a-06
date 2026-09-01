@@ -137,6 +137,7 @@ export default function RootLayout() {
                 <Stack.Screen name="mission" />
                 <Stack.Screen name="trip" />
                 <Stack.Screen name="collection" />
+                <Stack.Screen name="search" />
               </Stack>
             </View>
             <BottomNavigationBar />
