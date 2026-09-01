@@ -13,6 +13,9 @@ import { TutorialOverlayHost, TutorialProvider } from '@/components/tutorial-pro
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { LanguageProvider } from '@/hooks/use-language';
 import { saveAuthTokens } from '@/lib/auth-api';
+import { getAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
+import { hasAcceptedTerms } from '@/lib/terms-storage';
+import { hasSeenWelcomeScreen } from '@/lib/tutorial-storage';
 function getKakaoInviteToken(url: string) {
   try {
     const parsedUrl = new URL(url);
@@ -68,7 +71,16 @@ async function openKakaoAuth(url: string | null) {
       access_token: accessToken,
       user_id: userId ?? undefined,
     });
-    router.replace('/main');
+
+    const currentUserId = getAuthItem('user_id') ?? await getPersistentAuthItem('user_id');
+
+    if (currentUserId && !(await hasAcceptedTerms(currentUserId))) {
+      router.replace('/terms');
+      return;
+    }
+
+    const shouldShowWelcome = currentUserId ? !(await hasSeenWelcomeScreen(currentUserId)) : false;
+    router.replace(shouldShowWelcome ? '/welcome' : '/main');
   } catch {
     // Ignore unrelated deep links and malformed OAuth callback URLs.
   }
@@ -110,6 +122,15 @@ export default function RootLayout() {
                 <Stack.Screen name="main" />
                 <Stack.Screen name="welcome" />
                 <Stack.Screen name="onboarding" />
+                <Stack.Screen
+                  name="terms"
+                  options={{
+                    animation: 'slide_from_bottom',
+                    contentStyle: { backgroundColor: 'transparent' },
+                    presentation: 'transparentModal',
+                  }}
+                />
+                <Stack.Screen name="terms-detail" />
                 <Stack.Screen name="tutorial" />
                 <Stack.Screen name="magazine" />
                 <Stack.Screen name="map" />

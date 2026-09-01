@@ -92,9 +92,11 @@ export default function WelcomeScreen() {
 
         <Image
           accessibilityLabel="여행 가방을 끌고 있는 찌그까"
+          cachePolicy="memory-disk"
           contentFit="contain"
           source={welcomeImage}
           style={[styles.image, { height: imageSize, marginTop: Math.max(76, height * 0.12), width: imageSize }]}
+          transition={0}
         />
 
         <View style={styles.spacer} />

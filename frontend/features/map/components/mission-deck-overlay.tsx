@@ -1,9 +1,8 @@
 // 선택한 구의 미션 카드와 스와이프 오버레이를 담당합니다.
-import { Image } from 'expo-image';
 import { useEffect } from 'react';
 import { Animated, PanResponder, View } from 'react-native';
 
-import { getMissionCardLevel, MissionCard } from '@/components/mission-card';
+import { MissionCard } from '@/components/mission-card';
 import { LocalizedText as Text } from '@/components/localized-text';
 import { ScalePressable } from '@/components/scale-pressable';
 import { useTutorialTarget } from '@/components/tutorial-provider';
@@ -52,6 +51,13 @@ export function MissionDeckOverlay({
   shouldShowNextFrame,
   shouldShowPreviousFrame,
 }: MissionDeckOverlayProps) {
+  const toMissionCardData = (mission: MissionItem) => ({
+    description: mission.description,
+    iconText: mission.rewardItemIcon,
+    iconUrl: mission.emojiUrl,
+    title: mission.title,
+    type: mission.type,
+  });
   const cardTarget = useTutorialTarget('mission-card', {
     height: frameHeight,
     metadata: activeMission?.code ?? activeMission?.id,
@@ -69,19 +75,15 @@ export function MissionDeckOverlay({
     <View style={styles.overlay}>
       <Text style={styles.overlayTitle}>넘겨서 다음 미션 보기</Text>
       <View style={[styles.frameDeck, { height: frameHeight, width: frameWidth + 72 }]}>
-        {shouldShowPreviousFrame ? (
-          <Image
-            source={getMissionCardLevel(previousMission).frame}
-            style={[styles.missionFrame, styles.backFrameLeft, { height: frameHeight, width: frameWidth }]}
-            contentFit="contain"
-          />
+        {shouldShowPreviousFrame && previousMission ? (
+          <View style={[styles.backMissionCard, styles.backFrameLeft, { height: frameHeight, width: frameWidth }]}>
+            <MissionCard blurContent mission={toMissionCardData(previousMission)} />
+          </View>
         ) : null}
-        {shouldShowNextFrame ? (
-          <Image
-            source={getMissionCardLevel(nextMission).frame}
-            style={[styles.missionFrame, styles.backFrameRight, { height: frameHeight, width: frameWidth }]}
-            contentFit="contain"
-          />
+        {shouldShowNextFrame && nextMission ? (
+          <View style={[styles.backMissionCard, styles.backFrameRight, { height: frameHeight, width: frameWidth }]}>
+            <MissionCard blurContent mission={toMissionCardData(nextMission)} />
+          </View>
         ) : null}
         <View
           onLayout={cardTarget.onLayout}
@@ -94,11 +96,7 @@ export function MissionDeckOverlay({
               errorMessage={deckMissionError}
               isLoading={isDeckMissionLoading}
               mission={activeMission ? {
-                description: activeMission.description,
-                iconText: activeMission.rewardItemIcon,
-                iconUrl: activeMission.emojiUrl,
-                title: activeMission.title,
-                type: activeMission.type,
+                ...toMissionCardData(activeMission),
               } : null}
             />
           </Animated.View>

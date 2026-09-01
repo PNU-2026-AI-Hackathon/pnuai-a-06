@@ -30,13 +30,14 @@ export function getMissionCardLevel(mission?: MissionCardData | null) {
 }
 
 type MissionCardProps = {
+  blurContent?: boolean;
   emptyMessage?: string;
   errorMessage?: string;
   isLoading?: boolean;
   mission?: MissionCardData | null;
 };
 
-export function MissionCard({ emptyMessage = '표시할 미션이 없습니다.', errorMessage = '', isLoading = false, mission }: MissionCardProps) {
+export function MissionCard({ blurContent = false, emptyMessage = '표시할 미션이 없습니다.', errorMessage = '', isLoading = false, mission }: MissionCardProps) {
   const missionLevel = getMissionCardLevel(mission);
 
   useEffect(() => {
@@ -65,19 +66,19 @@ export function MissionCard({ emptyMessage = '표시할 미션이 없습니다.'
             <View style={[styles.typeBadge, { borderColor: missionLevel.accentColor }]}>
               <Text style={[styles.typeText, { color: missionLevel.accentColor }]}>{missionLevel.label}</Text>
             </View>
-            <Text style={[styles.title, { color: missionLevel.titleColor }]} numberOfLines={2}>
+            <Text style={[styles.title, blurContent && styles.blurredContent, { color: missionLevel.titleColor }]} numberOfLines={2}>
               {mission.title ?? '미션명'}
             </Text>
-            <View style={styles.iconBox}>
+            <View style={[styles.iconBox, blurContent && styles.blurredIcon]}>
               {mission.iconUrl ? (
-                <Image source={{ uri: mission.iconUrl }} style={styles.iconImage} cachePolicy="memory-disk" contentFit="contain" />
+                <Image blurRadius={blurContent ? 3 : 0} source={{ uri: mission.iconUrl }} style={styles.iconImage} cachePolicy="memory-disk" contentFit="contain" />
               ) : mission.iconText ? (
                 <Text style={styles.rewardIcon}>{mission.iconText}</Text>
               ) : (
                 <View style={styles.photoPlaceholder} />
               )}
             </View>
-            <Text style={[styles.description, { color: missionLevel.accentColor }]} numberOfLines={2}>
+            <Text style={[styles.description, blurContent && styles.blurredContent, { color: missionLevel.accentColor }]} numberOfLines={2}>
               {mission.description ?? '미션 설명이 아직 없습니다.'}
             </Text>
           </>
@@ -97,6 +98,12 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     width: '100%',
+  },
+  blurredContent: {
+    opacity: 0.08,
+  },
+  blurredIcon: {
+    opacity: 0.55,
   },
   frameImage: {
     height: '100%',

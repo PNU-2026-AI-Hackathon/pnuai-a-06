@@ -1,5 +1,5 @@
 // 인증 기능 화면들을 조립하고 라우팅하는 진입점입니다.
-import { router, useLocalSearchParams, type Href } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 
 import { AuthFormLayout } from '@/features/auth/components/auth-form-layout';
 import { AuthHome } from '@/features/auth/components/auth-home';
@@ -10,13 +10,33 @@ import { RegisterForm } from '@/features/auth/components/register-form';
 import { VerifyEmailForm } from '@/features/auth/components/verify-email-form';
 import { useAuthFlow } from '@/features/auth/hooks/use-auth-flow';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { getAuthItem } from '@/lib/auth-storage';
+import { hasAcceptedTerms } from '@/lib/terms-storage';
+import { hasSeenWelcomeScreen } from '@/lib/tutorial-storage';
 
 export default function LoginScreen() {
   const params = useLocalSearchParams<{ mode?: string; returnTo?: string }>();
   const { bottomActionInset, bottomSafeInset, horizontalPadding, topInset } = useResponsiveLayout();
+
+  const routeAfterAuthentication = async (isNewUser = false) => {
+    const userId = getAuthItem('user_id');
+
+    if (userId && !(await hasAcceptedTerms(userId))) {
+      router.push('/terms');
+      return;
+    }
+
+    if (isNewUser || (userId && !(await hasSeenWelcomeScreen(userId)))) {
+      router.replace('/welcome');
+      return;
+    }
+
+    router.replace('/main');
+  };
+
   const auth = useAuthFlow({
     initialMode: params.mode === 'reset' ? 'resetRequest' : 'home',
-    onAuthenticated: (isNewUser) => router.replace((isNewUser ? '/welcome' : '/main') as Href),
+    onAuthenticated: (isNewUser) => routeAfterAuthentication(isNewUser),
   });
 
   if (auth.mode === 'home') {

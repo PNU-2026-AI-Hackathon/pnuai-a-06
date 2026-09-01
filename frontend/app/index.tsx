@@ -6,11 +6,15 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { refreshAuthToken, saveAuthTokens, saveWebKakaoAuthToken } from '@/lib/auth-api';
 import { deletePersistentAuthItem, getAuthItem, getPersistentAuthItem } from '@/lib/auth-storage';
+import { hasAcceptedTerms } from '@/lib/terms-storage';
 import { hasSeenWelcomeScreen } from '@/lib/tutorial-storage';
 
 const splashText = require('@/assets/svg/logo_text.svg');
 const splashMap = require('@/assets/svg/splash_map.svg');
+const welcomeImage = require('@/assets/svg/main/sig_home.svg');
 const MIN_SPLASH_DURATION = 1000;
+
+void Image.loadAsync(welcomeImage).catch(() => undefined);
 
 function waitForMinimumSplash(startedAt: number) {
   const remaining = MIN_SPLASH_DURATION - (Date.now() - startedAt);
@@ -57,7 +61,7 @@ export default function SplashScreen() {
     let isActive = true;
     const startedAt = Date.now();
 
-    const routeAfterSplash = async (path: '/login' | '/main' | '/welcome') => {
+    const routeAfterSplash = async (path: '/login' | '/main' | '/welcome' | '/terms') => {
       await waitForMinimumSplash(startedAt);
 
       if (isActive) {
@@ -66,7 +70,13 @@ export default function SplashScreen() {
     };
 
     const routeAfterAuthentication = async () => {
-      const userId = getAuthItem('user_id');
+      const userId = getAuthItem('user_id') ?? await getPersistentAuthItem('user_id');
+
+      if (userId && !(await hasAcceptedTerms(userId))) {
+        await routeAfterSplash('/terms');
+        return;
+      }
+
       const shouldShowWelcome = userId ? !(await hasSeenWelcomeScreen(userId)) : false;
       await routeAfterSplash(shouldShowWelcome ? '/welcome' : '/main');
     };

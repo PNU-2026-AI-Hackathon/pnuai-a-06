@@ -21,8 +21,8 @@ function getWelcomeScreenKey(userId: string) {
   return `${WELCOME_SCREEN_KEY}:${userId}`;
 }
 
-export async function hasSeenWelcomeScreen(userId: string) {
-  return (await getPersistentAuthItem(getWelcomeScreenKey(userId))) === 'true';
+export async function hasSeenWelcomeScreen(userId?: string | null) {
+  return userId ? (await getPersistentAuthItem(getWelcomeScreenKey(userId))) === 'true' : false;
 }
 
 export function markWelcomeScreenCompleted(userId: string) {

@@ -80,7 +80,7 @@ export async function getPersistentAuthItem(key: string) {
     memoryStorage.set(key, value);
   }
 
-  return value;
+  return value ?? getAuthItem(key);
 }
 
 export async function deletePersistentAuthItem(key: string) {

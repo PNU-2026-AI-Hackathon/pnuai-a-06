@@ -153,7 +153,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  missionFrame: {
+  backMissionCard: {
     position: 'absolute',
     zIndex: 1,
   },
